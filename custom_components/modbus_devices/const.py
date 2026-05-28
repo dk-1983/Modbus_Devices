@@ -24,6 +24,21 @@ class Config:
         Platform.SWITCH,
     ]
 
+    CONF_MODBUS_MODE: str = "modbus_mode"
+    CONF_DEVICE_CLASS: str = "device_class"
+
+    CONF_COM_PORT: str = "com_port"
+    CONF_BAUDRATE: str = "baudrate"
+    CONF_BYTESIZE: str = "bytesize"
+    CONF_PARITY: str = "parity"
+    CONF_STOPBITS: str = "stopbits"
+
+    CONF_CONNECT_TO: str = "connect_to"
+
+    MODBUS_TCP: str = "ModBus TCP/IP"
+    MODBUS_UDP: str = "ModBus UDP/IP"
+    MODBUS_SERIAL: str = "SerialPort"
+
     MODBUS_ERROR: dict[int, str] = {  # TODO Do not used!
         1: "Принятый код функции не может быть обработан.",
         2: "Адрес данных, указанный в запросе, недоступен.",

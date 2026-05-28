@@ -1,4 +1,6 @@
-"""Support for Modbus Devices Switch Entitys."""
+"""Support for Modbus Devices Switches."""
+
+from __future__ import annotations
 
 import logging
 
@@ -9,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import Config
 
@@ -16,111 +19,155 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-):
-    """Load configuration for outputs."""
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Modbus switch entities."""
 
-    try:
-        device = hass.data[Config.DOMAIN][entry.options["secret"]]
-        entitys = []
-        for output in await device.get_outputs():
-            entity = ModBusSwitchEntity(
+    data = hass.data[Config.DOMAIN][entry.entry_id]
+
+    device = data["device"]
+    coordinator = data["coordinator"]
+
+    entities = []
+
+    outputs = await device.get_outputs()
+
+    for output in outputs:
+        entities.append(
+            ModBusSwitchEntity(
+                coordinator=coordinator,
                 device=device,
-                unique_id=entry.options["secret"],
+                entry=entry,
                 output=output,
             )
-            entitys.append(entity)
-        async_add_entities(entitys, True)
-    except KeyError as exc:
-        _LOGGER.error("Unknoun error %s", exc)
+        )
+
+    async_add_entities(entities)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Delete current configuration."""
-    hass.data[Config.DOMAIN].pop(entry.options["secret"])
-    return True
-
-
-class ModBusSwitchEntity(SwitchEntity):
-    """Class control switch."""
+class ModBusSwitchEntity(
+    CoordinatorEntity,
+    SwitchEntity,
+):
+    """Representation of Modbus switch."""
 
     _attr_has_entity_name = True
-    # _attr_name = None
+    _attr_should_poll = False
 
-    def __init__(self, device, unique_id=None, output=None) -> None:
-        """Initialization process."""
+    def __init__(
+        self,
+        coordinator,
+        device,
+        entry: ConfigEntry,
+        output: dict,
+    ) -> None:
+        """Initialize switch."""
+
+        super().__init__(coordinator)
+
         self._device = device
+        self._entry = entry
         self._output = output
+
+        self._output_number = output["out_number"]
+
         self._attr_name = (
-            f"{self._output['out_type']} {self._output['out_number_view']}"
+            f"{output['out_type']} "
+            f"{output['out_number_view']}"
         )
-        self._attr_available = True
-        self._is_on = output["state"]
-        self._unique_id = unique_id
-        # self.entity_id = unique_id
+
         self._attr_unique_id = (
-            f"{self._output['out_type']}_{self._output['out_number']}_{self._unique_id}"
+            f"{entry.entry_id}_"
+            f"{self._output_number}"
         )
-        self._attr_device_class = self._output["device_class"]
+
+        self._attr_device_class = output["device_class"]
+
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (Config.DOMAIN, self._unique_id),
+                (Config.DOMAIN, self._entry.entry_id),
             },
-            manufacturer=self._device.attr_manufactures_name,
-            model=self._device.attr_model_name,
-            name=self._device.attr_description,
-            hw_version=str(self._device.attr_hardware_version),
-            sw_version=str(self._device.attr_software_version),
-            serial_number=self._device.attr_serial_number,
+            manufacturer=device.attr_manufactures_name,
+            model=device.attr_model_name,
+            name=device.attr_description,
+            hw_version=str(device.attr_hardware_version),
+            sw_version=str(device.attr_software_version),
+            serial_number=device.attr_serial_number,
         )
 
     @property
-    def should_poll(self):
-        """Should pool."""
-        return True
+    def available(self) -> bool:
+        """Return entity availability."""
 
-    async def async_update(self) -> str:
-        """Update entity state."""
-        try:
-            self._is_on = (await self._device.get_output(self._output["out_number"]))[
-                "state"
-            ]
-            self._attr_available = True
-        except ConnectionException as exc:
-            _LOGGER.error("Can't update: %s", exc)
-            self._attr_available = False
-        return self._is_on
+        return self.coordinator.last_update_success
+
+    @property
+    def current_output(self) -> dict | None:
+        """Return current output data from coordinator."""
+
+        outputs = self.coordinator.data.get("outputs", {})
+
+        return outputs.get(self._output_number)
+
+    @property
+    def is_on(self) -> bool:
+        """Return switch state."""
+
+        output = self.current_output
+
+        if output is None:
+            return False
+
+        return output["state"]
 
     @property
     def icon(self) -> str | None:
-        """Icon of the entity."""
-        if self._is_on:
-            return self._output["icon_on"]
-        return self._output["icon_off"]
+        """Return entity icon."""
 
-    @property
-    def unique_id(self):
-        """Unuque id."""
-        return self._attr_unique_id
+        output = self.current_output
 
-    @property
-    def name(self):
-        """Name."""
-        return self._attr_name
+        if output is None:
+            return None
 
-    @property
-    def is_on(self):
-        """If the switch is currently on or off."""
-        return self._is_on
+        if output["state"]:
+            return output["icon_on"]
 
-    async def async_turn_on(self, **kwargs):
-        """Turn the switch on."""
-        _LOGGER.info("Turn on output: %s", self._output["out_number"])
-        out = await self._device.set_output(self._output["out_number"], True)
-        self._is_on = out["state"]
+        return output["icon_off"]
 
-    async def async_turn_off(self, **kwargs):
-        """Turn the switch off."""
-        _LOGGER.info("Turn off output: %s", self._output["out_number"])
-        out = await self._device.set_output(self._output["out_number"], False)
-        self._is_on = out["state"]
+    async def async_turn_on(self, **kwargs) -> None:
+        """Turn switch on."""
+
+        try:
+            await self._device.set_output(
+                self._output_number,
+                True,
+            )
+
+            await self.coordinator.async_request_refresh()
+
+        except ConnectionException as exc:
+            _LOGGER.error(
+                "Failed to turn ON output %s: %s",
+                self._output_number,
+                exc,
+            )
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Turn switch off."""
+
+        try:
+            await self._device.set_output(
+                self._output_number,
+                False,
+            )
+
+            await self.coordinator.async_request_refresh()
+
+        except ConnectionException as exc:
+            _LOGGER.error(
+                "Failed to turn OFF output %s: %s",
+                self._output_number,
+                exc,
+            )

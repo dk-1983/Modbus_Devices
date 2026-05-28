@@ -7,7 +7,7 @@ from pathlib import Path
 import random
 import sys
 
-from serial import Serial, SerialException
+from serial.tools import list_ports
 
 from ..const import Config
 
@@ -46,40 +46,90 @@ async def get_classes_from_files() -> list[str]:
 
 
 async def get_serial_ports() -> list[str]:
-    """
-    Lists serial port names
+    """Return available serial ports."""
 
-    :raises EnvironmentError:
-       On unsupported or unknown platforms
+    result = set()
 
-    :returns:
-       A list of the serial ports available on the system.
-    """
+    # -------------------------
+    # 1. PySerial (best source)
+    # -------------------------
+    try:
+        for p in list_ports.comports():
+            result.add(p.device)
+    except Exception:
+        pass
 
-    if sys.platform.startswith("win"):
-        ports = ["COM%s" % (i + 1) for i in range(256)]
-    elif sys.platform.startswith("linux") or sys.platform.startswith("cygwin"):
-        # this excludes your current terminal "/dev/tty"
-        ports = list(Path("/dev").glob("tty[A-Za-z]*"))
+    # -------------------------
+    # 2. Linux / WSL fallback
+    # -------------------------
+    if sys.platform.startswith(("linux", "cygwin")):
+
+        patterns = (
+            "ttyUSB*",
+            "ttyACM*",
+            "ttyS*",
+        )
+
+        for pattern in patterns:
+            for dev in Path("/dev").glob(pattern):
+                result.add(str(dev))
+
+    # -------------------------
+    # 3. macOS
+    # -------------------------
     elif sys.platform.startswith("darwin"):
-        ports = list(Path("/dev").glob("tty.*"))
-    else:
-        raise OSError("Unsupported platform")
+        for dev in Path("/dev").glob("tty.*"):
+            result.add(str(dev))
 
-    result = []
-    for port in ports:
-        try:
-            s = Serial(str(port))
-            s.close()
-            result.append(str(port))
-        except (OSError, SerialException):
-            pass
-    return (
-        result[::-1],
-        [
-            "Not Found.",
-        ],
-    )[not result]
+    # -------------------------
+    # 4. Windows fallback
+    # -------------------------
+    elif sys.platform.startswith("win"):
+
+        # pyserial usually already handles this,
+        # but keep simple fallback
+        for i in range(1, 33):  # 256 is overkill
+            result.add(f"COM{i}")
+
+    ports = sorted(result)
+
+    return ports or ["Not Found"]
+
+# async def get_serial_ports() -> list[str]:
+#     """
+#     Lists serial port names
+
+#     :raises EnvironmentError:
+#        On unsupported or unknown platforms
+
+#     :returns:
+#        A list of the serial ports available on the system.
+#     """
+
+#     if sys.platform.startswith("win"):
+#         ports = ["COM%s" % (i + 1) for i in range(256)]
+#     elif sys.platform.startswith("linux") or sys.platform.startswith("cygwin"):
+#         # this excludes your current terminal "/dev/tty"
+#         ports = list(Path("/dev").glob("tty[A-Za-z]*"))
+#     elif sys.platform.startswith("darwin"):
+#         ports = list(Path("/dev").glob("tty.*"))
+#     else:
+#         raise OSError("Unsupported platform")
+
+#     result = []
+#     for port in ports:
+#         try:
+#             s = Serial(str(port))
+#             s.close()
+#             result.append(str(port))
+#         except (OSError, SerialException):
+#             pass
+#     return (
+#         result[::-1],
+#         [
+#             "Not Found.",
+#         ],
+#     )[not result]
 
 
 def get_random_hex_string(_range: int = 32):

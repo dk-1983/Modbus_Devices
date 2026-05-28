@@ -1,113 +1,154 @@
-"""Support for Modbus Devices Binary Sensor Entitys."""
+"""Support for Modbus Devices binary sensors."""
+
+from __future__ import annotations
 
 import logging
 
-from pymodbus.exceptions import ConnectionException
-
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddEntitiesCallback,
+)
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+)
 
 from .const import Config
+from .coordinator import ModbusDeviceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-):
-    """Load configuration for inputs."""
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up binary sensors."""
 
     try:
-        device = hass.data[Config.DOMAIN][entry.options["secret"]]
-        entitys = []
-        for in_put in await device.get_inputs():
-            entity = ModBusBinarySensorEntity(
-                device=device,
-                unique_id=entry.options["secret"],
-                input=in_put,
+        entry_data = hass.data[Config.DOMAIN][entry.entry_id]
+
+        device = entry_data["device"]
+        coordinator = entry_data["coordinator"]
+
+        entities = []
+
+        for input_data in await device.get_inputs():
+
+            entities.append(
+                ModBusBinarySensorEntity(
+                    coordinator=coordinator,
+                    device=device,
+                    entry=entry,
+                    input_data=input_data,
+                )
             )
-            entitys.append(entity)
-        async_add_entities(entitys, True)
-    except KeyError as exc:
-        _LOGGER.error("Unknoun error %s", exc)
+
+        async_add_entities(entities)
+
+        _LOGGER.info(
+            "Loaded %s binary sensors",
+            len(entities),
+        )
+
+    except Exception as exc:
+        _LOGGER.exception(
+            "Failed setup binary_sensor: %s",
+            exc,
+        )
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Delete current configuration."""
-    hass.data[Config.DOMAIN].pop(entry.options["secret"])
-    return True
-
-
-class ModBusBinarySensorEntity(BinarySensorEntity):
-    """Class control binary sensor entity."""
+class ModBusBinarySensorEntity(
+    CoordinatorEntity,
+    BinarySensorEntity,
+):
+    """Representation of Modbus binary sensor."""
 
     _attr_has_entity_name = True
-    # _attr_name = None
 
-    def __init__(self, device, unique_id=None, input=None) -> None:
-        """Initialization process."""
+    def __init__(
+        self,
+        coordinator: ModbusDeviceCoordinator,
+        device,
+        entry: ConfigEntry,
+        input_data,
+    ) -> None:
+        """Initialize entity."""
+
+        super().__init__(coordinator)
+
         self._device = device
-        self._input = input
+        self._entry = entry
+        self._input = input_data
+
         self._attr_name = (
-            f"{self._input['input_type']} {self._input['input_number_view']}"
+            f"{input_data['input_type']} "
+            f"{input_data['input_number_view']}"
         )
-        self._attr_available = True
-        self._is_on = input["state"]
-        self._unique_id = unique_id
-        # self.entity_id = unique_id
-        self._attr_unique_id = f"{self._input['input_type']}_{self._input['input_number']}_{self._unique_id}"
-        self._attr_device_class = input["device_class"]
-        self._disabled_reported = False
+
+        self._attr_unique_id = (
+            f"{device.attr_serial_number}_"
+            f"input_"
+            f"{input_data['input_number']}"
+        )
+
+        self._attr_device_class = input_data["device_class"]
+
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (Config.DOMAIN, self._unique_id),
+                (
+                    Config.DOMAIN,
+                    self._entry.entry_id,
+                ),
             },
-            manufacturer=self._device.attr_manufactures_name,
-            model=self._device.attr_model_name,
-            name=self._device.attr_description,
-            hw_version=str(self._device.attr_hardware_version),
-            sw_version=str(self._device.attr_software_version),
-            serial_number=self._device.attr_serial_number,
+            manufacturer=device.attr_manufactures_name,
+            model=device.attr_model_name,
+            name=device.attr_description,
+            hw_version=str(
+                device.attr_hardware_version
+            ),
+            sw_version=str(
+                device.attr_software_version
+            ),
+            serial_number=device.attr_serial_number,
         )
 
     @property
-    def should_poll(self):
-        """Should pool."""
-        return True
+    def is_on(self) -> bool:
+        """Return sensor state."""
 
-    async def async_update(self) -> None:
-        """Update entity state."""
-        try:
-            self._is_on = (await self._device.get_input(self._input["input_number"]))[
-                "state"
-            ]
-            self._attr_available = True
-        except ConnectionException as exc:
-            _LOGGER.error("Can't update: %s", exc)
-            self._attr_available = False
-        return self._is_on
+        data = self.coordinator.data
+
+        if not data:
+            return False
+
+        inputs = data.get("inputs", {})
+
+        input_state = inputs.get(
+            self._input["input_number"]
+        )
+
+        if input_state is None:
+            return False
+
+        return input_state["state"]
+
+    @property
+    def available(self) -> bool:
+        """Return availability."""
+
+        return self.coordinator.last_update_success
 
     @property
     def icon(self) -> str | None:
-        """Icon of the entity, based on time."""
-        if self._is_on:
+        """Return icon."""
+
+        if self.is_on:
             return self._input["icon_on"]
+
         return self._input["icon_off"]
-
-    @property
-    def unique_id(self):
-        """Unuque id."""
-        return self._attr_unique_id
-
-    @property
-    def name(self):
-        """Name."""
-        return self._attr_name
-
-    @property
-    def is_on(self):
-        """If the switch is currently on or off."""
-        return self._is_on

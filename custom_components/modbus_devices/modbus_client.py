@@ -10,45 +10,87 @@ from pymodbus.client import (
     AsyncModbusUdpClient,
 )
 
+from .const import Config
+
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PORT,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
-async def connect_mb_Serial(data: dict[str, Any]):
-    """Connection Modbus Serial Port."""
+async def connect_modbus(data: dict[str, Any]):
+    """Unified Modbus connection factory."""
 
-    client = AsyncModbusSerialClient(
-        port=data["Com_port:"],
-        baudrate=int(data["Baudrate:"]),
-        bytesize=int(data["Bytesize:"]),
-        parity=data["Parity:"],
-        stopbits=int(data["Stopbits:"]),
-    )
-    try:
-        await client.connect()
-        _LOGGER.info(
-            "Connected to Serial Port: %s",
-            f"{data['Com_port:']} id: {data['device_id']}",
-        )
-    except ModbusException as exc:
-        _LOGGER.error("Error connection: %s", exc)
-        client.close()
-    return client
-
-
-async def connect_mb_TCP_or_UDP(data: dict[str, Any]):
-    """Connection Modbus TCP/UDP socket."""
-
-    if data["ModBus MODE:"] == "ModBus UDP/IP":
-        connection = AsyncModbusUdpClient
-    elif data["ModBus MODE:"] == "ModBus TCP/IP":
-        connection = AsyncModbusTcpClient
-
-    client = connection(host=data["host"], port=data["port"], name=data["Connect To:"])
+    mode = data[Config.CONF_MODBUS_MODE]
 
     try:
-        await client.connect()
-        _LOGGER.info("Connect to host: %s", f"{data['host']}:{data['port']} is OK.")
+        # -------------------------
+        # SERIAL
+        # -------------------------
+        if mode == Config.MODBUS_SERIAL:
+            client = AsyncModbusSerialClient(
+                port=data[Config.CONF_COM_PORT],
+                baudrate=int(data[Config.CONF_BAUDRATE]),
+                bytesize=int(data[Config.CONF_BYTESIZE]),
+                parity=data[Config.CONF_PARITY],
+                stopbits=int(data[Config.CONF_STOPBITS]),
+            )
+
+            await client.connect()
+
+            _LOGGER.info(
+                "Connected SERIAL: %s",
+                data[Config.CONF_COM_PORT],
+            )
+
+            return client
+
+        # -------------------------
+        # TCP
+        # -------------------------
+        if mode == Config.MODBUS_TCP:
+            client = AsyncModbusTcpClient(
+                host=data[CONF_HOST],
+                port=data[CONF_PORT],
+            )
+
+            await client.connect()
+
+            _LOGGER.info(
+                "Connected TCP: %s:%s",
+                data[CONF_HOST],
+                data[CONF_PORT],
+            )
+
+            return client
+
+        # -------------------------
+        # UDP
+        # -------------------------
+        if mode == Config.MODBUS_UDP:
+            client = AsyncModbusUdpClient(
+                host=data[CONF_HOST],
+                port=data[CONF_PORT],
+            )
+
+            await client.connect()
+
+            _LOGGER.info(
+                "Connected UDP: %s:%s",
+                data[CONF_HOST],
+                data[CONF_PORT],
+            )
+
+            return client
+
+        raise ValueError(f"Unknown Modbus mode: {mode}")
+
     except ModbusException as exc:
-        _LOGGER.error("Error connection: %s", exc)
-        client.close()
-    return client
+        _LOGGER.error("Modbus connection error: %s", exc)
+        return None
+
+    except Exception as exc:
+        _LOGGER.exception("Unexpected error: %s", exc)
+        return None

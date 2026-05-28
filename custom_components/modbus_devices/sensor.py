@@ -1,14 +1,15 @@
-"""Support for Modbus Devices Sensor Entitys."""
+"""Support for Modbus Devices Sensors."""
+
+from __future__ import annotations
 
 import logging
-
-from pymodbus.exceptions import ConnectionException
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import Config
 
@@ -16,90 +17,126 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-):
-    """Load configuration for inputs."""
-    try:
-        device = hass.data[Config.DOMAIN][entry.options["secret"]]
-        entitys = []
-        for chanel in await device.get_chanels():
-            entity = ModBusSensorEntity(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Modbus sensor entities."""
+
+    data = hass.data[Config.DOMAIN][entry.entry_id]
+
+    device = data["device"]
+    coordinator = data["coordinator"]
+
+    entities = []
+
+    channels = await device.get_chanels()
+
+    for channel in channels:
+        entities.append(
+            ModBusSensorEntity(
+                coordinator=coordinator,
                 device=device,
-                unique_id=entry.options["secret"],
-                chanel=chanel,
+                entry=entry,
+                channel=channel,
             )
-            entitys.append(entity)
-        async_add_entities(entitys, True)
-    except KeyError as exc:
-        _LOGGER.error("Unknoun error %s", exc)
+        )
+
+    async_add_entities(entities)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Delete current device configuration."""
-    hass.data[Config.DOMAIN].pop(entry.options["secret"])
-    return True
-
-
-class ModBusSensorEntity(SensorEntity):
-    """Class pull values from sensores."""
+class ModBusSensorEntity(
+    CoordinatorEntity,
+    SensorEntity,
+):
+    """Representation of Modbus sensor."""
 
     _attr_has_entity_name = True
-    # _attr_name = None
+    _attr_should_poll = False
 
-    def __init__(self, device, unique_id=None, chanel=None) -> None:
-        """Initialization process."""
+    def __init__(
+        self,
+        coordinator,
+        device,
+        entry: ConfigEntry,
+        channel: dict,
+    ) -> None:
+        """Initialize sensor."""
+
+        super().__init__(coordinator)
+
         self._device = device
-        self._chanel = chanel
+        self._entry = entry
+        self._channel = channel
+
+        self._channel_number = channel["chanel_number"]
+
         self._attr_name = (
-            f"{self._chanel['chanel_type']} {self._chanel['chanel_number_view']}"
+            f"{channel['chanel_type']} "
+            f"{channel['chanel_number_view']}"
         )
-        self._attr_available = True
-        self._is_on = chanel["value"]
-        self._unique_id = unique_id
-        # self.entity_id = unique_id
-        self._attr_unique_id = f"{self._chanel['chanel_type']}_{self._chanel['chanel_number']}_{self._unique_id}"
-        self._attr_device_class = self._chanel["device_class"]
-        self._attr_state_class = self._chanel["state_class"]
-        self._attr_native_unit_of_measurement = self._chanel["unit_of_temperature_c"]
-        self._attr_native_value = 0
-        self._attr_suggested_display_precision = 0
+
+        self._attr_unique_id = (
+            f"{entry.entry_id}_"
+            f"{self._channel_number}"
+        )
+
+        self._attr_device_class = channel["device_class"]
+
+        self._attr_state_class = channel["state_class"]
+
+        self._attr_native_unit_of_measurement = (
+            channel["unit_of_temperature_c"]
+        )
+
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (Config.DOMAIN, self._unique_id),
+                (Config.DOMAIN, entry.entry_id),
             },
-            manufacturer=self._device.attr_manufactures_name,
-            model=self._device.attr_model_name,
-            name=self._device.attr_description,
-            hw_version=str(self._device.attr_hardware_version),
-            sw_version=str(self._device.attr_software_version),
-            serial_number=self._device.attr_serial_number,
+            manufacturer=device.attr_manufactures_name,
+            model=device.attr_model_name,
+            name=device.attr_description,
+            hw_version=str(device.attr_hardware_version),
+            sw_version=str(device.attr_software_version),
+            serial_number=device.attr_serial_number,
         )
 
     @property
-    def should_poll(self):
-        """Should pool."""
-        return True
+    def available(self) -> bool:
+        """Return entity availability."""
 
-    async def async_update(self) -> str:
-        """Update entity state."""
-        try:
-            native_value = (
-                await self._device.get_chanel(self._chanel["chanel_number"])
-            )["value"]
-            self._attr_suggested_display_precision = native_value[0]
-            self._attr_native_value = native_value[1] / (10 ** native_value[0])
-            self._attr_available = True
-        except ConnectionException as exc:
-            _LOGGER.error("Can't update: %s", exc)
-            self._attr_available = False
-        return self._attr_native_value
+        return self.coordinator.last_update_success
 
     @property
-    def unique_id(self):
-        """Unuque id."""
-        return self._attr_unique_id
+    def current_channel(self) -> dict | None:
+        """Return current channel data from coordinator."""
+
+        channels = self.coordinator.data.get("channels", {})
+
+        return channels.get(self._channel_number)
 
     @property
-    def name(self):
-        """Name."""
-        return self._attr_name
+    def native_value(self):
+        """Return sensor value."""
+
+        channel = self.current_channel
+
+        if channel is None:
+            return None
+
+        value = channel["value"]
+
+        precision = value[0]
+
+        return value[1] / (10**precision)
+
+    @property
+    def suggested_display_precision(self) -> int:
+        """Return display precision."""
+
+        channel = self.current_channel
+
+        if channel is None:
+            return 0
+
+        return channel["value"][0]
