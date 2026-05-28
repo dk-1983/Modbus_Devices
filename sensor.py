@@ -77,7 +77,7 @@ class ModBusSensorEntity(
         )
 
         self._attr_unique_id = (
-            f"{entry.entry_id}_"
+            f"{self._entry.entry_id}_"
             f"{self._channel_number}"
         )
 
@@ -91,7 +91,7 @@ class ModBusSensorEntity(
 
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (Config.DOMAIN, entry.entry_id),
+                (Config.DOMAIN, self._entry.entry_id),
             },
             manufacturer=device.attr_manufactures_name,
             model=device.attr_model_name,
