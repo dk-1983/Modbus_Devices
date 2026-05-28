@@ -1,4 +1,35 @@
+# Python
 __pycache__/
-.git/
-.homeassistant/
-.idea/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+.venv/
+ha-venv/
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Home Assistant
+.storage/
+*.log
+
+# Local configs
+secrets.yaml
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# coverage
+.coverage
+htmlcov/
+>>>>>>> c315afc (Complete change of program algorithms for work through the coordinator to reduce the number of requests on the Modbus bus.)
