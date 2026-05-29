@@ -480,6 +480,9 @@ class C2000KPB:
 
         self.attr_init_time: datetime | None = None
 
+        self.attr_output_amount: int | None = 6
+        self.attr_input_amount: int | None = None
+
         self.attr_description: str = "Control and launch unit"
 
         self.attr_platforms: list[Platform] = [
@@ -695,8 +698,11 @@ class C2000SP4:
         self.attr_software_version: float | None = None
         self.attr_init_time: datetime | None = None
 
+        self.attr_output_amount: int | None = 6
+        self.attr_input_amount: int | None = None
+
         self.attr_description: str = (
-            "Programmable relay controller"
+            "Signal and starting block"
         )
 
         self.attr_secret: str | None = None
