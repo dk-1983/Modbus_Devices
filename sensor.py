@@ -111,7 +111,7 @@ class ModBusSensorEntity(
     def current_channel(self) -> dict | None:
         """Return current channel data from coordinator."""
 
-        channels = self.coordinator.data.get("channels", {})
+        channels = self.coordinator.data.get("chanels", {})
 
         return channels.get(self._channel_number)
 
@@ -124,7 +124,10 @@ class ModBusSensorEntity(
         if channel is None:
             return None
 
-        value = channel["value"]
+        value = channel.get("value")
+
+        if not value or len(value) < 2:
+            return None
 
         precision = value[0]
 
@@ -139,4 +142,9 @@ class ModBusSensorEntity(
         if channel is None:
             return 0
 
-        return channel["value"][0]
+        value = channel.get("value")
+
+        if not value:
+            return 0
+
+        return value[0]
