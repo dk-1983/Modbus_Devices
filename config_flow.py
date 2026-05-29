@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
-
 from logging import getLogger
+
 import voluptuous as vol
 
 from pymodbus.exceptions import ModbusException
@@ -22,36 +21,32 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.selector import selector
 
 from .const import Config
-from .equipment.equipment import (
-    get_classes_from_files,
-    get_serial_ports,
-)
+from .equipment.equipment import get_classes_from_files, get_serial_ports
 from .modbus_client import connect_modbus
 
 _LOGGER = getLogger(__name__)
 
 
-class ModbusDevicesConfigFlow(
-    ConfigFlow,
-    domain=Config.DOMAIN,
-):
-    """Handle config flow for Modbus Devices."""
+class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
+    """Handle config flow."""
 
     VERSION = 1
 
     def __init__(self) -> None:
-        """Initialize flow."""
-
         self._data: dict[str, Any] = {}
 
-        self._device_classes: list[str] = []
-        self._serial_ports: list[str] = []
+        # { "Bolid": {"S2000": ClassName} }
+        self._device_classes: dict[str, dict[str, Any]] = {}
 
-    async def async_step_user(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ):
-        """Handle initial step."""
+        self._serial_ports: list[str] = []
+        self._selected_manufacturer: str = ""
+        self._manufacturer_devices: dict[str, Any] = {}
+
+    # ---------------------------------------------------------
+    # STEP 1 - MODE
+    # ---------------------------------------------------------
+    async def async_step_user(self, user_input=None):
+        """Select connection type."""
 
         if not self._device_classes:
             self._device_classes = await get_classes_from_files()
@@ -61,23 +56,11 @@ class ModbusDevicesConfigFlow(
 
         if user_input is not None:
             self._data.update(user_input)
-
-            mode = user_input[Config.CONF_MODBUS_MODE]
-
-            if mode in (
-                Config.MODBUS_TCP,
-                Config.MODBUS_UDP,
-            ):
-                return await self.async_step_network()
-
-            if mode == Config.MODBUS_SERIAL:
-                return await self.async_step_serial()
+            return await self.async_step_manufacturer()
 
         schema = vol.Schema(
             {
-                vol.Required(
-                    Config.CONF_MODBUS_MODE,
-                ): selector(
+                vol.Required(Config.CONF_MODBUS_MODE): selector(
                     {
                         "select": {
                             "mode": "dropdown",
@@ -88,107 +71,145 @@ class ModbusDevicesConfigFlow(
                             ],
                         }
                     }
-                ),
+                )
+            }
+        )
+
+        return self.async_show_form(step_id="user", data_schema=schema)
+
+    # ---------------------------------------------------------
+    # STEP 2 - MANUFACTURER
+    # ---------------------------------------------------------
+    async def async_step_manufacturer(self, user_input=None):
+        """Select manufacturer."""
+
+        if not self._device_classes:
+            return self.async_abort(reason="no_devices")
+
+        if user_input is not None:
+            self._selected_manufacturer = user_input[Config.CONF_MANUFACTURER]
+
+            self._manufacturer_devices = self._device_classes.get(
+                self._selected_manufacturer, {}
+            )
+
+            return await self.async_step_device()
+
+        manufacturers = sorted(self._device_classes.keys())
+
+        if not manufacturers:
+            return self.async_abort(reason="no_manufacturers")
+
+        schema = vol.Schema(
+            {
+                vol.Required(Config.CONF_MANUFACTURER): selector(
+                    {
+                        "select": {
+                            "mode": "dropdown",
+                            "options": manufacturers,
+                        }
+                    }
+                )
             }
         )
 
         return self.async_show_form(
-            step_id="user",
+            step_id="manufacturer",
             data_schema=schema,
         )
 
-    async def async_step_network(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ):
-        """Handle TCP/UDP setup."""
-
-        errors: dict[str, str] = {}
+    # ---------------------------------------------------------
+    # STEP 3 - DEVICE
+    # ---------------------------------------------------------
+    async def async_step_device(self, user_input=None):
+        """Select device."""
 
         if user_input is not None:
+            device_name = user_input[Config.CONF_DEVICE_CLASS]
 
+            # FIX: сохраняем ВСЁ что нужно дальше
+            self._data[Config.CONF_MANUFACTURER] = self._selected_manufacturer
+            self._data[Config.CONF_DEVICE_CLASS] = device_name
+
+            return await self._next_step()
+
+        devices = list(self._manufacturer_devices)
+
+        if not devices:
+            return self.async_abort(reason="no_devices_for_manufacturer")
+
+        schema = vol.Schema(
+            {
+                vol.Required(Config.CONF_DEVICE_CLASS): selector(
+                    {
+                        "select": {
+                            "mode": "dropdown",
+                            "options": sorted(devices),
+                        }
+                    }
+                )
+            }
+        )
+
+        return self.async_show_form(step_id="device", data_schema=schema)
+
+    # ---------------------------------------------------------
+    # ROUTER
+    # ---------------------------------------------------------
+    async def _next_step(self):
+        mode = self._data.get(Config.CONF_MODBUS_MODE)
+
+        if mode in (Config.MODBUS_TCP, Config.MODBUS_UDP):
+            return await self.async_step_network()
+
+        return await self.async_step_serial()
+
+    # ---------------------------------------------------------
+    # STEP 4 - NETWORK (TCP/UDP)
+    # ---------------------------------------------------------
+    async def async_step_network(self, user_input=None):
+        """TCP/UDP setup."""
+
+        errors = {}
+
+        if user_input is not None:
             self._data.update(user_input)
 
-            unique_id = (
-                f"{self._data[CONF_HOST]}_"
-                f"{self._data[CONF_PORT]}_"
-                f"{self._data[CONF_DEVICE_ID]}"
-            )
-
-            await self.async_set_unique_id(unique_id)
-
-            self._abort_if_unique_id_configured()
+            self._data.setdefault(CONF_DEVICE_ID, 1)
 
             try:
                 client = await connect_modbus(self._data)
 
-                if client is None or not client.connected:
+                if not client or not client.connected:
                     errors["base"] = "cannot_connect"
-
                 else:
                     client.close()
 
-                    title = (
-                        f"{self._data[Config.CONF_DEVICE_CLASS]} "
-                        f"({self._data[CONF_HOST]})"
+                    unique_id = (
+                        f"{self._data.get(CONF_HOST)}_"
+                        f"{self._data.get(CONF_PORT)}_"
+                        f"{self._data.get(CONF_DEVICE_ID)}_"
+                        f"{self._selected_manufacturer}_"
+                        f"{self._data.get(Config.CONF_DEVICE_CLASS)}"
                     )
 
-                    _LOGGER.info(
-                        "Creating TCP/UDP config entry: %s",
-                        title,
-                    )
+                    await self.async_set_unique_id(unique_id)
+                    self._abort_if_unique_id_configured()
 
                     return self.async_create_entry(
-                        title=title,
+                        title=f"{self._selected_manufacturer} {self._data[Config.CONF_DEVICE_CLASS]}",
                         data=self._data,
                     )
 
-            except ModbusException as exc:
-                _LOGGER.error(
-                    "Modbus connection error: %s",
-                    exc,
-                )
+            except ModbusException:
                 errors["base"] = "cannot_connect"
-
-            except Exception as exc:
-                _LOGGER.exception(
-                    "Unexpected error: %s",
-                    exc,
-                )
-                errors["base"] = "unknown"
 
         schema = vol.Schema(
             {
-                vol.Required(
-                    CONF_HOST,
-                    default="10.0.2.13",
-                ): cv.string,
-
-                vol.Required(
-                    CONF_PORT,
-                    default=510,
-                ): int,
-
-                vol.Required(
-                    CONF_DEVICE_ID,
-                    default=1,
-                ): int,
-
-                vol.Required(
-                    Config.CONF_DEVICE_CLASS,
-                ): selector(
-                    {
-                        "select": {
-                            "mode": "dropdown",
-                            "options": self._device_classes,
-                        }
-                    }
-                ),
-
-                vol.Optional(
-                    CONF_NAME,
-                    default="Modbus Device",
-                ): cv.string,
+                vol.Required(CONF_HOST, default="10.0.2.13"): cv.string,
+                vol.Required(CONF_PORT, default=510): int,
+                vol.Required(CONF_DEVICE_ID, default=1): int,
+                vol.Optional(CONF_NAME, default="Modbus Device"): cv.string,
             }
         )
 
@@ -198,86 +219,53 @@ class ModbusDevicesConfigFlow(
             errors=errors,
         )
 
-    async def async_step_serial(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ):
-        """Handle serial setup."""
+    # ---------------------------------------------------------
+    # STEP 5 - SERIAL (FULL SETTINGS RESTORED)
+    # ---------------------------------------------------------
+    async def async_step_serial(self, user_input=None):
+        """Serial setup."""
 
-        errors: dict[str, str] = {}
+        errors = {}
 
         if user_input is not None:
-
             self._data.update(user_input)
 
-            unique_id = (
-                f"{self._data[Config.CONF_COM_PORT]}_"
-                f"{self._data[CONF_DEVICE_ID]}"
-            )
-
-            await self.async_set_unique_id(unique_id)
-
-            self._abort_if_unique_id_configured()
+            self._data.setdefault(CONF_DEVICE_ID, 1)
 
             try:
                 client = await connect_modbus(self._data)
 
-                if client is None or not client.connected:
+                if not client or not client.connected:
                     errors["base"] = "cannot_connect"
-
                 else:
                     client.close()
 
-                    title = (
-                        f"{self._data[Config.CONF_DEVICE_CLASS]} "
-                        f"({self._data[Config.CONF_COM_PORT]})"
+                    unique_id = (
+                        f"{self._data.get(Config.CONF_COM_PORT)}_"
+                        f"{self._data.get(CONF_DEVICE_ID)}_"
+                        f"{self._selected_manufacturer}_"
+                        f"{self._data.get(Config.CONF_DEVICE_CLASS)}"
                     )
 
-                    _LOGGER.info(
-                        "Creating SERIAL config entry: %s",
-                        title,
-                    )
+                    await self.async_set_unique_id(unique_id)
+                    self._abort_if_unique_id_configured()
 
                     return self.async_create_entry(
-                        title=title,
+                        title=f"{self._selected_manufacturer} {self._data[Config.CONF_DEVICE_CLASS]}",
                         data=self._data,
                     )
 
-            except ModbusException as exc:
-                _LOGGER.error(
-                    "Modbus serial error: %s",
-                    exc,
-                )
+            except ModbusException:
                 errors["base"] = "cannot_connect"
 
-            except Exception as exc:
-                _LOGGER.exception(
-                    "Unexpected error: %s",
-                    exc,
-                )
-                errors["base"] = "unknown"
-
+        # -------------------------
+        # FULL SERIAL CONFIG (НЕ УРЕЗАНО)
+        # -------------------------
         schema = vol.Schema(
             {
-                vol.Required(
-                    Config.CONF_DEVICE_CLASS,
-                ): selector(
-                    {
-                        "select": {
-                            "mode": "dropdown",
-                            "options": self._device_classes,
-                        }
-                    }
-                ),
+                vol.Required(CONF_DEVICE_ID, default=1): int,
 
-                vol.Required(
-                    CONF_DEVICE_ID,
-                    default=1,
-                ): int,
-
-                vol.Required(
-                    Config.CONF_COM_PORT,
-                ): selector(
+                vol.Required(Config.CONF_COM_PORT): selector(
                     {
                         "select": {
                             "mode": "dropdown",
@@ -286,88 +274,49 @@ class ModbusDevicesConfigFlow(
                     }
                 ),
 
-                vol.Required(
-                    Config.CONF_BAUDRATE,
-                    default="9600",
-                ): selector(
+                vol.Required(Config.CONF_BAUDRATE, default="9600"): selector(
                     {
                         "select": {
                             "mode": "dropdown",
                             "options": [
-                                "300",
-                                "600",
-                                "1200",
-                                "2400",
-                                "4800",
-                                "9600",
-                                "14400",
-                                "19200",
-                                "38400",
-                                "56000",
-                                "57600",
-                                "115200",
-                                "128000",
-                                "153600",
-                                "230400",
-                                "256000",
-                                "460800",
-                                "921600",
+                                "300", "600", "1200", "2400",
+                                "4800", "9600", "14400", "19200",
+                                "38400", "56000", "57600", "115200",
+                                "128000", "153600", "230400",
+                                "256000", "460800", "921600"
                             ],
                         }
                     }
                 ),
 
-                vol.Required(
-                    Config.CONF_BYTESIZE,
-                    default="8",
-                ): selector(
+                vol.Required(Config.CONF_BYTESIZE, default="8"): selector(
                     {
                         "select": {
                             "mode": "dropdown",
-                            "options": [
-                                "7",
-                                "8",
-                            ],
+                            "options": ["7", "8"],
                         }
                     }
                 ),
 
-                vol.Required(
-                    Config.CONF_PARITY,
-                    default="N",
-                ): selector(
+                vol.Required(Config.CONF_PARITY, default="N"): selector(
                     {
                         "select": {
                             "mode": "dropdown",
-                            "options": [
-                                "N",
-                                "E",
-                                "O",
-                            ],
+                            "options": ["N", "E", "O"],
                         }
                     }
                 ),
 
-                vol.Required(
-                    Config.CONF_STOPBITS,
-                    default="1",
-                ): selector(
+                vol.Required(Config.CONF_STOPBITS, default="1"): selector(
                     {
                         "select": {
                             "mode": "dropdown",
-                            "options": [
-                                "0",
-                                "1",
-                                "2",
-                            ],
+                            "options": ["1", "2"],
                         }
                     }
                 ),
 
-                vol.Optional(
-                    CONF_NAME,
-                    default="Modbus Device",
-                ): cv.string,
+                vol.Optional(CONF_NAME, default="Modbus Device"): cv.string,
             }
         )
 

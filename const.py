@@ -27,6 +27,8 @@ class Config:
     CONF_MODBUS_MODE: str = "modbus_mode"
     CONF_DEVICE_CLASS: str = "device_class"
 
+    CONF_MANUFACTURER: str = "manufacturer"
+
     CONF_COM_PORT: str = "com_port"
     CONF_BAUDRATE: str = "baudrate"
     CONF_BYTESIZE: str = "bytesize"

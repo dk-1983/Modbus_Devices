@@ -23,26 +23,53 @@ async def get_class(module: str, cls_name: str):
     )
 
 
-async def get_classes_from_files() -> list[str]:
-    """Get classes name from files with equipment."""
-    module: list[str] = []
-    dir_path = Path(os.path.realpath(__file__)).parent
+async def get_classes_from_files() -> dict[str, list[str]]:
+    """Return devices grouped by manufacturer."""
 
-    for file in [f.name.replace(".py", "") for f in dir_path.iterdir() if f.is_file()]:
+    result: dict[str, list[str]] = {}
+
+    dir_path = Path(__file__).parent
+
+    for file in [
+        f.stem
+        for f in dir_path.iterdir()
+        if f.is_file()
+        and f.suffix == ".py"
+        and f.stem != "__init__"
+        and f.stem != "equipment"
+    ]:
+
+        module = __import__(
+            name=file,
+            globals=globals(),
+            locals=locals(),
+            level=1,
+        )
+
         for name, obj in inspect.getmembers(
-            __import__(name=file, globals=globals(), locals=locals(), level=1),
+            module,
             inspect.isclass,
         ):
-            try:
-                if (
-                    obj.__module__.split(".", -1)[3] == file
-                    and obj.__module__ is not __name__
-                    and obj.__module__ != "__init__"
-                ):
-                    module.append(f"{file} {name}")
-            except IndexError:
+
+            if obj.__module__.split(".")[-1] != file:
                 continue
-    return module
+
+            try:
+                instance = obj(None, 1)
+
+                manufacturer = (
+                    instance.attr_manufactures_name
+                )
+
+                result.setdefault(
+                    manufacturer,
+                    []
+                ).append(name)
+
+            except Exception:
+                continue
+
+    return result
 
 
 async def get_serial_ports() -> list[str]:

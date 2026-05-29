@@ -24,34 +24,45 @@ async def async_setup_entry(
 
     hass.data.setdefault(Config.DOMAIN, {})
 
-    # migrate old data -> options
-    if entry.data:
+    # migrate old data -> options (safe)
+    if entry.data and not entry.options:
         hass.config_entries.async_update_entry(
             entry,
             data={},
-            options=entry.data,
+            options=dict(entry.data),
         )
+
+    options = entry.options or {}
 
     try:
         # -----------------------------------
         # Create Modbus client
         # -----------------------------------
-        client = await connect_modbus(entry.options)
+        client = await connect_modbus(options)
 
-        if not client or not client.connected:
+        if not client or not getattr(client, "connected", False):
+            raise ConfigEntryNotReady("Unable to establish Modbus connection")
+
+        # -----------------------------------
+        # Read safe config values
+        # -----------------------------------
+        manufacturer = options.get(Config.CONF_MANUFACTURER)
+        device_name = options.get(Config.CONF_DEVICE_CLASS)
+        device_id = options.get("device_id") or options.get(Config.CONF_DEVICE_ID)
+
+        if not manufacturer or not device_name:
             raise ConfigEntryNotReady(
-                "Unable to establish Modbus connection"
+                f"Missing config: manufacturer={manufacturer}, device={device_name}"
             )
+
+        manufacturer_module = manufacturer.strip().lower()
 
         # -----------------------------------
         # Load device class
         # -----------------------------------
-        _LOGGER = getLogger(entry.options[Config.CONF_DEVICE_CLASS])
-        cls = entry.options[Config.CONF_DEVICE_CLASS].split(" ")
-
         device_class = await get_class(
-            module=cls[0],
-            cls_name=cls[1],
+            module=manufacturer_module,
+            cls_name=device_name,
         )
 
         # -----------------------------------
@@ -59,13 +70,13 @@ async def async_setup_entry(
         # -----------------------------------
         device = device_class(
             client,
-            entry.options["device_id"],
+            device_id,
         )
 
         await device.data_init()
 
         # -----------------------------------
-        # Create coordinator
+        # Coordinator
         # -----------------------------------
         coordinator = ModbusDeviceCoordinator(
             hass=hass,
@@ -75,7 +86,7 @@ async def async_setup_entry(
         await coordinator.async_config_entry_first_refresh()
 
         # -----------------------------------
-        # Save integration data
+        # Store runtime objects
         # -----------------------------------
         hass.data[Config.DOMAIN][entry.entry_id] = {
             "client": client,
@@ -84,12 +95,13 @@ async def async_setup_entry(
         }
 
         _LOGGER.info(
-            "Modbus device initialized: %s",
+            "Modbus device initialized: %s (%s)",
             entry.title,
+            manufacturer,
         )
 
         # -----------------------------------
-        # Forward platforms
+        # Platforms
         # -----------------------------------
         await hass.config_entries.async_forward_entry_setups(
             entry,
@@ -108,11 +120,11 @@ async def async_setup_entry(
             f"Modbus connection failed: {exc}"
         ) from exc
 
+    except ConfigEntryNotReady:
+        raise
+
     except Exception as exc:
-        _LOGGER.exception(
-            "Setup failed: %s",
-            exc,
-        )
+        _LOGGER.exception("Setup failed: %s", exc)
         return False
 
 
@@ -122,16 +134,10 @@ async def async_unload_entry(
 ) -> bool:
     """Unload ModbusDevices config entry."""
 
-    entry_data = hass.data.get(
-        Config.DOMAIN,
-        {},
-    ).get(entry.entry_id)
+    entry_data = hass.data.get(Config.DOMAIN, {}).get(entry.entry_id)
 
-    if entry_data is None:
-        _LOGGER.warning(
-            "Device already removed: %s",
-            entry.entry_id,
-        )
+    if not entry_data:
+        _LOGGER.warning("Device already removed: %s", entry.entry_id)
         return True
 
     device = entry_data["device"]
@@ -143,18 +149,14 @@ async def async_unload_entry(
     )
 
     if unload_ok:
-        # close modbus connection
         if client:
-            client.close()
+            try:
+                client.close()
+            except Exception:
+                _LOGGER.exception("Error closing Modbus client")
 
-        hass.data[Config.DOMAIN].pop(
-            entry.entry_id,
-            None,
-        )
+        hass.data[Config.DOMAIN].pop(entry.entry_id, None)
 
-        _LOGGER.info(
-            "Modbus device unloaded: %s",
-            entry.title,
-        )
+        _LOGGER.info("Modbus device unloaded: %s", entry.title)
 
     return unload_ok
