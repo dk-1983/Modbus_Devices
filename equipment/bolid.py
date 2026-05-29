@@ -444,3 +444,229 @@ class M3000BB1020:
             f"out6: {self.attr_out6['state']}, "
             f"description: {self.attr_description}"
         )
+
+
+class C2000KPB:
+    """
+    Bolid C2000-KPB hw: - sw: 3.04.
+
+    Управление реле:
+    01 - Slave ID
+    05 - Function code
+    27 10..15 - адрес реле
+    FF00 / FFFF - ON
+    0000 - OFF
+    """
+
+    def __init__(self, client, device_id) -> None:
+        """Initialization variables."""
+
+        self.attr_device_id: int = device_id
+
+        self.attr_client: (
+            AsyncModbusSerialClient
+            | AsyncModbusTcpClient
+            | AsyncModbusUdpClient
+            | None
+        ) = client
+
+        self.attr_manufactures_name: str = "Bolid"
+        self.attr_model_name: str = "C2000-KPB"
+
+        self.attr_device_type: int | None = None
+        self.attr_serial_number: str | None = None
+        self.attr_hardware_version: float | None = None
+        self.attr_software_version: float | None = 3.04
+
+        self.attr_init_time: datetime | None = None
+
+        self.attr_description: str = "Control and launch unit"
+
+        self.attr_platforms: list[Platform] = [
+            Platform.SWITCH,
+        ]
+
+        #
+        # Outputs
+        #
+
+        for num in range(1, 7):
+
+            setattr(
+                self,
+                f"attr_out{num}",
+                {
+                    "out_number": num,
+                    "out_number_view": num,
+                    "out_type": "relay",
+                    "data_type": "coil_register",
+                    "address": 10000 + (num - 1),
+                    "address_hex": hex(10000 + (num - 1)),
+                    "state": None,
+                    "func_mode": [1, 5, 15],
+                    "device_class": SwitchDeviceClass.SWITCH,
+                    "icon_on": "mdi:toggle-switch-variant",
+                    "icon_off": "mdi:toggle-switch-variant-off",
+                },
+            )
+
+    async def data_init(self) -> bool:
+        """Initialize device data."""
+
+        await self.get_device_info()
+        await self.get_outputs()
+
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        """
+        Получение информации о приборе.
+
+        У C2000-KPB нет нормального регистра
+        идентификации как у M3000,
+        поэтому генерируем данные программно.
+        """
+
+        self.attr_device_type = 2000
+
+        #
+        # Универсальный serial
+        # для Home Assistant
+        #
+
+        self.attr_serial_number = (
+            f"{self.attr_model_name}_"
+            f"{self.attr_device_id}"
+        )
+
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+        }
+
+    async def get_output(
+        self,
+        output: int,
+    ) -> dict[str, Any]:
+        """Get one relay state."""
+
+        attr = getattr(self, f"attr_out{output}")
+
+        result = await self.attr_client.read_coils(
+            address=attr["address"],
+            count=1,
+            device_id=self.attr_device_id,
+        )
+
+        attr["state"] = result.bits[0]
+
+        setattr(
+            self,
+            f"attr_out{output}",
+            attr,
+        )
+
+        return attr
+
+    async def get_outputs(
+        self,
+        outputs: list[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get all or selected outputs."""
+
+        data: list[dict[str, Any]] = []
+
+        outputs = outputs or list(range(1, 7))
+
+        for output in outputs:
+
+            attr = getattr(
+                self,
+                f"attr_out{output}",
+            )
+
+            result = await self.attr_client.read_coils(
+                address=attr["address"],
+                count=1,
+                device_id=self.attr_device_id,
+            )
+
+            attr["state"] = result.bits[0]
+
+            setattr(
+                self,
+                f"attr_out{output}",
+                attr,
+            )
+
+            data.append(attr)
+
+        return data
+
+    async def set_output(
+        self,
+        output: int,
+        value: bool,
+    ) -> dict[str, Any]:
+        """Set one relay state."""
+
+        attr = getattr(
+            self,
+            f"attr_out{output}",
+        )
+
+        #
+        # FC05
+        #
+
+        await self.attr_client.write_coil(
+            address=attr["address"],
+            value=value,
+            device_id=self.attr_device_id,
+        )
+
+        #
+        # Обновляем состояние
+        #
+
+        return await self.get_output(output)
+
+    async def set_outputs(
+        self,
+        outputs: list[int] | None = None,
+        values: list[bool] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Set multiple outputs."""
+
+        if values is None:
+            return []
+
+        data: list[dict[str, Any]] = []
+
+        outputs = outputs or list(range(1, 7))
+
+        for output, value in zip(outputs, values):
+
+            result = await self.set_output(
+                output,
+                value,
+            )
+
+            data.append(result)
+
+        return data
+
+    def __repr__(self) -> str:
+        """Representation info."""
+
+        cls = self.__class__.__name__
+
+        return (
+            f"class: {cls}, "
+            f"device_id: {self.attr_device_id}, "
+            f"manufactures_name: {self.attr_manufactures_name}, "
+            f"model_name: {self.attr_model_name}, "
+            f"serial_number: {self.attr_serial_number}, "
+            f"software_version: {self.attr_software_version}, "
+            f"description: {self.attr_description}"
+        )
