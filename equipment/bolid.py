@@ -670,3 +670,262 @@ class C2000KPB:
             f"software_version: {self.attr_software_version}, "
             f"description: {self.attr_description}"
         )
+
+
+class C2000SP4:
+    """Bolid C2000-SP4/24(220)."""
+
+    def __init__(self, client, device_id) -> None:
+        """Inicialization variables."""
+
+        self.attr_device_id: int = device_id
+
+        self.attr_client: (
+            AsyncModbusSerialClient
+            | AsyncModbusTcpClient
+            | AsyncModbusUdpClient
+            | None
+        ) = client
+
+        self.attr_manufactures_name: str = "Bolid"
+        self.attr_model_name: str = "C2000-SP4"
+        self.attr_device_type: int | None = None
+        self.attr_serial_number: str | None = None
+        self.attr_hardware_version: float | None = None
+        self.attr_software_version: float | None = None
+        self.attr_init_time: datetime | None = None
+
+        self.attr_description: str = (
+            "Programmable relay controller"
+        )
+
+        self.attr_secret: str | None = None
+
+        self.attr_platforms: list[Platform] = [
+            Platform.SWITCH,
+        ]
+
+        # -------------------------------------------------
+        # OUTPUT
+        # -------------------------------------------------
+
+        self.attr_out1: dict[str, Any] = {
+            "out_number": 1,
+            "out_number_view": 1,
+            "out_type": "relay",
+            "data_type": "coil_register",
+            "address": 10000,
+            "address_hex": hex(0x2710),
+            "state": None,
+            "func_mode": [1, 5, 15],
+            "device_class": SwitchDeviceClass.SWITCH,
+            "icon_on": "mdi:toggle-switch-variant",
+            "icon_off": "mdi:toggle-switch-variant-off",
+        }
+
+    # -------------------------------------------------
+    # INIT
+    # -------------------------------------------------
+
+    async def data_init(self) -> bool:
+        """Initialize device."""
+
+        await self.get_output(1)
+
+        self.attr_init_time = datetime.now()
+
+        return True
+
+    # -------------------------------------------------
+    # OUTPUT
+    # -------------------------------------------------
+
+    async def get_output(
+        self,
+        out: int = 1,
+    ) -> dict[str, Any]:
+        """Get output state."""
+
+        attr = getattr(
+            self,
+            f"attr_out{out}",
+        )
+
+        attr["state"] = (
+            await self.attr_client.read_coils(
+                address=attr["address"],
+                count=1,
+                device_id=self.attr_device_id,
+            )
+        ).bits[0]
+
+        setattr(
+            self,
+            f"attr_out{out}",
+            attr,
+        )
+
+        return getattr(
+            self,
+            f"attr_out{out}",
+        )
+
+    async def get_outputs(
+        self,
+        outputs: list[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get outputs state."""
+
+        data: list[dict[str, Any]] = []
+
+        outputs = (
+            outputs,
+            [1],
+        )[outputs is None]
+
+        for output in outputs:
+
+            attr = getattr(
+                self,
+                f"attr_out{output}",
+            )
+
+            attr["state"] = (
+                await self.attr_client.read_coils(
+                    address=attr["address"],
+                    count=1,
+                    device_id=self.attr_device_id,
+                )
+            ).bits[0]
+
+            setattr(
+                self,
+                f"attr_out{output}",
+                attr,
+            )
+
+            data.append(
+                getattr(
+                    self,
+                    f"attr_out{output}",
+                )
+            )
+
+        return data
+
+    async def set_output(
+        self,
+        output: int = 1,
+        value: bool = False,
+    ) -> dict[str, Any]:
+        """Set output state."""
+
+        attr = getattr(
+            self,
+            f"attr_out{output}",
+        )
+
+        result = await self.attr_client.write_coil(
+            address=attr["address"],
+            value=value,
+            device_id=self.attr_device_id,
+        )
+
+        attr["state"] = result.bits[0]
+
+        setattr(
+            self,
+            f"attr_out{output}",
+            attr,
+        )
+
+        return getattr(
+            self,
+            f"attr_out{output}",
+        )
+
+    async def set_outputs(
+        self,
+        outputs: list[int] | None = None,
+        values: list[bool] | None = None,
+    ):
+        """Set outputs state."""
+
+        if values is None:
+            return False
+
+        data: list[dict[str, Any]] = []
+
+        outputs = (
+            outputs,
+            [1],
+        )[outputs is None]
+
+        for output, index in zip(
+            outputs,
+            range(len(outputs)),
+        ):
+
+            try:
+
+                if not isinstance(
+                    values[index],
+                    (bool, int),
+                ):
+                    raise TypeError
+
+                attr = getattr(
+                    self,
+                    f"attr_out{output}",
+                )
+
+                result = (
+                    await self.attr_client.write_coil(
+                        address=attr["address"],
+                        value=values[index],
+                        device_id=self.attr_device_id,
+                    )
+                )
+
+                attr["state"] = result.bits[0]
+
+                setattr(
+                    self,
+                    f"attr_out{output}",
+                    attr,
+                )
+
+                data.append(
+                    getattr(
+                        self,
+                        f"attr_out{output}",
+                    )
+                )
+
+            except IndexError:
+                break
+
+        return data
+
+    def __repr__(self) -> str:
+        """Representation info of object."""
+
+        cls = self.__class__.__name__
+
+        return (
+            f"class: {cls}, "
+            f"init_time: {self.attr_init_time}, "
+            f"device_id: {self.attr_device_id}, "
+            f"manufactures_name: "
+            f"{self.attr_manufactures_name}, "
+            f"device_type: {self.attr_device_type}, "
+            f"model_name: {self.attr_model_name}, "
+            f"serial_number: {self.attr_serial_number}, "
+            f"hardware_version: "
+            f"{self.attr_hardware_version}, "
+            f"software_version: "
+            f"{self.attr_software_version}, "
+            f"secret: {self.attr_secret}, "
+            f"out1: {self.attr_out1['state']}, "
+            f"description: {self.attr_description}"
+        )
