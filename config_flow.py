@@ -259,7 +259,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 errors["base"] = "cannot_connect"
 
         # -------------------------
-        # FULL SERIAL CONFIG (НЕ УРЕЗАНО)
+        # FULL SERIAL CONFIG
         # -------------------------
         schema = vol.Schema(
             {
