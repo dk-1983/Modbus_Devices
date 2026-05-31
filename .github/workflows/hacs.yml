@@ -11,6 +11,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: HACS validation
-        uses: hacs/action@v3.0.0
+        uses: hacs/action@main
         with:
           category: integration
