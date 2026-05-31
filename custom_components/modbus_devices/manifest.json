@@ -1,15 +1,14 @@
 {
   "domain": "modbus_devices",
   "name": "Modbus Devices",
-  "codeowners": [
-    "@dk-1983"
-  ],
+
+  "codeowners": ["@dk-1983"],
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/dk-1983/Modbus_Devices/blob/master/README.md",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/dk-1983/Modbus_Devices/issues",
-  "requirements": ["pymodbus>=3.12.2"],
-  "config_flow": true,
-  "version": "0.1.5"
+  "requirements": ["pymodbus>=3.11.2"],
+  "version": "0.1.6"
 }
