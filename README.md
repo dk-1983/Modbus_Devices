@@ -51,7 +51,7 @@
 
 ## Использованные технологии
 
-- [Pymodbus](https://pymodbus.readthedocs.io/en/stable/index.html) версии 3.13.0 и выше...;
+- [Pymodbus](https://pymodbus.readthedocs.io/en/stable/index.html) версии 3.11.2 и выше...;
 
 ## Информация об авторе
 
