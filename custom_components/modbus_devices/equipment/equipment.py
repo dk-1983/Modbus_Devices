@@ -1,11 +1,13 @@
-"""helpers function for dir work."""
+"""Helpers for equipment discovery."""
+
+from __future__ import annotations
 
 import inspect
 import logging
-import os
 from pathlib import Path
 import random
 import sys
+from typing import Any
 
 from serial.tools import list_ports
 
@@ -14,151 +16,93 @@ from ..const import Config
 _LOGGER = logging.getLogger(__name__)
 
 
-async def get_class(module: str, cls_name: str):
-    """Get objeckt from equipment."""
+def get_class(module: str, cls_name: str) -> type[Any]:
+    """Return an equipment class from a driver module."""
+    imported_module = __import__(
+        name=module,
+        globals=globals(),
+        locals=locals(),
+        level=1,
+    )
+    return getattr(imported_module, cls_name)
 
-    return getattr(
-        __import__(name=module, globals=globals(), locals=locals(), level=1),
-        cls_name,
+
+def get_classes_from_files() -> dict[str, list[str]]:
+    """Return available equipment classes grouped by manufacturer."""
+    result: dict[str, list[str]] = {}
+    directory = Path(__file__).parent
+
+    driver_files = (
+        path
+        for path in directory.iterdir()
+        if path.is_file()
+        and path.suffix == ".py"
+        and path.stem not in {"__init__", "equipment"}
     )
 
-
-async def get_classes_from_files() -> dict[str, list[str]]:
-    """Return devices grouped by manufacturer."""
-
-    result: dict[str, list[str]] = {}
-
-    dir_path = Path(__file__).parent
-
-    for file in [
-        f.stem
-        for f in dir_path.iterdir()
-        if f.is_file()
-        and f.suffix == ".py"
-        and f.stem != "__init__"
-        and f.stem != "equipment"
-    ]:
-
+    for driver_file in driver_files:
+        module_name = driver_file.stem
         module = __import__(
-            name=file,
+            name=module_name,
             globals=globals(),
             locals=locals(),
             level=1,
         )
 
-        for name, obj in inspect.getmembers(
+        for class_name, equipment_class in inspect.getmembers(
             module,
             inspect.isclass,
         ):
-
-            if obj.__module__.split(".")[-1] != file:
+            if equipment_class.__module__.split(".")[-1] != module_name:
                 continue
 
             try:
-                instance = obj(None, 1)
-
-                manufacturer = (
-                    instance.attr_manufactures_name
-                )
-
-                result.setdefault(
-                    manufacturer,
-                    []
-                ).append(name)
-
+                instance = equipment_class(None, 1)
+                manufacturer = instance.attr_manufactures_name
             except Exception:
+                _LOGGER.debug(
+                    "Unable to inspect equipment class %s from module %s",
+                    class_name,
+                    module_name,
+                    exc_info=True,
+                )
                 continue
+
+            result.setdefault(manufacturer, []).append(class_name)
+
+    for class_names in result.values():
+        class_names.sort()
 
     return result
 
 
-async def get_serial_ports() -> list[str]:
+def get_serial_ports() -> list[str]:
     """Return available serial ports."""
+    result: set[str] = set()
 
-    result = set()
-
-    # -------------------------
-    # 1. PySerial (best source)
-    # -------------------------
     try:
-        for p in list_ports.comports():
-            result.add(p.device)
+        for port in list_ports.comports():
+            result.add(port.device)
     except Exception:
-        pass
+        _LOGGER.debug("Unable to enumerate serial ports with pyserial", exc_info=True)
 
-    # -------------------------
-    # 2. Linux / WSL fallback
-    # -------------------------
     if sys.platform.startswith(("linux", "cygwin")):
+        for pattern in ("ttyUSB*", "ttyACM*", "ttyS*"):
+            for device in Path("/dev").glob(pattern):
+                result.add(str(device))
 
-        patterns = (
-            "ttyUSB*",
-            "ttyACM*",
-            "ttyS*",
-        )
-
-        for pattern in patterns:
-            for dev in Path("/dev").glob(pattern):
-                result.add(str(dev))
-
-    # -------------------------
-    # 3. macOS
-    # -------------------------
     elif sys.platform.startswith("darwin"):
-        for dev in Path("/dev").glob("tty.*"):
-            result.add(str(dev))
+        for device in Path("/dev").glob("tty.*"):
+            result.add(str(device))
 
-    # -------------------------
-    # 4. Windows fallback
-    # -------------------------
     elif sys.platform.startswith("win"):
-
-        # pyserial usually already handles this,
-        # but keep simple fallback
-        for i in range(1, 33):  # 256 is overkill
-            result.add(f"COM{i}")
+        for number in range(1, 33):
+            result.add(f"COM{number}")
 
     ports = sorted(result)
-
     return ports or ["Not Found"]
 
-# async def get_serial_ports() -> list[str]:
-#     """
-#     Lists serial port names
 
-#     :raises EnvironmentError:
-#        On unsupported or unknown platforms
-
-#     :returns:
-#        A list of the serial ports available on the system.
-#     """
-
-#     if sys.platform.startswith("win"):
-#         ports = ["COM%s" % (i + 1) for i in range(256)]
-#     elif sys.platform.startswith("linux") or sys.platform.startswith("cygwin"):
-#         # this excludes your current terminal "/dev/tty"
-#         ports = list(Path("/dev").glob("tty[A-Za-z]*"))
-#     elif sys.platform.startswith("darwin"):
-#         ports = list(Path("/dev").glob("tty.*"))
-#     else:
-#         raise OSError("Unsupported platform")
-
-#     result = []
-#     for port in ports:
-#         try:
-#             s = Serial(str(port))
-#             s.close()
-#             result.append(str(port))
-#         except (OSError, SerialException):
-#             pass
-#     return (
-#         result[::-1],
-#         [
-#             "Not Found.",
-#         ],
-#     )[not result]
-
-
-def get_random_hex_string(_range: int = 32):
-    """Randomize hex number string."""
-    return "".join([random.choice(Config.WORD) for x in range(_range)])
+def get_random_hex_string(_range: int = 32) -> str:
+    """Return a random hexadecimal-like identifier string."""
+    return "".join(random.choice(Config.WORD) for _ in range(_range))

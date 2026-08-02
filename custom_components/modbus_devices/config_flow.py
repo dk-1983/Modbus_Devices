@@ -2,21 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
 from logging import getLogger
-
-import voluptuous as vol
+from typing import Any
 
 from pymodbus.exceptions import ModbusException
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow
-from homeassistant.const import (
-    CONF_DEVICE_ID,
-    CONF_HOST,
-    CONF_NAME,
-    CONF_PORT,
-)
-
+from homeassistant.const import CONF_DEVICE_ID, CONF_HOST, CONF_NAME, CONF_PORT
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.selector import selector
 
@@ -35,12 +28,11 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
 
-        # { "Bolid": {"S2000": ClassName} }
-        self._device_classes: dict[str, dict[str, Any]] = {}
+        self._device_classes: dict[str, list[str]] = {}
 
         self._serial_ports: list[str] = []
         self._selected_manufacturer: str = ""
-        self._manufacturer_devices: dict[str, Any] = {}
+        self._manufacturer_devices: list[str] = []
 
     # ---------------------------------------------------------
     # STEP 1 - MODE
@@ -49,10 +41,14 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         """Select connection type."""
 
         if not self._device_classes:
-            self._device_classes = await get_classes_from_files()
+            self._device_classes = await self.hass.async_add_executor_job(
+                get_classes_from_files
+            )
 
         if not self._serial_ports:
-            self._serial_ports = await get_serial_ports()
+            self._serial_ports = await self.hass.async_add_executor_job(
+                get_serial_ports
+            )
 
         if user_input is not None:
             self._data.update(user_input)
@@ -90,7 +86,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             self._selected_manufacturer = user_input[Config.CONF_MANUFACTURER]
 
             self._manufacturer_devices = self._device_classes.get(
-                self._selected_manufacturer, {}
+                self._selected_manufacturer, []
             )
 
             return await self.async_step_device()
@@ -264,7 +260,6 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_DEVICE_ID, default=1): int,
-
                 vol.Required(Config.CONF_COM_PORT): selector(
                     {
                         "select": {
@@ -273,22 +268,33 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         }
                     }
                 ),
-
                 vol.Required(Config.CONF_BAUDRATE, default="9600"): selector(
                     {
                         "select": {
                             "mode": "dropdown",
                             "options": [
-                                "300", "600", "1200", "2400",
-                                "4800", "9600", "14400", "19200",
-                                "38400", "56000", "57600", "115200",
-                                "128000", "153600", "230400",
-                                "256000", "460800", "921600"
+                                "300",
+                                "600",
+                                "1200",
+                                "2400",
+                                "4800",
+                                "9600",
+                                "14400",
+                                "19200",
+                                "38400",
+                                "56000",
+                                "57600",
+                                "115200",
+                                "128000",
+                                "153600",
+                                "230400",
+                                "256000",
+                                "460800",
+                                "921600",
                             ],
                         }
                     }
                 ),
-
                 vol.Required(Config.CONF_BYTESIZE, default="8"): selector(
                     {
                         "select": {
@@ -297,7 +303,6 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         }
                     }
                 ),
-
                 vol.Required(Config.CONF_PARITY, default="N"): selector(
                     {
                         "select": {
@@ -306,7 +311,6 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         }
                     }
                 ),
-
                 vol.Required(Config.CONF_STOPBITS, default="1"): selector(
                     {
                         "select": {
@@ -315,7 +319,6 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         }
                     }
                 ),
-
                 vol.Optional(CONF_NAME, default="Modbus Device"): cv.string,
             }
         )

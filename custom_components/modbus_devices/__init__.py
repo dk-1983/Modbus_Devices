@@ -60,9 +60,10 @@ async def async_setup_entry(
         # -----------------------------------
         # Load device class
         # -----------------------------------
-        device_class = await get_class(
-            module=manufacturer_module,
-            cls_name=device_name,
+        device_class = await hass.async_add_executor_job(
+            get_class,
+            manufacturer_module,
+            device_name,
         )
 
         # -----------------------------------
@@ -116,9 +117,7 @@ async def async_setup_entry(
         return True
 
     except ConnectionException as exc:
-        raise ConfigEntryNotReady(
-            f"Modbus connection failed: {exc}"
-        ) from exc
+        raise ConfigEntryNotReady(f"Modbus connection failed: {exc}") from exc
 
     except ConfigEntryNotReady:
         raise
