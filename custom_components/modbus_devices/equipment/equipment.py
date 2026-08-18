@@ -9,11 +9,26 @@ import random
 import sys
 from typing import Any
 
+from pymodbus.exceptions import ModbusException
 from serial.tools import list_ports
 
 from ..const import Config
+from ..gateway import GatewayCapabilitySpec, ResolvedDeviceMapping
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def validate_write_response(response: Any, operation: str) -> None:
+    """Validate that a Modbus write request was accepted."""
+    if response is None:
+        raise ModbusException(f"Empty Modbus response for {operation}")
+
+    is_error = getattr(response, "isError", None)
+    if not callable(is_error):
+        raise ModbusException(f"Invalid Modbus response for {operation}")
+
+    if is_error():
+        raise ModbusException(f"Modbus error response for {operation}: {response}")
 
 
 def get_class(module: str, cls_name: str) -> type[Any]:
@@ -25,6 +40,35 @@ def get_class(module: str, cls_name: str) -> type[Any]:
         level=1,
     )
     return getattr(imported_module, cls_name)
+
+
+def get_gateway_requirement(module: str, cls_name: str):
+    """Return the gateway type declared by an equipment class, if any."""
+    return getattr(get_class(module, cls_name), "required_gateway", None)
+
+
+def get_gateway_capabilities(
+    module: str,
+    cls_name: str,
+) -> tuple[GatewayCapabilitySpec, ...]:
+    """Return equipment-owned gateway capability definitions."""
+    equipment_class = get_class(module, cls_name)
+    reader = getattr(equipment_class, "get_gateway_capabilities", None)
+    return tuple(reader()) if callable(reader) else ()
+
+
+def validate_equipment_gateway_mapping(
+    module: str,
+    cls_name: str,
+    mapping: ResolvedDeviceMapping,
+) -> None:
+    """Validate a resolved mapping against equipment-owned capabilities."""
+    equipment_class = get_class(module, cls_name)
+    equipment = equipment_class(None, mapping.identity.gateway.modbus_unit_id)
+    apply_mapping = getattr(equipment, "apply_gateway_mapping", None)
+    if not callable(apply_mapping):
+        raise ValueError(f"{cls_name} does not support gateway mappings")
+    apply_mapping(mapping)
 
 
 def get_classes_from_files() -> dict[str, list[str]]:

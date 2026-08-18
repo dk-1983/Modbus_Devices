@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
-from pymodbus.exceptions import ConnectionException
-
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -14,9 +10,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import Config
-
-_LOGGER = logging.getLogger(__name__)
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -32,7 +25,12 @@ async def async_setup_entry(
 
     entities = []
 
-    outputs = await device.get_outputs()
+    description_reader = getattr(device, "get_output_descriptions", None)
+    outputs = (
+        description_reader()
+        if callable(description_reader)
+        else await device.get_outputs()
+    )
 
     for output in outputs:
         entities.append(
@@ -78,22 +76,36 @@ class ModBusSwitchEntity(
             f"{output['out_number_view']}"
         )
 
+        identity = getattr(device, "attr_unique_id_prefix", None)
         self._attr_unique_id = (
-            f"{entry.entry_id}_"
-            f"{self._output_number}"
+            f"{identity}_output_{self._output_number}"
+            if identity
+            else f"{entry.entry_id}_{self._output_number}"
         )
 
         self._attr_device_class = output["device_class"]
 
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (Config.DOMAIN, self._entry.entry_id),
+                (
+                    Config.DOMAIN,
+                    getattr(device, "attr_device_identifier", None)
+                    or self._entry.entry_id,
+                ),
             },
             manufacturer=device.attr_manufactures_name,
             model=device.attr_model_name,
             name=device.attr_description,
-            hw_version=str(device.attr_hardware_version),
-            sw_version=str(device.attr_software_version),
+            hw_version=(
+                None
+                if device.attr_hardware_version is None
+                else str(device.attr_hardware_version)
+            ),
+            sw_version=(
+                None
+                if device.attr_software_version is None
+                else str(device.attr_software_version)
+            ),
             serial_number=device.attr_serial_number,
         )
 
@@ -138,36 +150,22 @@ class ModBusSwitchEntity(
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn switch on."""
-
-        try:
-            await self._device.set_output(
-                self._output_number,
-                True,
-            )
-
-            await self.coordinator.async_request_refresh()
-
-        except ConnectionException as exc:
-            _LOGGER.error(
-                "Failed to turn ON output %s: %s",
-                self._output_number,
-                exc,
-            )
+        await self._device.set_output(
+            self._output_number,
+            True,
+        )
+        self.coordinator.async_apply_optimistic_write(
+            ("outputs", self._output_number, "state"),
+            True,
+        )
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn switch off."""
-
-        try:
-            await self._device.set_output(
-                self._output_number,
-                False,
-            )
-
-            await self.coordinator.async_request_refresh()
-
-        except ConnectionException as exc:
-            _LOGGER.error(
-                "Failed to turn OFF output %s: %s",
-                self._output_number,
-                exc,
-            )
+        await self._device.set_output(
+            self._output_number,
+            False,
+        )
+        self.coordinator.async_apply_optimistic_write(
+            ("outputs", self._output_number, "state"),
+            False,
+        )

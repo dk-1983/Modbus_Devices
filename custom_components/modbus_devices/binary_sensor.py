@@ -91,11 +91,8 @@ class ModBusBinarySensorEntity(
             f"{input_data['input_number_view']}"
         )
 
-        self._attr_unique_id = (
-            f"{device.attr_serial_number}_"
-            f"input_"
-            f"{input_data['input_number']}"
-        )
+        identity = device.attr_serial_number or self._entry.entry_id
+        self._attr_unique_id = f"{identity}_input_{input_data['input_number']}"
 
         self._attr_device_class = input_data["device_class"]
 
@@ -109,11 +106,15 @@ class ModBusBinarySensorEntity(
             manufacturer=device.attr_manufactures_name,
             model=device.attr_model_name,
             name=device.attr_description,
-            hw_version=str(
-                device.attr_hardware_version
+            hw_version=(
+                None
+                if device.attr_hardware_version is None
+                else str(device.attr_hardware_version)
             ),
-            sw_version=str(
-                device.attr_software_version
+            sw_version=(
+                None
+                if device.attr_software_version is None
+                else str(device.attr_software_version)
             ),
             serial_number=device.attr_serial_number,
         )

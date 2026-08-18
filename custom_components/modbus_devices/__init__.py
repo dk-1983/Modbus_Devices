@@ -11,6 +11,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from .const import Config
 from .coordinator import ModbusDeviceCoordinator
 from .equipment.equipment import get_class
+from .gateway import ResolvedDeviceMapping
 from .modbus_client import connect_modbus
 
 _LOGGER = getLogger(__name__)
@@ -66,6 +67,25 @@ async def async_setup_entry(
             device_name,
         )
 
+        mapping_data = options.get(Config.CONF_GATEWAY_MAPPING)
+        gateway_mapping = (
+            None
+            if mapping_data is None
+            else ResolvedDeviceMapping.from_dict(mapping_data)
+        )
+        required_gateway = getattr(device_class, "required_gateway", None)
+        if required_gateway is not None and gateway_mapping is None:
+            raise ConfigEntryNotReady(
+                f"{device_name} requires a validated gateway mapping"
+            )
+        if (
+            required_gateway is not None
+            and gateway_mapping.identity.gateway.gateway_type is not required_gateway
+        ):
+            raise ConfigEntryNotReady(
+                f"Gateway mapping type does not match {device_name}"
+            )
+
         # -----------------------------------
         # Create device
         # -----------------------------------
@@ -73,6 +93,14 @@ async def async_setup_entry(
             client,
             device_id,
         )
+
+        if gateway_mapping is not None:
+            apply_mapping = getattr(device, "apply_gateway_mapping", None)
+            if not callable(apply_mapping):
+                raise ConfigEntryNotReady(
+                    f"{device_name} does not support gateway mappings"
+                )
+            apply_mapping(gateway_mapping)
 
         await device.data_init()
 
@@ -93,6 +121,7 @@ async def async_setup_entry(
             "client": client,
             "device": device,
             "coordinator": coordinator,
+            "gateway_mapping": gateway_mapping,
         }
 
         _LOGGER.info(

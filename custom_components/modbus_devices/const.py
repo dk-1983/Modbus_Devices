@@ -26,6 +26,21 @@ class Config:
 
     CONF_MODBUS_MODE: str = "modbus_mode"
     CONF_DEVICE_CLASS: str = "device_class"
+    CONF_GATEWAY_MAPPING: str = "gateway_mapping"
+    CONF_GATEWAY_ID: str = "gateway_id"
+    CONF_GATEWAY_SELECTION: str = "gateway_selection"
+    CONF_MAPPING_SOURCE: str = "mapping_source"
+    CONF_ORION_ADDRESS: str = "orion_address"
+    CONF_OBJECT_KIND: str = "object_kind"
+    CONF_DATA_AREA: str = "data_area"
+    CONF_LOCAL_OBJECT_NUMBER: str = "local_object_number"
+    CONF_GATEWAY_OBJECT_NUMBER: str = "gateway_object_number"
+    CONF_RESOLVED_MODBUS_ADDRESS: str = "resolved_modbus_address"
+    CONF_ADD_ANOTHER_OBJECT: str = "add_another_object"
+    CONF_ZONE_TYPE: str = "zone_type"
+    CONF_PARTITION_NUMBER: str = "partition_number"
+    CONF_PARTITION_ID: str = "partition_id"
+    CONF_CAPABILITY_KEY: str = "capability_key"
 
     CONF_MANUFACTURER: str = "manufacturer"
 

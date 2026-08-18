@@ -30,7 +30,8 @@ async def async_setup_entry(
 
     entities = []
 
-    channels = await device.get_chanels()
+    channel_reader = getattr(device, "get_chanels", None)
+    channels = await channel_reader() if callable(channel_reader) else []
 
     for channel in channels:
         entities.append(
@@ -41,6 +42,18 @@ async def async_setup_entry(
                 channel=channel,
             )
         )
+
+    description_reader = getattr(device, "get_state_sensor_descriptions", None)
+    if callable(description_reader):
+        for description in description_reader():
+            entities.append(
+                ModBusStateSensorEntity(
+                    coordinator=coordinator,
+                    device=device,
+                    entry=entry,
+                    description=description,
+                )
+            )
 
     async_add_entities(entities)
 
@@ -96,8 +109,16 @@ class ModBusSensorEntity(
             manufacturer=device.attr_manufactures_name,
             model=device.attr_model_name,
             name=device.attr_description,
-            hw_version=str(device.attr_hardware_version),
-            sw_version=str(device.attr_software_version),
+            hw_version=(
+                None
+                if device.attr_hardware_version is None
+                else str(device.attr_hardware_version)
+            ),
+            sw_version=(
+                None
+                if device.attr_software_version is None
+                else str(device.attr_software_version)
+            ),
             serial_number=device.attr_serial_number,
         )
 
@@ -148,3 +169,64 @@ class ModBusSensorEntity(
             return 0
 
         return value[0]
+
+
+class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
+    """Representation of a lossless multi-state gateway object."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, coordinator, device, entry: ConfigEntry, description) -> None:
+        super().__init__(coordinator)
+        self._sensor_id = description["sensor_id"]
+        self._attr_name = description["name"]
+        self._attr_device_class = description.get("device_class")
+        self._attr_icon = description.get("icon")
+        identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
+        self._attr_unique_id = f"{identity}_{self._sensor_id}"
+        device_identifier = (
+            getattr(device, "attr_device_identifier", None) or entry.entry_id
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(Config.DOMAIN, device_identifier)},
+            manufacturer=device.attr_manufactures_name,
+            model=device.attr_model_name,
+            name=device.attr_description,
+            hw_version=(
+                None
+                if device.attr_hardware_version is None
+                else str(device.attr_hardware_version)
+            ),
+            sw_version=(
+                None
+                if device.attr_software_version is None
+                else str(device.attr_software_version)
+            ),
+            serial_number=device.attr_serial_number,
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    @property
+    def _current(self) -> dict | None:
+        data = self.coordinator.data or {}
+        return data.get("state_sensors", {}).get(self._sensor_id)
+
+    @property
+    def native_value(self) -> str | None:
+        current = self._current
+        return None if current is None else current["state"]
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        current = self._current
+        if current is None:
+            return {}
+        return {
+            "primary_code": current["primary_code"],
+            "expanded_codes": current["expanded_codes"],
+            "expanded_states": current["expanded_states"],
+        }

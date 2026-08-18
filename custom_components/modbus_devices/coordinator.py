@@ -31,6 +31,8 @@ class ModbusDeviceCoordinator(
         """Initialize coordinator."""
 
         self.device = device
+        self._write_generation = 0
+        self._pending_write_patches: dict[tuple, tuple[int, object]] = {}
 
         super().__init__(
             hass,
@@ -43,6 +45,13 @@ class ModbusDeviceCoordinator(
         """Fetch data from device."""
 
         try:
+            update_generation = self._write_generation
+            snapshot_reader = getattr(self.device, "async_get_snapshot", None)
+            if callable(snapshot_reader):
+                data = await snapshot_reader()
+                self._reconcile_pending_writes(data, update_generation)
+                return data
+
             data: dict = {}
 
             # ---------------------------------
@@ -100,6 +109,7 @@ class ModbusDeviceCoordinator(
                     await self.device.get_time()
                 )
 
+            self._reconcile_pending_writes(data, update_generation)
             return data
 
         except ConnectionException as exc:
@@ -111,3 +121,42 @@ class ModbusDeviceCoordinator(
             raise UpdateFailed(
                 f"Unexpected error: {exc}"
             ) from exc
+
+    def async_apply_optimistic_write(self, path: tuple, value: object) -> None:
+        """Publish a successful write while protecting it from an older poll."""
+        self._write_generation += 1
+        self._pending_write_patches[path] = (self._write_generation, value)
+
+        data = self._copy_and_patch(self.data or {}, path, value)
+        self.async_set_updated_data(data)
+
+    def _reconcile_pending_writes(
+        self,
+        data: dict,
+        update_generation: int,
+    ) -> None:
+        """Keep writes newer than this poll and retire writes it can verify."""
+        for path, (generation, value) in list(
+            self._pending_write_patches.items()
+        ):
+            if generation > update_generation:
+                patched = self._copy_and_patch(data, path, value)
+                data.clear()
+                data.update(patched)
+            else:
+                self._pending_write_patches.pop(path, None)
+
+    @staticmethod
+    def _copy_and_patch(data: dict, path: tuple, value: object) -> dict:
+        """Copy a coordinator snapshot and set a nested value."""
+        result = dict(data)
+        current = result
+
+        for key in path[:-1]:
+            child = current.get(key, {})
+            child = dict(child) if isinstance(child, dict) else {}
+            current[key] = child
+            current = child
+
+        current[path[-1]] = value
+        return result

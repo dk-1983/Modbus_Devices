@@ -100,9 +100,7 @@ class ModBusDevicesDateTime(
     def native_value(self) -> datetime | None:
         """Return datetime value."""
 
-        controller_time = self.coordinator.data.get(
-            "controller_time"
-        )
+        controller_time = self.coordinator.data.get("time")
 
         if controller_time is None:
             return None
@@ -119,8 +117,10 @@ class ModBusDevicesDateTime(
 
         try:
             await self._device.set_time(value)
-
-            await self.coordinator.async_request_refresh()
+            self.coordinator.async_apply_optimistic_write(
+                ("time",),
+                value - timedelta(hours=Config.TIME_DELTA),
+            )
 
             _LOGGER.info(
                 "Controller time updated: %s",
@@ -132,3 +132,4 @@ class ModBusDevicesDateTime(
                 "Failed to update controller time: %s",
                 exc,
             )
+            raise
