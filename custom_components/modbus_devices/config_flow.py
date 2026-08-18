@@ -485,6 +485,18 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 self._selected_manufacturer.lower(),
                 self._data[Config.CONF_DEVICE_CLASS],
             )
+        if not self._gateway_device_metadata["gateway_transport_supported"]:
+            return self.async_show_form(
+                step_id="gateway_device",
+                data_schema=vol.Schema({}),
+                errors={"base": "unsupported_gateway_transport"},
+                description_placeholders={
+                    "transport_limitation": self._gateway_device_metadata[
+                        "gateway_transport_limitation"
+                    ]
+                    or "This gateway transport is not supported",
+                },
+            )
         if not self._gateway_device_metadata["uses_dpls_identity"]:
             return await self.async_step_mapping_source()
 
@@ -496,9 +508,15 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             else:
                 try:
                     self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
+                    address_count = self._gateway_device_metadata[
+                        "variant_dpls_address_counts"
+                    ].get(
+                        variant,
+                        self._gateway_device_metadata["dpls_address_count"],
+                    )
                     self._dpls_identity = DPLSSubIdentity(
                         base_address=user_input[Config.CONF_DPLS_BASE_ADDRESS],
-                        address_count=self._gateway_device_metadata["dpls_address_count"],
+                        address_count=address_count,
                     )
                     self._device_metadata = DownstreamDeviceMetadata(variant=variant)
                 except (KeyError, TypeError, ValueError):

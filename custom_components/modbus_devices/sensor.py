@@ -55,6 +55,18 @@ async def async_setup_entry(
                 )
             )
 
+    numeric_reader = getattr(device, "get_numeric_sensor_descriptions", None)
+    if callable(numeric_reader):
+        for description in numeric_reader():
+            entities.append(
+                ModBusNumericSensorEntity(
+                    coordinator=coordinator,
+                    device=device,
+                    entry=entry,
+                    description=description,
+                )
+            )
+
     async_add_entities(entities)
 
 
@@ -231,4 +243,61 @@ class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
             "primary_code": current["primary_code"],
             "expanded_codes": current["expanded_codes"],
             "expanded_states": current["expanded_states"],
+        }
+
+
+class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
+    """Representation of a documented S2000-PP physical numeric value."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, coordinator, device, entry: ConfigEntry, description) -> None:
+        super().__init__(coordinator)
+        self._sensor_id = description["sensor_id"]
+        self._attr_name = description["name"]
+        self._attr_device_class = description["device_class"]
+        self._attr_state_class = description["state_class"]
+        self._attr_native_unit_of_measurement = description["unit"]
+        self._attr_suggested_display_precision = description["precision"]
+        identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
+        self._attr_unique_id = f"{identity}_{self._sensor_id}"
+        device_identifier = (
+            getattr(device, "attr_device_identifier", None) or entry.entry_id
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(Config.DOMAIN, device_identifier)},
+            manufacturer=device.attr_manufactures_name,
+            model=device.attr_model_name,
+            name=device.attr_description,
+            hw_version=(None if device.attr_hardware_version is None else str(device.attr_hardware_version)),
+            sw_version=(None if device.attr_software_version is None else str(device.attr_software_version)),
+            serial_number=device.attr_serial_number,
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    @property
+    def _current(self) -> dict | None:
+        return (self.coordinator.data or {}).get("numeric_sensors", {}).get(
+            self._sensor_id
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        current = self._current
+        return None if current is None else current["value"]
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        current = self._current
+        metadata = dict(getattr(self.coordinator.device, "attr_device_metadata", {}))
+        if current is None:
+            return metadata
+        return {
+            **metadata,
+            "raw_register": current["raw_register"],
+            "parameter_kind": current["parameter_kind"],
         }

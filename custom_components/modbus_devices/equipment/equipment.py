@@ -70,6 +70,15 @@ def get_gateway_device_metadata(module: str, cls_name: str) -> dict[str, Any]:
         "unsupported_variants": dict(
             getattr(equipment_class, "unsupported_variants", {})
         ),
+        "variant_dpls_address_counts": dict(
+            getattr(equipment_class, "variant_dpls_address_counts", {})
+        ),
+        "gateway_transport_supported": bool(
+            getattr(equipment_class, "gateway_transport_supported", True)
+        ),
+        "gateway_transport_limitation": getattr(
+            equipment_class, "gateway_transport_limitation", None
+        ),
     }
 
 

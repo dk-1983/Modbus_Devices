@@ -1,0 +1,106 @@
+"""Tests for the documented S2000-PP numeric selector/result protocol."""
+
+import asyncio
+
+import pytest
+
+from custom_components.modbus_devices.s2000_pp import (
+    NumericParameterKind,
+    NumericResultStatus,
+    S2000PPNumericValueReader,
+    decode_s2000_pp_q8_8,
+)
+
+
+class Response:
+    def __init__(self, *, registers=None, error=False, code=None, address=None, value=None):
+        self.registers = registers
+        self._error = error
+        self.exception_code = code
+        self.address = address
+        self.value = value
+
+    def isError(self):
+        return self._error
+
+
+class Client:
+    def __init__(self, result):
+        self.result = result
+        self.writes = []
+
+    async def write_register(self, **kwargs):
+        self.writes.append(kwargs)
+        return Response(address=kwargs["address"], value=kwargs["value"])
+
+    async def read_holding_registers(self, **kwargs):
+        return self.result
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"), [(0x1A70, 26.4375), (0xECD0, -19.1875), (0, 0.0)]
+)
+def test_q8_8(raw, value):
+    assert decode_s2000_pp_q8_8(raw) == value
+
+
+@pytest.mark.asyncio
+async def test_selector_and_ready_result_are_validated():
+    client = Client(Response(registers=[0x0180]))
+    result = await S2000PPNumericValueReader(client, 3, "ready").async_read(
+        10, NumericParameterKind.TEMPERATURE
+    )
+    assert result.status is NumericResultStatus.READY
+    assert result.value == 1.5
+    assert client.writes[0] == {"address": 46179, "value": 10, "device_id": 3}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("code", "status"),
+    [(15, NumericResultStatus.PENDING), (6, NumericResultStatus.RETRYABLE)],
+)
+async def test_retryable_modbus_exceptions(code, status):
+    result = await S2000PPNumericValueReader(
+        Client(Response(error=True, code=code)), 1, f"exception-{code}"
+    ).async_read(1, NumericParameterKind.RELATIVE_HUMIDITY)
+    assert result.status is status
+    assert result.exception_code == code
+    assert result.value is None
+
+
+@pytest.mark.asyncio
+async def test_protocol_and_short_response_are_not_zero():
+    result = await S2000PPNumericValueReader(
+        Client(Response(registers=[])), 1, "short"
+    ).async_read(1, NumericParameterKind.TEMPERATURE)
+    assert result.status is NumericResultStatus.PROTOCOL_ERROR
+    assert result.value is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_selector_echo_is_protocol_error():
+    client = Client(Response(registers=[0]))
+
+    async def bad_write(**kwargs):
+        return Response(address=46179, value=kwargs["value"] + 1)
+
+    client.write_register = bad_write
+    result = await S2000PPNumericValueReader(client, 1, "bad-echo").async_read(
+        2, NumericParameterKind.TEMPERATURE
+    )
+    assert result.status is NumericResultStatus.PROTOCOL_ERROR
+
+
+@pytest.mark.asyncio
+async def test_parked_request_serializes_other_zones():
+    client = Client(Response(error=True, code=15))
+    reader_a = S2000PPNumericValueReader(client, 1, "shared")
+    reader_b = S2000PPNumericValueReader(client, 1, "shared")
+    first, second = await asyncio.gather(
+        reader_a.async_read(10, NumericParameterKind.TEMPERATURE),
+        reader_b.async_read(20, NumericParameterKind.RELATIVE_HUMIDITY),
+    )
+    assert first.status is NumericResultStatus.PENDING
+    assert second.status is NumericResultStatus.RETRYABLE
+    assert [write["value"] for write in client.writes] == [10]

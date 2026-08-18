@@ -15,8 +15,9 @@ from pymodbus.client import (
 from pymodbus.exceptions import ModbusException
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
-from homeassistant.const import Platform
+from homeassistant.const import PERCENTAGE, Platform, UnitOfTemperature
 
 from ..gateway import (
     CapabilityRequirement,
@@ -29,7 +30,10 @@ from ..gateway import (
 )
 from ..s2000_pp import (
     S2000PPRuntimeReader,
+    S2000PPNumericValueReader,
     S2000PPZoneState,
+    NumericParameterKind,
+    NumericResultStatus,
     validated_bits,
     validated_registers,
 )
@@ -1015,6 +1019,323 @@ class C2000KPB:
             f"software_version: {self.attr_software_version}, "
             f"description: {self.attr_description}"
         )
+
+
+class BolidDPLSNumericDeviceBase:
+    """Shared mechanics for distinct DPLS devices exposing numeric zones."""
+
+    required_gateway = GatewayType.S2000_PP
+    uses_dpls_identity = True
+    gateway_transport_supported = True
+    capability_requirements: tuple[GatewayCapabilitySpec, ...] = ()
+    numeric_kinds: dict[str, NumericParameterKind] = {}
+    numeric_metadata: dict[str, tuple[Any, str, int]] = {}
+    variants: dict = {}
+    variant_dpls_address_counts: dict[str, int] = {}
+    STATE_NAMES = C2000KPB.STATE_NAMES
+
+    def __init__(self, client, device_id) -> None:
+        if self.__class__ is BolidDPLSNumericDeviceBase:
+            raise TypeError("BolidDPLSNumericDeviceBase is not equipment")
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = self.__class__.__name__
+        self.attr_description = "DPLS numeric device"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._numeric_mappings: dict[str, ResolvedObjectMapping] = {}
+        self._numeric_values: dict[str, dict[str, Any]] = {}
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        return cls.capability_requirements
+
+    @classmethod
+    def get_variant_options(cls) -> dict[str, str]:
+        return {
+            variant.value: metadata.display_name
+            for variant, metadata in cls.variants.items()
+        }
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        if not self.gateway_transport_supported:
+            raise ValueError(self.gateway_transport_limitation)
+        if mapping.identity.model != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match equipment")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match equipment")
+        identity = mapping.identity
+        if identity.dpls is None:
+            raise ValueError("Numeric DPLS equipment requires nested DPLS identity")
+        try:
+            variant = self.Variant(identity.metadata.variant)
+            metadata = self.variants[variant]
+        except (TypeError, ValueError, KeyError) as exc:
+            raise ValueError("Unsupported or missing equipment variant") from exc
+        expected_count = self.variant_dpls_address_counts[variant.value]
+        if identity.dpls.address_count != expected_count:
+            raise ValueError("DPLS address count does not match equipment variant")
+
+        specs = {
+            (
+                spec.resolved_local_object_number(identity.dpls.base_address),
+                spec.zone_type,
+            ): spec
+            for spec in self.capability_requirements
+        }
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for item in mapping.objects:
+            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            spec = specs.get((item.local_object_number, zone_type))
+            if (
+                spec is None
+                or item.object_kind is not ObjectKind.ZONE
+                or item.data_area is not ModbusDataArea.HOLDING_REGISTER
+            ):
+                raise ValueError("Mapping contains an unsupported numeric DPLS object")
+            if spec.key in resolved:
+                raise ValueError("Duplicate numeric capability mapping")
+            resolved[spec.key] = item
+        if not resolved:
+            raise ValueError("Numeric DPLS mapping must configure at least one capability")
+
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = identity.stable_id
+        self.attr_unique_id_prefix = identity.stable_id
+        self.attr_model_name = metadata.display_name
+        self.attr_device_metadata = {
+            **metadata.device_metadata,
+            "kdl_orion_address": identity.orion_address,
+            "dpls_base_address": identity.dpls.base_address,
+        }
+        self._numeric_mappings = resolved
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        if self.attr_gateway_mapping is None:
+            raise ValueError("Equipment requires a validated S2000-PP mapping")
+        await self.async_get_snapshot()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_numeric_sensor_descriptions(self) -> list[dict[str, Any]]:
+        descriptions = []
+        for key in self._numeric_mappings:
+            device_class, unit, precision = self.numeric_metadata[key]
+            descriptions.append(
+                {
+                    "sensor_id": key,
+                    "name": self._capability(key).name,
+                    "device_class": device_class,
+                    "state_class": SensorStateClass.MEASUREMENT,
+                    "unit": unit,
+                    "precision": precision,
+                }
+            )
+        return descriptions
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "sensor_id": f"{key}_state",
+                "name": f"{self._capability(key).name} state",
+                "device_class": None,
+                "icon": "mdi:state-machine",
+            }
+            for key in self._numeric_mappings
+        ]
+
+    def _capability(self, key: str) -> GatewayCapabilitySpec:
+        return next(item for item in self.capability_requirements if item.key == key)
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        mapping = self.attr_gateway_mapping
+        reader = S2000PPNumericValueReader(
+            self.attr_client,
+            self.attr_device_id,
+            mapping.identity.gateway.stable_id,
+        )
+        for key, item in self._numeric_mappings.items():
+            result = await reader.async_read(
+                item.gateway_object_number, self.numeric_kinds[key]
+            )
+            if result.status is NumericResultStatus.READY:
+                self._numeric_values[key] = {
+                    "value": result.value,
+                    "raw_register": result.raw_register,
+                    "parameter_kind": result.parameter_kind.value,
+                }
+            elif result.status is NumericResultStatus.PROTOCOL_ERROR:
+                raise ModbusException(result.message or "numeric protocol error")
+
+        zone_states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states(self._numeric_mappings.values())
+        return {
+            "numeric_sensors": {
+                key: dict(value) for key, value in self._numeric_values.items()
+            },
+            "state_sensors": {
+                f"{key}_state": self._state_sensor_value(
+                    zone_states[item.gateway_object_number]
+                )
+                for key, item in self._numeric_mappings.items()
+            },
+        }
+
+    def _state_sensor_value(self, state: S2000PPZoneState) -> dict[str, Any]:
+        active = tuple(code for code in state.expanded_states if code != 0)
+        return {
+            "state": self.STATE_NAMES.get(
+                state.primary_state, f"unknown_{state.primary_state}"
+            ),
+            "primary_code": state.primary_state,
+            "expanded_codes": state.expanded_states,
+            "expanded_states": tuple(
+                self.STATE_NAMES.get(code, f"unknown_{code}") for code in active
+            ),
+        }
+
+
+class C2000VT(BolidDPLSNumericDeviceBase):
+    """Bolid С2000-ВТ and С2000-ВТ исп.01 DPLS thermohygrometers."""
+
+    dpls_address_count = 2
+
+    class Variant(str, Enum):
+        VT = "vt"
+        VT_01 = "vt_01"
+
+    @dataclass(frozen=True, slots=True)
+    class VariantMetadata:
+        display_name: str
+        temperature_accuracy: str
+        humidity_accuracy: str
+
+        @property
+        def device_metadata(self) -> dict[str, Any]:
+            return {
+                "variant": self.display_name,
+                "temperature_range": "-30…+55 °C",
+                "temperature_accuracy": self.temperature_accuracy,
+                "temperature_resolution": "0.1 °C",
+                "humidity_range": "0…100 %",
+                "humidity_accuracy": self.humidity_accuracy,
+                "humidity_resolution": "1 %",
+            }
+
+    variants = {
+        Variant.VT: VariantMetadata("С2000-ВТ", "±0.5 °C", "±5 %"),
+        Variant.VT_01: VariantMetadata("С2000-ВТ исп.01", "±0.4 °C", "±3 %"),
+    }
+    variant_dpls_address_counts = {"vt": 2, "vt_01": 2}
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="temperature", name="Temperature", object_kind=ObjectKind.ZONE,
+            local_object_number=0, local_object_offset=0,
+            zone_type=6,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="humidity", name="Humidity", object_kind=ObjectKind.ZONE,
+            local_object_number=0, local_object_offset=1,
+            zone_type=6,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+    )
+    numeric_kinds = {
+        "temperature": NumericParameterKind.TEMPERATURE,
+        "humidity": NumericParameterKind.RELATIVE_HUMIDITY,
+    }
+    numeric_metadata = {
+        "temperature": (SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS, 1),
+        "humidity": (SensorDeviceClass.HUMIDITY, PERCENTAGE, 0),
+    }
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self.attr_model_name = "С2000-ВТ"
+        self.attr_description = "Addressable temperature and humidity sensor"
+
+
+class C2000VTI(BolidDPLSNumericDeviceBase):
+    """Bolid С2000-ВТИ and С2000-ВТИ исп.01 display thermohygrometers."""
+
+    dpls_address_count = 3
+    gateway_transport_supported = False
+    gateway_transport_limitation = (
+        "Current S2000-PP documentation does not confirm numeric values from C2000-VTI"
+    )
+
+    class Variant(str, Enum):
+        VTI = "vti"
+        VTI_01 = "vti_01"
+
+    @dataclass(frozen=True, slots=True)
+    class VariantMetadata:
+        display_name: str
+        has_co_sensor: bool
+        has_local_sounder: bool
+
+        @property
+        def device_metadata(self) -> dict[str, Any]:
+            return {
+                "variant": self.display_name,
+                "temperature_range": "-10…+55 °C",
+                "temperature_accuracy": "±0.4 °C",
+                "temperature_resolution": "0.1 °C",
+                "humidity_range": "0…100 %",
+                "humidity_accuracy": "±3 %",
+                "humidity_resolution": "0.1 %",
+                "local_lcd": True,
+                "co_sensor": self.has_co_sensor,
+                "local_sounder": self.has_local_sounder,
+                "remote_sounder_control": False,
+            }
+
+    variants = {
+        Variant.VTI: VariantMetadata("С2000-ВТИ", False, False),
+        Variant.VTI_01: VariantMetadata("С2000-ВТИ исп.01", True, True),
+    }
+    variant_dpls_address_counts = {"vti": 2, "vti_01": 3}
+    capability_requirements = C2000VT.capability_requirements + (
+        GatewayCapabilitySpec(
+            key="co_concentration", name="CO concentration",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=2, zone_type=6,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+    )
+    numeric_kinds = {
+        **C2000VT.numeric_kinds,
+        "co_concentration": NumericParameterKind.CO_CONCENTRATION,
+    }
+    numeric_metadata = {
+        **C2000VT.numeric_metadata,
+        "co_concentration": (None, "ppm", 0),
+    }
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self.attr_model_name = "С2000-ВТИ"
+        self.attr_description = "Addressable display thermohygrometer"
 
 
 class C2000SP4:

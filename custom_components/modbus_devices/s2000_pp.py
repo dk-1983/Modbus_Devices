@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+from enum import Enum
 from typing import Awaitable, Callable, Iterable
 
 from pymodbus.exceptions import ModbusException
@@ -31,6 +33,186 @@ S2000_PP_ZONE_STATE_START = 40000
 S2000_PP_EXPANDED_ZONE_START = 4096
 S2000_PP_EXPANDED_ZONE_SIZE = 16
 S2000_PP_RUNTIME_READ_CHUNK_SIZE = 120
+S2000_PP_NUMERIC_SELECTOR = 46179
+S2000_PP_NUMERIC_RESULT = 46328
+S2000_PP_NUMERIC_ZONE_TYPE = 6
+
+
+class NumericParameterKind(str, Enum):
+    """Physical numeric parameters transported by the generic gateway API."""
+
+    TEMPERATURE = "temperature"
+    RELATIVE_HUMIDITY = "relative_humidity"
+    CO_CONCENTRATION = "co_concentration"
+
+
+class NumericResultStatus(str, Enum):
+    """Outcome of one non-blocking numeric-value transaction."""
+
+    READY = "ready"
+    PENDING = "pending"
+    RETRYABLE = "retryable"
+    PROTOCOL_ERROR = "protocol_error"
+
+
+@dataclass(frozen=True, slots=True)
+class S2000PPNumericResult:
+    """Typed result preserving pending and protocol-error semantics."""
+
+    status: NumericResultStatus
+    parameter_kind: NumericParameterKind
+    zone_table_number: int
+    value: float | None = None
+    raw_register: int | None = None
+    exception_code: int | None = None
+    message: str | None = None
+
+
+@dataclass(slots=True)
+class _NumericGatewaySession:
+    lock: asyncio.Lock
+    pending_zone: int | None = None
+
+
+_NUMERIC_GATEWAY_SESSIONS: dict[str, _NumericGatewaySession] = {}
+
+
+def decode_s2000_pp_q8_8(raw: int) -> float:
+    """Decode the documented signed 16-bit Q8.8 physical value."""
+    if not 0 <= raw <= 0xFFFF:
+        raise ValueError("S2000-PP numeric register must be an unsigned 16-bit value")
+    signed = raw - 0x10000 if raw & 0x8000 else raw
+    return signed / 256
+
+
+class S2000PPNumericValueReader:
+    """Serialize and execute documented selector/result numeric transactions."""
+
+    def __init__(self, client, modbus_unit_id: int, gateway_key: str) -> None:
+        self._client = client
+        self._modbus_unit_id = modbus_unit_id
+        self._session = _NUMERIC_GATEWAY_SESSIONS.setdefault(
+            gateway_key, _NumericGatewaySession(asyncio.Lock())
+        )
+
+    async def async_read(
+        self,
+        zone_table_number: int,
+        parameter_kind: NumericParameterKind,
+    ) -> S2000PPNumericResult:
+        """Advance one transaction once; never sleep or busy-loop."""
+        _validate_table_number(zone_table_number, S2000_PP_ZONE_COUNT, "zone")
+        async with self._session.lock:
+            pending = self._session.pending_zone
+            if pending is not None and pending != zone_table_number:
+                return S2000PPNumericResult(
+                    NumericResultStatus.RETRYABLE,
+                    parameter_kind,
+                    zone_table_number,
+                    exception_code=6,
+                    message=f"numeric selector is parked for zone {pending}",
+                )
+            if pending is None:
+                selected = await self._select(zone_table_number, parameter_kind)
+                if selected is not None:
+                    return selected
+                self._session.pending_zone = zone_table_number
+
+            result = await self._read_result(zone_table_number, parameter_kind)
+            if result.status not in {
+                NumericResultStatus.PENDING,
+                NumericResultStatus.RETRYABLE,
+            }:
+                self._session.pending_zone = None
+            return result
+
+    async def _select(self, zone: int, kind: NumericParameterKind):
+        response = await self._client.write_register(
+            address=S2000_PP_NUMERIC_SELECTOR,
+            value=zone,
+            device_id=self._modbus_unit_id,
+        )
+        error = _numeric_error_result(response, kind, zone, "select numeric zone")
+        if error is not None:
+            return error
+        address = getattr(response, "address", None)
+        values = getattr(response, "registers", None)
+        echoed = getattr(response, "value", None)
+        if echoed is None and isinstance(values, list) and values:
+            echoed = values[0]
+        if address != S2000_PP_NUMERIC_SELECTOR or echoed != zone:
+            return S2000PPNumericResult(
+                NumericResultStatus.PROTOCOL_ERROR,
+                kind,
+                zone,
+                message="invalid FC06 selector echo",
+            )
+        return None
+
+    async def _read_result(
+        self, zone: int, kind: NumericParameterKind
+    ) -> S2000PPNumericResult:
+        response = await self._client.read_holding_registers(
+            address=S2000_PP_NUMERIC_RESULT,
+            count=1,
+            device_id=self._modbus_unit_id,
+        )
+        error = _numeric_error_result(response, kind, zone, "read numeric result")
+        if error is not None:
+            return error
+        registers = getattr(response, "registers", None)
+        if not isinstance(registers, list) or len(registers) != 1:
+            return S2000PPNumericResult(
+                NumericResultStatus.PROTOCOL_ERROR,
+                kind,
+                zone,
+                message="numeric result must contain exactly one register",
+            )
+        raw = registers[0]
+        try:
+            value = decode_s2000_pp_q8_8(raw)
+        except (TypeError, ValueError) as exc:
+            return S2000PPNumericResult(
+                NumericResultStatus.PROTOCOL_ERROR,
+                kind,
+                zone,
+                message=str(exc),
+            )
+        return S2000PPNumericResult(
+            NumericResultStatus.READY,
+            kind,
+            zone,
+            value=value,
+            raw_register=raw,
+        )
+
+
+def _numeric_error_result(response, kind, zone, operation):
+    if response is None:
+        return S2000PPNumericResult(
+            NumericResultStatus.PROTOCOL_ERROR, kind, zone,
+            message=f"empty response for {operation}",
+        )
+    is_error = getattr(response, "isError", None)
+    if not callable(is_error):
+        return S2000PPNumericResult(
+            NumericResultStatus.PROTOCOL_ERROR, kind, zone,
+            message=f"invalid response for {operation}",
+        )
+    if not is_error():
+        return None
+    code = getattr(response, "exception_code", None)
+    status = (
+        NumericResultStatus.PENDING
+        if code == 15
+        else NumericResultStatus.RETRYABLE
+        if code == 6
+        else NumericResultStatus.PROTOCOL_ERROR
+    )
+    return S2000PPNumericResult(
+        status, kind, zone, exception_code=code,
+        message=f"Modbus exception during {operation}: {response}",
+    )
 
 
 @dataclass(frozen=True, slots=True)
