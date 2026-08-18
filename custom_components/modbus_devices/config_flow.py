@@ -17,11 +17,14 @@ from .const import Config
 from .equipment.equipment import (
     get_classes_from_files,
     get_gateway_capabilities,
+    get_gateway_device_metadata,
     get_gateway_requirement,
     get_serial_ports,
     validate_equipment_gateway_mapping,
 )
 from .gateway import (
+    DPLSSubIdentity,
+    DownstreamDeviceMetadata,
     GatewayContext,
     GatewayCapabilitySpec,
     GatewayType,
@@ -29,6 +32,7 @@ from .gateway import (
     ObjectKind,
     ResolvedDeviceMapping,
     ResolvedObjectMapping,
+    dpls_ranges_overlap,
 )
 from .mapping import (
     AutomaticDeviceMappingProvider,
@@ -65,6 +69,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         self._orion_address: int | None = None
         self._manual_mapping_error: str | None = None
         self._gateway_capabilities: tuple[GatewayCapabilitySpec, ...] = ()
+        self._dpls_identity: DPLSSubIdentity | None = None
+        self._device_metadata = DownstreamDeviceMetadata()
+        self._gateway_device_metadata: dict[str, Any] = {}
 
     # ---------------------------------------------------------
     # STEP 1 - MODE
@@ -420,7 +427,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 return await self.async_step_gateway_new()
 
             self._gateway_context = contexts[selection]
-            return await self.async_step_mapping_source()
+            return await self.async_step_gateway_device()
 
         options = [
             {"value": stable_id, "label": gateway.gateway_id}
@@ -454,7 +461,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             except ValueError:
                 errors["base"] = "invalid_gateway"
             else:
-                return await self.async_step_mapping_source()
+                return await self.async_step_gateway_device()
 
         schema = vol.Schema(
             {
@@ -468,6 +475,58 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             step_id="gateway_new",
             data_schema=schema,
             errors=errors,
+        )
+
+    async def async_step_gateway_device(self, user_input=None):
+        """Collect declarative nested identity and variant metadata."""
+        if not self._gateway_device_metadata:
+            self._gateway_device_metadata = await self.hass.async_add_executor_job(
+                get_gateway_device_metadata,
+                self._selected_manufacturer.lower(),
+                self._data[Config.CONF_DEVICE_CLASS],
+            )
+        if not self._gateway_device_metadata["uses_dpls_identity"]:
+            return await self.async_step_mapping_source()
+
+        errors = {}
+        if user_input is not None:
+            variant = user_input[Config.CONF_DEVICE_VARIANT]
+            if variant in self._gateway_device_metadata["unsupported_variants"]:
+                errors[Config.CONF_DEVICE_VARIANT] = "unsupported_variant"
+            else:
+                try:
+                    self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
+                    self._dpls_identity = DPLSSubIdentity(
+                        base_address=user_input[Config.CONF_DPLS_BASE_ADDRESS],
+                        address_count=self._gateway_device_metadata["dpls_address_count"],
+                    )
+                    self._device_metadata = DownstreamDeviceMetadata(variant=variant)
+                except (KeyError, TypeError, ValueError):
+                    errors["base"] = "invalid_mapping"
+                else:
+                    return await self.async_step_mapping_source()
+
+        schema = vol.Schema(
+            {
+                vol.Required(Config.CONF_DEVICE_VARIANT): selector(
+                    {"select": {"mode": "dropdown", "options": [
+                        {"value": value, "label": label}
+                        for value, label in self._gateway_device_metadata["variants"].items()
+                    ]}}
+                ),
+                vol.Required(Config.CONF_ORION_ADDRESS): vol.All(
+                    int, vol.Range(min=1, max=127)
+                ),
+                vol.Required(Config.CONF_DPLS_BASE_ADDRESS): vol.All(
+                    int, vol.Range(min=1, max=127)
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="gateway_device", data_schema=schema, errors=errors,
+            description_placeholders={
+                "unsupported_variant": "С2000-СП4/220 исп.02 is not supported"
+            },
         )
 
     async def async_step_mapping_source(self, user_input=None):
@@ -497,6 +556,13 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
     async def async_step_manual_device(self, user_input=None):
         """Identify the downstream physical device."""
+        if self._dpls_identity is not None and self._orion_address is not None:
+            self._gateway_capabilities = await self.hass.async_add_executor_job(
+                get_gateway_capabilities,
+                self._selected_manufacturer.lower(),
+                self._data[Config.CONF_DEVICE_CLASS],
+            )
+            return await self.async_step_manual_object()
         if user_input is not None:
             self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
             self._gateway_capabilities = await self.hass.async_add_executor_job(
@@ -625,12 +691,16 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 table_number = user_input[Config.CONF_GATEWAY_OBJECT_NUMBER]
                 if spec.object_kind is ObjectKind.RELAY:
                     resolved_object = manual_relay_mapping(
-                        local_object_number=spec.local_object_number,
+                        local_object_number=spec.resolved_local_object_number(
+                            None if self._dpls_identity is None else self._dpls_identity.base_address
+                        ),
                         table_number=table_number,
                     )
                 elif spec.object_kind is ObjectKind.ZONE:
                     resolved_object = manual_zone_mapping(
-                        local_object_number=spec.local_object_number,
+                        local_object_number=spec.resolved_local_object_number(
+                            None if self._dpls_identity is None else self._dpls_identity.base_address
+                        ),
                         table_number=table_number,
                         zone_type=spec.zone_type,
                         partition_number=0,
@@ -678,7 +748,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         for spec in self._gateway_capabilities:
             if (
                 spec.object_kind is mapping.object_kind
-                and spec.local_object_number == mapping.local_object_number
+                and spec.resolved_local_object_number(
+                    None if self._dpls_identity is None else self._dpls_identity.base_address
+                ) == mapping.local_object_number
                 and spec.zone_type == zone_type
             ):
                 return spec.key
@@ -693,6 +765,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 model=self._data[Config.CONF_DEVICE_CLASS],
                 orion_address=self._orion_address,
                 objects=tuple(self._manual_objects),
+                dpls=self._dpls_identity,
+                metadata=self._device_metadata,
             )
         except ValueError:
             self._manual_mapping_error = "invalid_mapping"
@@ -710,6 +784,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     async def async_step_automatic_device(self, user_input=None):
         """Resolve one downstream device from С2000-ПП configuration tables."""
         errors = {}
+        if self._dpls_identity is not None and self._orion_address is not None and user_input is None:
+            user_input = {Config.CONF_ORION_ADDRESS: self._orion_address}
         if user_input is not None:
             self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
             client = None
@@ -734,6 +810,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         gateway=self._gateway_context,
                         model=self._data[Config.CONF_DEVICE_CLASS],
                         orion_address=self._orion_address,
+                        dpls=self._dpls_identity,
+                        metadata=self._device_metadata,
                     )
                     if await self._async_validate_and_store_mapping(mapping):
                         return self._create_device_entry(
@@ -781,6 +859,20 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             )
         except ValueError:
             return False
+
+        identity = mapping.identity
+        if identity.dpls is not None:
+            for entry in self.hass.config_entries.async_entries(Config.DOMAIN):
+                config = entry.options or entry.data
+                existing_data = config.get(Config.CONF_GATEWAY_MAPPING)
+                if not existing_data:
+                    continue
+                try:
+                    existing = ResolvedDeviceMapping.from_dict(existing_data).identity
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if dpls_ranges_overlap(identity, existing):
+                    return False
 
         self._data[Config.CONF_GATEWAY_MAPPING] = mapping.to_dict()
         await self.async_set_unique_id(mapping.identity.stable_id)

@@ -57,6 +57,22 @@ def get_gateway_capabilities(
     return tuple(reader()) if callable(reader) else ()
 
 
+def get_gateway_device_metadata(module: str, cls_name: str) -> dict[str, Any]:
+    """Return declarative gateway-flow metadata owned by equipment."""
+    equipment_class = get_class(module, cls_name)
+    variant_reader = getattr(equipment_class, "get_variant_options", None)
+    return {
+        "uses_dpls_identity": bool(
+            getattr(equipment_class, "uses_dpls_identity", False)
+        ),
+        "dpls_address_count": getattr(equipment_class, "dpls_address_count", None),
+        "variants": dict(variant_reader()) if callable(variant_reader) else {},
+        "unsupported_variants": dict(
+            getattr(equipment_class, "unsupported_variants", {})
+        ),
+    }
+
+
 def validate_equipment_gateway_mapping(
     module: str,
     cls_name: str,

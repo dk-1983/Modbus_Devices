@@ -56,6 +56,7 @@ class GatewayCapabilitySpec:
     local_object_number: int
     requirement: CapabilityRequirement
     zone_type: int | None = None
+    local_object_offset: int | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.name:
@@ -66,6 +67,16 @@ class GatewayCapabilitySpec:
             raise ValueError("Zone capability must declare its S2000-PP zone type")
         if self.object_kind is not ObjectKind.ZONE and self.zone_type is not None:
             raise ValueError("Only zone capabilities may declare a zone type")
+        if self.local_object_offset is not None and self.local_object_offset < 0:
+            raise ValueError("Capability local object offset must not be negative")
+
+    def resolved_local_object_number(self, dpls_base_address: int | None) -> int:
+        """Resolve an exact local number, optionally relative to a DPLS base."""
+        if self.local_object_offset is None:
+            return self.local_object_number
+        if dpls_base_address is None:
+            raise ValueError("DPLS base address is required for this capability")
+        return dpls_base_address + self.local_object_offset
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,12 +125,52 @@ class GatewayContext:
 
 
 @dataclass(frozen=True, slots=True)
+class DPLSSubIdentity:
+    """Stable identity of an addressable device behind an Orion KDL."""
+
+    base_address: int
+    address_count: int
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.base_address <= 127:
+            raise ValueError("DPLS base address must be between 1 and 127")
+        if self.address_count < 1 or self.base_address + self.address_count - 1 > 127:
+            raise ValueError("DPLS address range must fit within 1..127")
+
+    def to_dict(self) -> dict[str, int]:
+        return {"base_address": self.base_address, "address_count": self.address_count}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DPLSSubIdentity:
+        return cls(
+            base_address=int(data["base_address"]),
+            address_count=int(data["address_count"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DownstreamDeviceMetadata:
+    """Typed configuration metadata that is not part of physical addressing."""
+
+    variant: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"variant": self.variant}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DownstreamDeviceMetadata:
+        return cls(variant=data.get("variant"))
+
+
+@dataclass(frozen=True, slots=True)
 class DownstreamDeviceIdentity:
     """Identity of a physical device behind a gateway."""
 
     gateway: GatewayContext
     model: str
     orion_address: int
+    dpls: DPLSSubIdentity | None = None
+    metadata: DownstreamDeviceMetadata = DownstreamDeviceMetadata()
 
     def __post_init__(self) -> None:
         if not self.model.strip():
@@ -130,7 +181,10 @@ class DownstreamDeviceIdentity:
     @property
     def stable_id(self) -> str:
         """Return the physical identity independent of mapping source."""
-        return f"{self.gateway.stable_id}:orion:{self.orion_address}"
+        stable_id = f"{self.gateway.stable_id}:orion:{self.orion_address}"
+        if self.dpls is not None:
+            stable_id += f":dpls:{self.dpls.base_address}"
+        return stable_id
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for Config Entry storage."""
@@ -138,16 +192,40 @@ class DownstreamDeviceIdentity:
             "gateway": self.gateway.to_dict(),
             "model": self.model,
             "orion_address": self.orion_address,
+            "dpls": None if self.dpls is None else self.dpls.to_dict(),
+            "metadata": self.metadata.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DownstreamDeviceIdentity:
         """Restore from Config Entry storage."""
+        dpls = data.get("dpls")
         return cls(
             gateway=GatewayContext.from_dict(data["gateway"]),
             model=str(data["model"]),
             orion_address=int(data["orion_address"]),
+            dpls=None if dpls is None else DPLSSubIdentity.from_dict(dpls),
+            metadata=DownstreamDeviceMetadata.from_dict(data.get("metadata", {})),
         )
+
+
+def dpls_ranges_overlap(
+    first: DownstreamDeviceIdentity,
+    second: DownstreamDeviceIdentity,
+) -> bool:
+    """Return whether two devices claim overlapping DPLS addresses on one KDL."""
+    if (
+        first.dpls is None
+        or second.dpls is None
+        or first.gateway.stable_id != second.gateway.stable_id
+        or first.orion_address != second.orion_address
+    ):
+        return False
+    first_end = first.dpls.base_address + first.dpls.address_count - 1
+    second_end = second.dpls.base_address + second.dpls.address_count - 1
+    return max(first.dpls.base_address, second.dpls.base_address) <= min(
+        first_end, second_end
+    )
 
 
 @dataclass(frozen=True, slots=True)

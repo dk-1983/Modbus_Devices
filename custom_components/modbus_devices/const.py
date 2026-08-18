@@ -41,6 +41,8 @@ class Config:
     CONF_PARTITION_NUMBER: str = "partition_number"
     CONF_PARTITION_ID: str = "partition_id"
     CONF_CAPABILITY_KEY: str = "capability_key"
+    CONF_DEVICE_VARIANT: str = "device_variant"
+    CONF_DPLS_BASE_ADDRESS: str = "dpls_base_address"
 
     CONF_MANUFACTURER: str = "manufacturer"
 

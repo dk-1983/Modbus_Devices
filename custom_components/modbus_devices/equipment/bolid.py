@@ -1,6 +1,8 @@
 """Классы описывают содержание каждого прибора."""
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from logging import getLogger
 from typing import Any
 
@@ -1016,9 +1018,103 @@ class C2000KPB:
 
 
 class C2000SP4:
-    """Bolid C2000-SP4/24(220)."""
+    """Bolid C2000-SP4 family equipment.
+
+    Supported variants: С2000-СП4/24, С2000-СП4/24 исп.01,
+    С2000-СП4/220 and С2000-СП4/220 исп.01.
+    С2000-СП4/220 исп.02 is explicitly not supported.
+    """
 
     required_gateway = GatewayType.S2000_PP
+    uses_dpls_identity = True
+    dpls_address_count = 5
+
+    class Variant(str, Enum):
+        SP4_24 = "sp4_24"
+        SP4_24_01 = "sp4_24_01"
+        SP4_220 = "sp4_220"
+        SP4_220_01 = "sp4_220_01"
+
+    @dataclass(frozen=True, slots=True)
+    class VariantMetadata:
+        display_name: str
+        nominal_power: str
+        maximum_output_current: str
+        integrated_dpls_isolator: bool
+        output_circuit_supervision: str
+
+    variants = {
+        Variant.SP4_24: VariantMetadata(
+            "С2000-СП4/24", "10.2–28.4 V DC / 12–24 V AC", "3 A", False,
+            "open circuit and short circuit",
+        ),
+        Variant.SP4_24_01: VariantMetadata(
+            "С2000-СП4/24 исп.01", "10.2–28.4 V DC / 12–24 V AC", "3 A", True,
+            "open circuit and short circuit",
+        ),
+        Variant.SP4_220: VariantMetadata(
+            "С2000-СП4/220", "230 V AC ±10%", "3 A", False,
+            "open circuit and short circuit",
+        ),
+        Variant.SP4_220_01: VariantMetadata(
+            "С2000-СП4/220 исп.01", "230 V AC ±10%", "3 A", True,
+            "open circuit and short circuit",
+        ),
+    }
+    unsupported_variants = {"sp4_220_02": "С2000-СП4/220 исп.02 (not supported)"}
+
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="actuator_control", name="Working position",
+            object_kind=ObjectKind.RELAY, local_object_number=0,
+            local_object_offset=0,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="actuator_state", name="Actuator state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=0, zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="working_output_circuit", name="Working output circuit",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=1, zone_type=2,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="initial_output_circuit", name="Initial output circuit",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=2, zone_type=2,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="working_limit_switch", name="Working-position limit switch",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=3, zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="initial_limit_switch", name="Initial-position limit switch",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=4, zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+    )
+
+    STATE_NAMES = {
+        **C2000KPB.STATE_NAMES,
+        153: "actuator_working_position",
+        154: "actuator_initial_position",
+        155: "actuator_failure",
+        156: "actuator_error",
+    }
+    ACTUATOR_STATE_NAMES = {
+        44: "actuator_error",
+        45: "actuator_failure",
+        53: "actuator_initial_position",
+        54: "actuator_working_position",
+    }
 
     def __init__(self, client, device_id) -> None:
         """Inicialization variables."""
@@ -1033,35 +1129,28 @@ class C2000SP4:
         ) = client
 
         self.attr_manufactures_name: str = "Bolid"
-        self.attr_model_name: str = "C2000-SP4"
+        self.attr_model_name: str = "С2000-СП4/24(220)"
         self.attr_device_type: int | None = None
         self.attr_serial_number: str | None = None
-        self.attr_hardware_version: float | None = None
-        self.attr_software_version: float | None = None
+        self.attr_hardware_version: str | None = None
+        self.attr_software_version: str | None = None
         self.attr_init_time: datetime | None = None
 
-        self.attr_output_amount: int | None = 6
-        self.attr_input_amount: int | None = None
-
-        self.attr_description: str = (
-            "Signal and starting block"
-        )
-
-        self.attr_secret: str | None = None
-
-        self.attr_platforms: list[Platform] = [
-            Platform.SWITCH,
-        ]
+        self.attr_output_amount = 1
+        self.attr_input_amount = 0
+        self.attr_description = "Addressable valve control unit"
+        self.attr_platforms: list[Platform] = []
         self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
-
-        # -------------------------------------------------
-        # OUTPUT
-        # -------------------------------------------------
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._relay_mapping: ResolvedObjectMapping | None = None
+        self._zone_mappings: dict[str, ResolvedObjectMapping] = {}
 
         self.attr_out1: dict[str, Any] = {
             "out_number": 1,
-            "out_number_view": 1,
-            "out_type": "relay",
+            "out_number_view": "Working position",
+            "out_type": "Actuator",
             "data_type": "coil_register",
             "address": None,
             "address_hex": None,
@@ -1072,45 +1161,142 @@ class C2000SP4:
             "icon_off": "mdi:toggle-switch-variant-off",
         }
 
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        return cls.capability_requirements
+
+    @classmethod
+    def get_variant_options(cls) -> dict[str, str]:
+        """Return supported variants plus an explicit rejected option for the UI."""
+        return {
+            **{variant.value: metadata.display_name for variant, metadata in cls.variants.items()},
+            **cls.unsupported_variants,
+        }
+
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
-        """Apply the resolved address supported by the current prototype."""
+        """Validate and apply the configured subset of the five DPLS addresses."""
         if mapping.identity.model != self.__class__.__name__:
             raise ValueError("Gateway mapping model does not match C2000-SP4")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match C2000-SP4")
 
+        identity = mapping.identity
+        if identity.dpls is None or identity.dpls.address_count != self.dpls_address_count:
+            raise ValueError("C2000-SP4 requires a five-address DPLS identity")
+        try:
+            variant = self.Variant(identity.metadata.variant)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Unsupported or missing C2000-SP4 variant") from exc
+        metadata = self.variants[variant]
+        specs = {
+            (spec.object_kind,
+             spec.resolved_local_object_number(identity.dpls.base_address),
+             spec.zone_type): spec
+            for spec in self.capability_requirements
+        }
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for item in mapping.objects:
+            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            spec = specs.get((item.object_kind, item.local_object_number, zone_type))
+            if spec is None:
+                raise ValueError("Mapping contains an unsupported C2000-SP4 object")
+            expected = ModbusDataArea.COIL if item.object_kind is ObjectKind.RELAY else ModbusDataArea.HOLDING_REGISTER
+            if item.data_area is not expected:
+                raise ValueError("C2000-SP4 mapping uses an invalid Modbus data area")
+            if spec.key in resolved:
+                raise ValueError("Duplicate C2000-SP4 capability mapping")
+            resolved[spec.key] = item
+        if not resolved:
+            raise ValueError("C2000-SP4 mapping must configure at least one capability")
+
         self.attr_gateway_mapping = mapping
-
-        relay_mappings = mapping.objects_for(
-            ObjectKind.RELAY,
-            ModbusDataArea.COIL,
-        )
-        by_number = {item.local_object_number: item for item in relay_mappings}
-
-        if set(by_number) != {1}:
-            raise ValueError("C2000-SP4 prototype requires a mapping for relay 1")
-
-        item = by_number[1]
-        self.attr_out1["address"] = item.modbus_address
-        self.attr_out1["address_hex"] = hex(item.modbus_address)
-
-    # -------------------------------------------------
-    # INIT
-    # -------------------------------------------------
+        self.attr_device_identifier = identity.stable_id
+        self.attr_unique_id_prefix = identity.stable_id
+        self.attr_model_name = metadata.display_name
+        self.attr_device_metadata = {
+            "variant": metadata.display_name,
+            "nominal_power": metadata.nominal_power,
+            "maximum_output_current": metadata.maximum_output_current,
+            "integrated_dpls_isolator": metadata.integrated_dpls_isolator,
+            "output_circuit_supervision": metadata.output_circuit_supervision,
+            "kdl_orion_address": identity.orion_address,
+            "dpls_base_address": identity.dpls.base_address,
+        }
+        self._relay_mapping = resolved.get("actuator_control")
+        self._zone_mappings = {
+            key: item for key, item in resolved.items() if item.object_kind is ObjectKind.ZONE
+        }
+        if self._relay_mapping is not None:
+            self.attr_out1["address"] = self._relay_mapping.modbus_address
+            self.attr_out1["address_hex"] = hex(self._relay_mapping.modbus_address)
+            self.attr_platforms.append(Platform.SWITCH)
+        if self._zone_mappings:
+            self.attr_platforms.append(Platform.SENSOR)
 
     async def data_init(self) -> bool:
         """Initialize device."""
         if self.attr_gateway_mapping is None:
             raise ValueError("C2000-SP4 requires a validated S2000-PP mapping")
-        await self.get_output(1)
-
+        await self.get_device_info()
+        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
 
         return True
 
-    # -------------------------------------------------
-    # OUTPUT
-    # -------------------------------------------------
+    async def get_device_info(self) -> dict[str, Any]:
+        """Return only service information available through this transport path."""
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_output_descriptions(self) -> list[dict[str, Any]]:
+        return [] if self._relay_mapping is None else [self.attr_out1]
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        specs = {spec.key: spec for spec in self.capability_requirements}
+        return [
+            {"sensor_id": key, "name": specs[key].name, "device_class": None,
+             "icon": "mdi:state-machine"}
+            for key in self._zone_mappings
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        reader = S2000PPRuntimeReader(self.attr_client, self.attr_device_id)
+        snapshot: dict[str, dict] = {}
+        if self._relay_mapping is not None:
+            states = await reader.async_read_coils((self._relay_mapping.modbus_address,))
+            output = dict(self.attr_out1)
+            output["state"] = states[self._relay_mapping.modbus_address]
+            self.attr_out1 = output
+            snapshot["outputs"] = {1: output}
+        if self._zone_mappings:
+            states = await reader.async_read_zone_states(self._zone_mappings.values())
+            snapshot["state_sensors"] = {
+                key: self._state_sensor_value(key, states[item.gateway_object_number])
+                for key, item in self._zone_mappings.items()
+            }
+        return snapshot
+
+    def _state_sensor_value(
+        self, key: str, state: S2000PPZoneState
+    ) -> dict[str, Any]:
+        active = tuple(code for code in state.expanded_states if code != 0)
+        names = (
+            {**self.STATE_NAMES, **self.ACTUATOR_STATE_NAMES}
+            if key == "actuator_state"
+            else self.STATE_NAMES
+        )
+        return {
+            "state": names.get(state.primary_state, f"unknown_{state.primary_state}"),
+            "primary_code": state.primary_state,
+            "expanded_codes": state.expanded_states,
+            "expanded_states": tuple(
+                names.get(code, f"unknown_{code}") for code in active
+            ),
+        }
 
     async def get_output(
         self,
@@ -1118,32 +1304,11 @@ class C2000SP4:
     ) -> dict[str, Any]:
         """Get output state."""
 
-        attr = getattr(
-            self,
-            f"attr_out{out}",
-        )
-
-        response = await self.attr_client.read_coils(
-            address=attr["address"],
-            count=1,
-            device_id=self.attr_device_id,
-        )
-        attr["state"] = validated_bits(
-            response,
-            1,
-            f"read C2000-SP4 output {out}",
-        )[0]
-
-        setattr(
-            self,
-            f"attr_out{out}",
-            attr,
-        )
-
-        return getattr(
-            self,
-            f"attr_out{out}",
-        )
+        if out != 1 or self._relay_mapping is None:
+            raise ValueError("C2000-SP4 actuator control is not configured")
+        states = await S2000PPRuntimeReader(self.attr_client, self.attr_device_id).async_read_coils((self._relay_mapping.modbus_address,))
+        self.attr_out1["state"] = states[self._relay_mapping.modbus_address]
+        return self.attr_out1
 
     async def get_outputs(
         self,
@@ -1151,45 +1316,10 @@ class C2000SP4:
     ) -> list[dict[str, Any]]:
         """Get outputs state."""
 
-        data: list[dict[str, Any]] = []
-
-        outputs = (
-            outputs,
-            [1],
-        )[outputs is None]
-
-        for output in outputs:
-
-            attr = getattr(
-                self,
-                f"attr_out{output}",
-            )
-
-            response = await self.attr_client.read_coils(
-                address=attr["address"],
-                count=1,
-                device_id=self.attr_device_id,
-            )
-            attr["state"] = validated_bits(
-                response,
-                1,
-                f"read C2000-SP4 output {output}",
-            )[0]
-
-            setattr(
-                self,
-                f"attr_out{output}",
-                attr,
-            )
-
-            data.append(
-                getattr(
-                    self,
-                    f"attr_out{output}",
-                )
-            )
-
-        return data
+        selected = outputs or ([1] if self._relay_mapping is not None else [])
+        if set(selected) - {1} or (selected and self._relay_mapping is None):
+            raise ValueError("C2000-SP4 actuator control is not configured")
+        return [await self.get_output(1)] if selected else []
 
     async def set_output(
         self,
@@ -1198,10 +1328,9 @@ class C2000SP4:
     ) -> dict[str, Any]:
         """Set output state."""
 
-        attr = getattr(
-            self,
-            f"attr_out{output}",
-        )
+        if output != 1 or self._relay_mapping is None:
+            raise ValueError("C2000-SP4 actuator control is not configured")
+        attr = self.attr_out1
 
         result = await self.attr_client.write_coil(
             address=attr["address"],
@@ -1212,16 +1341,8 @@ class C2000SP4:
 
         attr["state"] = bool(value)
 
-        setattr(
-            self,
-            f"attr_out{output}",
-            attr,
-        )
-
-        return getattr(
-            self,
-            f"attr_out{output}",
-        )
+        self.attr_out1 = attr
+        return attr
 
     async def set_outputs(
         self,
@@ -1231,64 +1352,9 @@ class C2000SP4:
         """Set outputs state."""
 
         if values is None:
-            return False
-
-        data: list[dict[str, Any]] = []
-
-        outputs = (
-            outputs,
-            [1],
-        )[outputs is None]
-
-        for output, index in zip(
-            outputs,
-            range(len(outputs)),
-        ):
-
-            try:
-
-                if not isinstance(
-                    values[index],
-                    (bool, int),
-                ):
-                    raise TypeError
-
-                attr = getattr(
-                    self,
-                    f"attr_out{output}",
-                )
-
-                result = (
-                    await self.attr_client.write_coil(
-                        address=attr["address"],
-                        value=values[index],
-                        device_id=self.attr_device_id,
-                    )
-                )
-
-                validate_write_response(
-                    result,
-                    f"set C2000-SP4 output {output}",
-                )
-                attr["state"] = bool(values[index])
-
-                setattr(
-                    self,
-                    f"attr_out{output}",
-                    attr,
-                )
-
-                data.append(
-                    getattr(
-                        self,
-                        f"attr_out{output}",
-                    )
-                )
-
-            except IndexError:
-                break
-
-        return data
+            return []
+        selected = outputs or [1]
+        return [await self.set_output(output, value) for output, value in zip(selected, values)]
 
     def __repr__(self) -> str:
         """Representation info of object."""
@@ -1308,7 +1374,6 @@ class C2000SP4:
             f"{self.attr_hardware_version}, "
             f"software_version: "
             f"{self.attr_software_version}, "
-            f"secret: {self.attr_secret}, "
             f"out1: {self.attr_out1['state']}, "
             f"description: {self.attr_description}"
         )

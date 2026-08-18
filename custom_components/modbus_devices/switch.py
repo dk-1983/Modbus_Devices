@@ -148,6 +148,11 @@ class ModBusSwitchEntity(
 
         return output["icon_off"]
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose static passport metadata without creating runtime entities."""
+        return dict(getattr(self._device, "attr_device_metadata", {}))
+
     async def async_turn_on(self, **kwargs) -> None:
         """Turn switch on."""
         await self._device.set_output(

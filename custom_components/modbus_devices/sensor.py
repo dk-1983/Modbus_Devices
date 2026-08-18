@@ -223,9 +223,11 @@ class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         current = self._current
+        metadata = dict(getattr(self.coordinator.device, "attr_device_metadata", {}))
         if current is None:
-            return {}
+            return metadata
         return {
+            **metadata,
             "primary_code": current["primary_code"],
             "expanded_codes": current["expanded_codes"],
             "expanded_states": current["expanded_states"],
