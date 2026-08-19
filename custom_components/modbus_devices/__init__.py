@@ -94,6 +94,20 @@ async def async_setup_entry(
             device_id,
         )
 
+        io_mapping = options.get(Config.CONF_IO_MAPPING)
+        if io_mapping is not None:
+            apply_io_mapping = getattr(device, "apply_io_mapping", None)
+            if not callable(apply_io_mapping):
+                raise ConfigEntryNotReady(
+                    f"{device_name} does not support direct I/O mappings"
+                )
+            apply_io_mapping(io_mapping)
+
+        if getattr(device, "uses_stable_entry_identity", False):
+            stable_identity = entry.unique_id or entry.entry_id
+            device.attr_unique_id_prefix = stable_identity
+            device.attr_device_identifier = stable_identity
+
         if gateway_mapping is not None:
             apply_mapping = getattr(device, "apply_gateway_mapping", None)
             if not callable(apply_mapping):

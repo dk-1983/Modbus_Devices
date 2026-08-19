@@ -43,6 +43,12 @@ class Config:
     CONF_CAPABILITY_KEY: str = "capability_key"
     CONF_DEVICE_VARIANT: str = "device_variant"
     CONF_DPLS_BASE_ADDRESS: str = "dpls_base_address"
+    CONF_IO_MAPPING: str = "io_mapping"
+    CONF_DI_DATA_AREA: str = "di_data_area"
+    CONF_DI_BASE_ADDRESS: str = "di_base_address"
+    CONF_DI_ADDRESS_STRIDE: str = "di_address_stride"
+    CONF_DO_BASE_ADDRESS: str = "do_base_address"
+    CONF_DO_ADDRESS_STRIDE: str = "do_address_stride"
 
     CONF_MANUFACTURER: str = "manufacturer"
 

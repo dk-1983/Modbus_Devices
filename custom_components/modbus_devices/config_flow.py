@@ -19,6 +19,7 @@ from .equipment.equipment import (
     get_gateway_capabilities,
     get_gateway_device_metadata,
     get_gateway_requirement,
+    get_manual_io_mapping_spec,
     get_serial_ports,
     validate_equipment_gateway_mapping,
 )
@@ -72,6 +73,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         self._dpls_identity: DPLSSubIdentity | None = None
         self._device_metadata = DownstreamDeviceMetadata()
         self._gateway_device_metadata: dict[str, Any] = {}
+        self._manual_io_mapping_spec: dict[str, Any] | None = None
 
     # ---------------------------------------------------------
     # STEP 1 - MODE
@@ -172,6 +174,15 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 device_name,
             )
 
+            self._manual_io_mapping_spec = await self.hass.async_add_executor_job(
+                get_manual_io_mapping_spec,
+                self._selected_manufacturer.lower(),
+                device_name,
+            )
+
+            if self._manual_io_mapping_spec is not None:
+                return await self.async_step_io_mapping()
+
             return await self._next_step()
 
         devices = list(self._manufacturer_devices)
@@ -204,6 +215,84 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             return await self.async_step_network()
 
         return await self.async_step_serial()
+
+    async def async_step_io_mapping(self, user_input=None):
+        """Collect the compact user-program-defined Modbus I/O layout."""
+        errors = {}
+        if user_input is not None:
+            try:
+                di_area = user_input[Config.CONF_DI_DATA_AREA]
+                if di_area not in self._manual_io_mapping_spec["di_data_areas"]:
+                    raise ValueError("Unsupported DI data area")
+                mapping = {
+                    Config.CONF_DI_DATA_AREA: di_area,
+                    Config.CONF_DI_BASE_ADDRESS: int(
+                        user_input[Config.CONF_DI_BASE_ADDRESS]
+                    ),
+                    Config.CONF_DI_ADDRESS_STRIDE: int(
+                        user_input[Config.CONF_DI_ADDRESS_STRIDE]
+                    ),
+                    Config.CONF_DO_BASE_ADDRESS: int(
+                        user_input[Config.CONF_DO_BASE_ADDRESS]
+                    ),
+                    Config.CONF_DO_ADDRESS_STRIDE: int(
+                        user_input[Config.CONF_DO_ADDRESS_STRIDE]
+                    ),
+                }
+                if (
+                    mapping[Config.CONF_DI_BASE_ADDRESS] < 0
+                    or mapping[Config.CONF_DO_BASE_ADDRESS] < 0
+                ):
+                    raise ValueError("Base addresses must not be negative")
+                if (
+                    mapping[Config.CONF_DI_ADDRESS_STRIDE] < 1
+                    or mapping[Config.CONF_DO_ADDRESS_STRIDE] < 1
+                ):
+                    raise ValueError("Address strides must be positive")
+                self._data[Config.CONF_IO_MAPPING] = mapping
+            except (KeyError, TypeError, ValueError):
+                errors["base"] = "invalid_io_mapping"
+            else:
+                return await self._next_step()
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    Config.CONF_DI_DATA_AREA,
+                    default="discrete_input",
+                ): selector(
+                    {
+                        "select": {
+                            "mode": "dropdown",
+                            "options": list(
+                                self._manual_io_mapping_spec["di_data_areas"]
+                            ),
+                        }
+                    }
+                ),
+                vol.Required(
+                    Config.CONF_DI_BASE_ADDRESS,
+                    default=0,
+                ): vol.All(int, vol.Range(min=0)),
+                vol.Required(
+                    Config.CONF_DI_ADDRESS_STRIDE,
+                    default=1,
+                ): vol.All(int, vol.Range(min=1)),
+                vol.Required(
+                    Config.CONF_DO_BASE_ADDRESS,
+                    default=0,
+                ): vol.All(int, vol.Range(min=0)),
+                vol.Required(
+                    Config.CONF_DO_ADDRESS_STRIDE,
+                    default=1,
+                ): vol.All(int, vol.Range(min=1)),
+            }
+        )
+        return self.async_show_form(
+            step_id="io_mapping",
+            data_schema=schema,
+            errors=errors,
+        )
 
     # ---------------------------------------------------------
     # STEP 4 - NETWORK (TCP/UDP)

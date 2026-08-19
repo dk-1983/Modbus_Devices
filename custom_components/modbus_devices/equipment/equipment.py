@@ -47,6 +47,14 @@ def get_gateway_requirement(module: str, cls_name: str):
     return getattr(get_class(module, cls_name), "required_gateway", None)
 
 
+def get_manual_io_mapping_spec(module: str, cls_name: str) -> dict[str, Any] | None:
+    """Return an equipment-owned direct Modbus I/O mapping specification."""
+    specification = getattr(
+        get_class(module, cls_name), "manual_io_mapping_spec", None
+    )
+    return None if specification is None else dict(specification)
+
+
 def get_gateway_capabilities(
     module: str,
     cls_name: str,

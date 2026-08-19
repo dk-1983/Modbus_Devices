@@ -91,7 +91,11 @@ class ModBusBinarySensorEntity(
             f"{input_data['input_number_view']}"
         )
 
-        identity = device.attr_serial_number or self._entry.entry_id
+        identity = (
+            getattr(device, "attr_unique_id_prefix", None)
+            or device.attr_serial_number
+            or self._entry.entry_id
+        )
         self._attr_unique_id = f"{identity}_input_{input_data['input_number']}"
 
         self._attr_device_class = input_data["device_class"]
@@ -100,7 +104,8 @@ class ModBusBinarySensorEntity(
             identifiers={
                 (
                     Config.DOMAIN,
-                    self._entry.entry_id,
+                    getattr(device, "attr_device_identifier", None)
+                    or self._entry.entry_id,
                 ),
             },
             manufacturer=device.attr_manufactures_name,
@@ -144,6 +149,16 @@ class ModBusBinarySensorEntity(
         """Return availability."""
 
         return self.coordinator.last_update_success
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose static channel and passport metadata."""
+        return {
+            **dict(getattr(self._device, "attr_device_metadata", {})),
+            "high_speed": bool(self._input.get("high_speed", False)),
+            "modbus_address": self._input.get("address"),
+            "modbus_data_area": self._input.get("data_type"),
+        }
 
     @property
     def icon(self) -> str | None:
