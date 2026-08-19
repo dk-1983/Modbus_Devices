@@ -36,6 +36,7 @@ from .gateway import (
     dpls_ranges_overlap,
 )
 from .mapping import (
+    AmbiguousDeviceMappingError,
     AutomaticDeviceMappingProvider,
     DeviceMappingNotFoundError,
     ManualDeviceMappingProvider,
@@ -627,27 +628,28 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 else:
                     return await self.async_step_mapping_source()
 
-        variant_key = (
-            vol.Optional(Config.CONF_DEVICE_VARIANT)
-            if self._gateway_device_metadata["variant_optional"]
-            else vol.Required(Config.CONF_DEVICE_VARIANT)
-        )
-        schema = vol.Schema(
-            {
-                variant_key: selector(
+        schema_fields = {}
+        if self._gateway_device_metadata["variants"]:
+            variant_key = (
+                vol.Optional(Config.CONF_DEVICE_VARIANT)
+                if self._gateway_device_metadata["variant_optional"]
+                else vol.Required(Config.CONF_DEVICE_VARIANT)
+            )
+            schema_fields[variant_key] = selector(
                     {"select": {"mode": "dropdown", "options": [
                         {"value": value, "label": label}
                         for value, label in self._gateway_device_metadata["variants"].items()
                     ]}}
-                ),
+                )
+        schema_fields.update({
                 vol.Required(Config.CONF_ORION_ADDRESS): vol.All(
                     int, vol.Range(min=1, max=127)
                 ),
                 vol.Required(Config.CONF_DPLS_BASE_ADDRESS): vol.All(
                     int, vol.Range(min=1, max=127)
                 ),
-            }
-        )
+            })
+        schema = vol.Schema(schema_fields)
         return self.async_show_form(
             step_id="gateway_device", data_schema=schema, errors=errors,
             description_placeholders={
@@ -812,10 +814,16 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         mapped_keys = {
             self._capability_key_for_mapping(item) for item in self._manual_objects
         }
+        mapped_groups = {
+            spec.alternative_group
+            for spec in self._gateway_capabilities
+            if spec.key in mapped_keys and spec.alternative_group is not None
+        }
         available = {
             spec.key: spec
             for spec in self._gateway_capabilities
             if spec.key not in mapped_keys
+            and spec.alternative_group not in mapped_groups
         }
         if user_input is not None:
             try:
@@ -951,6 +959,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                             suffix=f" Orion {mapping.identity.orion_address}"
                         )
                     errors["base"] = "invalid_equipment_mapping"
+            except AmbiguousDeviceMappingError:
+                errors["base"] = "ambiguous_device_mapping"
             except DeviceMappingNotFoundError:
                 errors["base"] = "downstream_device_not_found"
             except ModbusException:

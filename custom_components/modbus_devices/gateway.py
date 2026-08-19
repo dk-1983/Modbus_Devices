@@ -57,6 +57,7 @@ class GatewayCapabilitySpec:
     requirement: CapabilityRequirement
     zone_type: int | None = None
     local_object_offset: int | None = None
+    alternative_group: str | None = None
 
     def __post_init__(self) -> None:
         if not self.key or not self.name:
@@ -69,6 +70,8 @@ class GatewayCapabilitySpec:
             raise ValueError("Only zone capabilities may declare a zone type")
         if self.local_object_offset is not None and self.local_object_offset < 0:
             raise ValueError("Capability local object offset must not be negative")
+        if self.alternative_group is not None and not self.alternative_group.strip():
+            raise ValueError("Capability alternative group must not be empty")
 
     def resolved_local_object_number(self, dpls_base_address: int | None) -> int:
         """Resolve an exact local number, optionally relative to a DPLS base."""

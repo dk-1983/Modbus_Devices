@@ -656,9 +656,12 @@ class C2000KPB:
         24: "armed",
         35: "technological_input_restored",
         36: "technological_input_violated",
+        37: "fire",
         38: "technological_input_violated_2",
         39: "equipment_normal",
         41: "equipment_fault",
+        43: "warning",
+        44: "attention",
         45: "input_open_circuit",
         71: "level_low",
         72: "level_normal",
@@ -1376,6 +1379,278 @@ class C2000RARR125:
     @classmethod
     def _state_name(cls, code: int) -> str:
         return cls.STATE_NAMES.get(code, f"unknown_{code}")
+
+
+class BolidDPLSDetectorBase:
+    """Shared one-address state mechanics for distinct DPLS fire detectors."""
+
+    required_gateway = GatewayType.S2000_PP
+    uses_dpls_identity = True
+    dpls_address_count = 1
+    variant_optional = True
+    variants: dict = {}
+    capability_requirements: tuple[GatewayCapabilitySpec, ...] = ()
+    STATE_NAMES = C2000KPB.STATE_NAMES
+    detector_model = ""
+    detector_description = "Addressable fire detector"
+    supported_kdl_input_types: tuple[int, ...] = ()
+    documented_target_firmware: str | None = None
+    physical_capabilities: tuple[str, ...] = ()
+    gateway_transport_limitation = (
+        "S2000-PP does not expose the configured KDL input type, serial, actual "
+        "firmware, hardware revision, product cipher, DPLS protocol version, or "
+        "detector service/configuration values"
+    )
+
+    def __init__(self, client, device_id) -> None:
+        if self.__class__ is BolidDPLSDetectorBase:
+            raise TypeError("BolidDPLSDetectorBase is not equipment")
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = self.detector_model
+        self.attr_description = self.detector_description
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._state_mapping: ResolvedObjectMapping | None = None
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        return cls.capability_requirements
+
+    @classmethod
+    def get_variant_options(cls) -> dict[str, str]:
+        return {}
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        if mapping.identity.model != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match detector")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match detector")
+        dpls = mapping.identity.dpls
+        if dpls is None or dpls.address_count != 1:
+            raise ValueError("DPLS detector requires exactly one DPLS address")
+        if len(mapping.objects) != 1:
+            raise ValueError("DPLS detector requires exactly one own zone mapping")
+        state_mapping = mapping.objects[0]
+        accepted = {
+            (
+                spec.resolved_local_object_number(dpls.base_address),
+                spec.zone_type,
+            )
+            for spec in self.capability_requirements
+        }
+        if (
+            state_mapping.object_kind is not ObjectKind.ZONE
+            or state_mapping.zone_details is None
+            or (state_mapping.local_object_number, state_mapping.zone_details.zone_type)
+            not in accepted
+            or state_mapping.data_area is not ModbusDataArea.HOLDING_REGISTER
+        ):
+            raise ValueError(
+                "Detector mapping must be an accepted zone at its configured DPLS address"
+            )
+
+        identity = mapping.identity
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = identity.stable_id
+        self.attr_unique_id_prefix = identity.stable_id
+        self.attr_device_metadata = {
+            "kdl_orion_address": identity.orion_address,
+            "gateway_identity": identity.gateway.stable_id,
+            "dpls_address": dpls.base_address,
+            "dpls_address_count": 1,
+            "supported_kdl_input_types": self.supported_kdl_input_types,
+            "documented_target_firmware": self.documented_target_firmware,
+            "physical_capabilities": self.physical_capabilities,
+            "transport_limitation": self.gateway_transport_limitation,
+        }
+        self._state_mapping = state_mapping
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        if self._state_mapping is None:
+            raise ValueError("Detector zone mapping is not configured")
+        await self.async_get_snapshot()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        if self._state_mapping is None:
+            return []
+        return [{
+            "sensor_id": "detector_state",
+            "name": "Detector state",
+            "device_class": None,
+            "icon": "mdi:smoke-detector",
+        }]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        if self._state_mapping is None:
+            raise ValueError("Detector zone mapping is not configured")
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states((self._state_mapping,))
+        state = states[self._state_mapping.gateway_object_number]
+        active = tuple(code for code in state.expanded_states if code != 0)
+        return {"state_sensors": {"detector_state": {
+            "sensor_id": "detector_state",
+            "state": self._state_name(state.primary_state),
+            "primary_code": state.primary_state,
+            "expanded_codes": state.expanded_states,
+            "expanded_states": tuple(self._state_name(code) for code in active),
+        }}}
+
+    @classmethod
+    def _state_name(cls, code: int) -> str:
+        return cls.STATE_NAMES.get(code, f"unknown_{code}")
+
+
+class C2000DIP(BolidDPLSDetectorBase):
+    """Current wired optical smoke detector ДИП-34А-05."""
+
+    detector_model = "ДИП-34А-05"
+    documented_variant = "dip_34a_05"
+    documented_target_firmware = "1.22"
+    supported_kdl_input_types = (6, 21)
+    physical_capabilities = ("smoke_detection", "dust_compensation", "test")
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="detector_state", name="Detector state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=0, zone_type=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+
+
+class C2000RDIP(BolidDPLSDetectorBase):
+    """Radio optical smoke detector represented as its own DPLS object."""
+
+    detector_model = "С2000Р-ДИП"
+    documented_target_firmware = "1.29"
+    supported_kdl_input_types = (1, 6, 8, 21)
+    physical_capabilities = (
+        "smoke_detection", "dust_compensation", "radio_supervision",
+        "main_and_reserve_battery", "tamper", "test",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; RSSI, channel, repeater route, radio identifier, and battery voltage "
+        "are not exposed"
+    )
+    capability_requirements = C2000DIP.capability_requirements
+
+
+class C2000IP(BolidDPLSDetectorBase):
+    """Wired temperature detector С2000-ИП-03 with two PP mapping modes."""
+
+    detector_model = "С2000-ИП-03"
+    documented_variant = "s2000_ip_03"
+    documented_target_firmware = "1.15"
+    supported_kdl_input_types = (6, 21)
+    physical_capabilities = ("temperature_measurement", "fire_detection", "test")
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="state_only", name="Detector state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=0, zone_type=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+            alternative_group="detector_mapping",
+        ),
+        GatewayCapabilitySpec(
+            key="state_and_temperature", name="Detector state + temperature",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=0, zone_type=6,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+            alternative_group="detector_mapping",
+        ),
+    )
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self._temperature_enabled = False
+        self._temperature_value: dict[str, Any] | None = None
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        super().apply_gateway_mapping(mapping)
+        self._temperature_enabled = self._state_mapping.zone_details.zone_type == 6
+        self.attr_device_metadata["mapping_mode"] = (
+            "state_and_temperature" if self._temperature_enabled else "state_only"
+        )
+
+    def get_numeric_sensor_descriptions(self) -> list[dict[str, Any]]:
+        if not self._temperature_enabled:
+            return []
+        return [{
+            "sensor_id": "temperature",
+            "name": "Temperature",
+            "device_class": SensorDeviceClass.TEMPERATURE,
+            "state_class": SensorStateClass.MEASUREMENT,
+            "unit": UnitOfTemperature.CELSIUS,
+            "precision": 2,
+        }]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        snapshot = await super().async_get_snapshot()
+        if not self._temperature_enabled:
+            return snapshot
+        mapping = self.attr_gateway_mapping
+        result = await S2000PPNumericValueReader(
+            self.attr_client,
+            self.attr_device_id,
+            mapping.identity.gateway.stable_id,
+        ).async_read(
+            self._state_mapping.gateway_object_number,
+            NumericParameterKind.TEMPERATURE,
+        )
+        if result.status is NumericResultStatus.READY:
+            self._temperature_value = {
+                "value": result.value,
+                "raw_register": result.raw_register,
+                "parameter_kind": result.parameter_kind.value,
+            }
+        elif result.status is NumericResultStatus.PROTOCOL_ERROR:
+            raise ModbusException(result.message or "numeric protocol error")
+        snapshot["numeric_sensors"] = (
+            {} if self._temperature_value is None
+            else {"temperature": dict(self._temperature_value)}
+        )
+        return snapshot
+
+
+class C2000RIP(BolidDPLSDetectorBase):
+    """Radio temperature detector; PP numeric transport is not confirmed."""
+
+    detector_model = "С2000Р-ИП"
+    documented_target_firmware = "1.29"
+    supported_kdl_input_types = (3, 6, 9, 10, 21)
+    physical_capabilities = (
+        "temperature_measurement", "fire_detection", "radio_supervision",
+        "main_and_reserve_battery", "tamper", "test",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; numeric temperature through S2000-PP is not confirmed; RSSI, channel, "
+        "repeater route, radio identifier, and battery voltage are not exposed"
+    )
+    capability_requirements = C2000DIP.capability_requirements
 
 
 class BolidDPLSNumericDeviceBase:

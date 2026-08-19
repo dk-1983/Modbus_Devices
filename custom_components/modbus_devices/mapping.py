@@ -26,6 +26,10 @@ class DeviceMappingNotFoundError(ValueError):
     """Raised when no configuration rows belong to the requested device."""
 
 
+class AmbiguousDeviceMappingError(ValueError):
+    """Raised when multiple mutually exclusive capability rows match."""
+
+
 class DeviceMappingProvider(Protocol):
     """Resolve one downstream device into the common mapping model."""
 
@@ -145,6 +149,31 @@ class AutomaticDeviceMappingProvider:
                 )
                 in capability_keys
             )
+        matched_keys = {
+            (item.object_kind, item.local_object_number,
+             None if item.zone_details is None else item.zone_details.zone_type)
+            for item in relay_objects + zone_objects
+        }
+        for group in {
+            spec.alternative_group
+            for spec in capabilities
+            if spec.alternative_group is not None
+        }:
+            matches = [
+                spec for spec in capabilities
+                if spec.alternative_group == group
+                and (
+                    spec.object_kind,
+                    spec.resolved_local_object_number(
+                        None if dpls is None else dpls.base_address
+                    ),
+                    spec.zone_type,
+                ) in matched_keys
+            ]
+            if len(matches) > 1:
+                raise AmbiguousDeviceMappingError(
+                    f"Multiple S2000-PP rows match alternative capability group {group}"
+                )
         if not relay_objects and not zone_objects:
             raise DeviceMappingNotFoundError(
                 f"No S2000-PP rows found for Orion address {orion_address}"
