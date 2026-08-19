@@ -1179,6 +1179,205 @@ class C2000KDL:
         return cls.STATE_NAMES.get(code, f"unknown_{code}")
 
 
+class C2000RARR125:
+    """Bolid C2000R-ARR125 radio expander behind a C2000-KDL.
+
+    The expander owns exactly one DPLS input object. Radio devices enrolled in
+    it have independent DPLS identities and are deliberately outside this
+    model. KDL input types 5 and 6 are model metadata: the documented
+    S2000-PP configuration table does not expose that KDL setting.
+    """
+
+    required_gateway = GatewayType.S2000_PP
+    uses_dpls_identity = True
+    dpls_address_count = 1
+    variant_optional = True
+    documented_target_firmware = "1.31"
+    supported_kdl_input_types = (5, 6)
+    gateway_transport_limitation = (
+        "S2000-PP does not expose the configured KDL input type, serial, "
+        "actual firmware, hardware revision, product cipher, radio identifier, "
+        "protocol version, enrolled-device catalog, RSSI, radio route, channel, "
+        "or ARR125 electrical measurements"
+    )
+
+    class Variant(str, Enum):
+        HARDWARE_1_0 = "hardware_1_0"
+        HARDWARE_14_0 = "hardware_14_0"
+
+    @dataclass(frozen=True, slots=True)
+    class VariantMetadata:
+        display_name: str
+        dpls_current: str
+        external_power_current: str
+        power_behavior: str
+
+        @property
+        def device_metadata(self) -> dict[str, Any]:
+            return {
+                "hardware_variant": self.display_name,
+                "dpls_current": self.dpls_current,
+                "external_power_current": self.external_power_current,
+                "power_behavior": self.power_behavior,
+            }
+
+    variants = {
+        Variant.HARDWARE_1_0: VariantMetadata(
+            "1.0",
+            "up to 21 mA; emergency mode up to 5.7 mA",
+            "15 mA nominal at 12 V",
+            "configurable DPLS/external supply; emergency DPLS operation with radio off",
+        ),
+        Variant.HARDWARE_14_0: VariantMetadata(
+            "14.0",
+            "up to 27 mA",
+            "27 mA at 12 V; 15 mA at 24 V",
+            "hardware-selected DPLS supply; stops if all permitted sources fail",
+        ),
+    }
+    variant_dpls_address_counts = {
+        Variant.HARDWARE_1_0.value: 1,
+        Variant.HARDWARE_14_0.value: 1,
+    }
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="device_state",
+            name="ARR125 state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    STATE_NAMES = C2000KPB.STATE_NAMES
+
+    def __init__(self, client, device_id) -> None:
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = "С2000Р-АРР125"
+        self.attr_description = "Addressable radio expander"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._device_state_mapping: ResolvedObjectMapping | None = None
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        return cls.capability_requirements
+
+    @classmethod
+    def get_variant_options(cls) -> dict[str, str]:
+        return {
+            variant.value: metadata.display_name
+            for variant, metadata in cls.variants.items()
+        }
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        if mapping.identity.model != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match C2000RARR125")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match C2000RARR125")
+        dpls = mapping.identity.dpls
+        if dpls is None or dpls.address_count != 1:
+            raise ValueError("C2000RARR125 requires one DPLS address")
+        if len(mapping.objects) != 1:
+            raise ValueError("C2000RARR125 requires exactly one own zone mapping")
+
+        device_state = mapping.objects[0]
+        if (
+            device_state.object_kind is not ObjectKind.ZONE
+            or device_state.local_object_number != dpls.base_address
+            or device_state.zone_details is None
+            or device_state.zone_details.zone_type != 1
+            or device_state.data_area is not ModbusDataArea.HOLDING_REGISTER
+        ):
+            raise ValueError(
+                "C2000RARR125 requires its own type-1 zone at the configured DPLS address"
+            )
+
+        variant = mapping.identity.metadata.variant
+        if variant is not None and variant not in self.get_variant_options():
+            raise ValueError("C2000RARR125 requires hardware variant 1.0 or 14.0")
+        variant_metadata = (
+            None if variant is None else self.variants[self.Variant(variant)]
+        )
+        identity = mapping.identity
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = identity.stable_id
+        self.attr_unique_id_prefix = identity.stable_id
+        self.attr_device_metadata = {
+            **({} if variant_metadata is None else variant_metadata.device_metadata),
+            "orion_address": identity.orion_address,
+            "gateway_identity": identity.gateway.stable_id,
+            "dpls_address": dpls.base_address,
+            "dpls_address_count": 1,
+            "supported_kdl_input_types": self.supported_kdl_input_types,
+            "maximum_radio_devices": 125,
+            "maximum_repeaters": 32,
+            "maximum_repeater_depth": 8,
+            "radio_channels": 10,
+            "radio_bands_mhz": "866.0–868.0, 868.0–868.2, 868.7–869.2",
+            "transport_limitation": self.gateway_transport_limitation,
+        }
+        self._device_state_mapping = device_state
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        if self._device_state_mapping is None:
+            raise ValueError("C2000RARR125 own zone mapping is not configured")
+        await self.async_get_snapshot()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        if self._device_state_mapping is None:
+            return []
+        return [{
+            "sensor_id": "device_state",
+            "name": "ARR125 state",
+            "device_class": None,
+            "entity_category": EntityCategory.DIAGNOSTIC,
+            "icon": "mdi:radio-tower",
+        }]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        if self._device_state_mapping is None:
+            raise ValueError("C2000RARR125 own zone mapping is not configured")
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states((self._device_state_mapping,))
+        state = states[self._device_state_mapping.gateway_object_number]
+        active_codes = tuple(code for code in state.expanded_states if code != 0)
+        return {"state_sensors": {"device_state": {
+            "sensor_id": "device_state",
+            "state": self._state_name(state.primary_state),
+            "primary_code": state.primary_state,
+            "expanded_codes": state.expanded_states,
+            "expanded_states": tuple(self._state_name(code) for code in active_codes),
+        }}}
+
+    @classmethod
+    def _state_name(cls, code: int) -> str:
+        return cls.STATE_NAMES.get(code, f"unknown_{code}")
+
+
 class BolidDPLSNumericDeviceBase:
     """Shared mechanics for distinct DPLS devices exposing numeric zones."""
 

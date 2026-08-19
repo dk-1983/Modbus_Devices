@@ -77,6 +77,9 @@ def get_gateway_device_metadata(module: str, cls_name: str) -> dict[str, Any]:
         ),
         "dpls_address_count": getattr(equipment_class, "dpls_address_count", None),
         "variants": dict(variant_reader()) if callable(variant_reader) else {},
+        "variant_optional": bool(
+            getattr(equipment_class, "variant_optional", False)
+        ),
         "unsupported_variants": dict(
             getattr(equipment_class, "unsupported_variants", {})
         ),

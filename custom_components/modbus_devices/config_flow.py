@@ -605,7 +605,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         errors = {}
         if user_input is not None:
-            variant = user_input[Config.CONF_DEVICE_VARIANT]
+            variant = user_input.get(Config.CONF_DEVICE_VARIANT)
             if variant in self._gateway_device_metadata["unsupported_variants"]:
                 errors[Config.CONF_DEVICE_VARIANT] = "unsupported_variant"
             else:
@@ -627,9 +627,14 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 else:
                     return await self.async_step_mapping_source()
 
+        variant_key = (
+            vol.Optional(Config.CONF_DEVICE_VARIANT)
+            if self._gateway_device_metadata["variant_optional"]
+            else vol.Required(Config.CONF_DEVICE_VARIANT)
+        )
         schema = vol.Schema(
             {
-                vol.Required(Config.CONF_DEVICE_VARIANT): selector(
+                variant_key: selector(
                     {"select": {"mode": "dropdown", "options": [
                         {"value": value, "label": label}
                         for value, label in self._gateway_device_metadata["variants"].items()
