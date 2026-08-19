@@ -16,6 +16,7 @@ from homeassistant.helpers.selector import selector
 from .const import Config
 from .equipment.equipment import (
     get_classes_from_files,
+    get_equipment_display_name,
     get_gateway_capabilities,
     get_gateway_device_metadata,
     get_gateway_requirement,
@@ -203,7 +204,14 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                     {
                         "select": {
                             "mode": "dropdown",
-                            "options": sorted(devices),
+                            "options": [
+                                {"value": name, "label": await self.hass.async_add_executor_job(
+                                    get_equipment_display_name,
+                                    self._selected_manufacturer,
+                                    name,
+                                )}
+                                for name in sorted(devices)
+                            ],
                         }
                     }
                 )
@@ -588,6 +596,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 get_gateway_device_metadata,
                 self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
+                self._device_metadata,
             )
         if not self._gateway_device_metadata["gateway_transport_supported"]:
             return self.async_show_form(
@@ -607,22 +616,26 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         errors = {}
         if user_input is not None:
             variant = user_input.get(Config.CONF_DEVICE_VARIANT)
+            topology = user_input.get(Config.CONF_DEVICE_TOPOLOGY)
             if variant in self._gateway_device_metadata["unsupported_variants"]:
                 errors[Config.CONF_DEVICE_VARIANT] = "unsupported_variant"
             else:
                 try:
                     self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
                     address_count = self._gateway_device_metadata[
-                        "variant_dpls_address_counts"
-                    ].get(
-                        variant,
-                        self._gateway_device_metadata["dpls_address_count"],
-                    )
+                        "topology_dpls_address_counts"
+                    ].get(topology)
+                    if address_count is None:
+                        address_count = self._gateway_device_metadata[
+                            "variant_dpls_address_counts"
+                        ].get(variant, self._gateway_device_metadata["dpls_address_count"])
                     self._dpls_identity = DPLSSubIdentity(
                         base_address=user_input[Config.CONF_DPLS_BASE_ADDRESS],
                         address_count=address_count,
                     )
-                    self._device_metadata = DownstreamDeviceMetadata(variant=variant)
+                    self._device_metadata = DownstreamDeviceMetadata(
+                        variant=variant, topology=topology
+                    )
                 except (KeyError, TypeError, ValueError):
                     errors["base"] = "invalid_mapping"
                 else:
@@ -641,6 +654,13 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         for value, label in self._gateway_device_metadata["variants"].items()
                     ]}}
                 )
+        if self._gateway_device_metadata["topologies"]:
+            schema_fields[vol.Required(Config.CONF_DEVICE_TOPOLOGY)] = selector(
+                {"select": {"mode": "dropdown", "options": [
+                    {"value": value, "label": label}
+                    for value, label in self._gateway_device_metadata["topologies"].items()
+                ]}}
+            )
         schema_fields.update({
                 vol.Required(Config.CONF_ORION_ADDRESS): vol.All(
                     int, vol.Range(min=1, max=127)
@@ -664,6 +684,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 get_gateway_capabilities,
                 self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
+                self._device_metadata,
             )
         if user_input is not None:
             source = MappingSource(user_input[Config.CONF_MAPPING_SOURCE])
@@ -695,6 +716,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 get_gateway_capabilities,
                 self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
+                self._device_metadata,
             )
             return await self.async_step_manual_object()
         if user_input is not None:
@@ -703,6 +725,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 get_gateway_capabilities,
                 self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
+                self._device_metadata,
             )
             return await self.async_step_manual_object()
 

@@ -156,13 +156,17 @@ class DownstreamDeviceMetadata:
     """Typed configuration metadata that is not part of physical addressing."""
 
     variant: str | None = None
+    topology: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"variant": self.variant}
+        data = {"variant": self.variant}
+        if self.topology is not None:
+            data["topology"] = self.topology
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DownstreamDeviceMetadata:
-        return cls(variant=data.get("variant"))
+        return cls(variant=data.get("variant"), topology=data.get("topology"))
 
 
 @dataclass(frozen=True, slots=True)

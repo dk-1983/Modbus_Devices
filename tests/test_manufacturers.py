@@ -2,10 +2,18 @@
 
 import pytest
 
-from custom_components.modbus_devices.equipment.bolid import C2000KPB
+from custom_components.modbus_devices.equipment.bolid import (
+    C2000IP03,
+    C2000KPB,
+    C2000RDIP,
+    C2000RIP,
+    DIP34A05,
+)
 from custom_components.modbus_devices.equipment.equipment import (
+    canonical_equipment_class_name,
     get_class,
     get_classes_from_files,
+    get_equipment_display_name,
 )
 from custom_components.modbus_devices.equipment.owen import (
     PLC110_24_60_K_M,
@@ -74,3 +82,44 @@ def test_legacy_unique_ids_compare_as_existing_owen_identity(legacy_name):
     canonical_unique_id = "192.0.2.1_502_1_Owen_TRM138"
 
     assert canonicalize_manufacturer_unique_id(legacy_unique_id) == canonical_unique_id
+
+
+@pytest.mark.parametrize(
+    ("legacy", "canonical", "equipment_class"),
+    [
+        ("C2000DIP", "DIP34A05", DIP34A05),
+        ("C2000IP", "C2000IP03", C2000IP03),
+    ],
+)
+def test_legacy_detector_class_names_resolve_at_central_boundary(
+    legacy, canonical, equipment_class
+):
+    assert canonical_equipment_class_name(legacy) == canonical
+    assert get_class("Bolid", legacy) is equipment_class
+    assert get_class("Bolid", canonical) is equipment_class
+
+
+def test_only_canonical_wired_detector_class_names_are_discovered():
+    devices = get_classes_from_files()["Bolid"]
+    assert "DIP34A05" in devices
+    assert "C2000IP03" in devices
+    assert "C2000DIP" not in devices
+    assert "C2000IP" not in devices
+
+
+@pytest.mark.parametrize(
+    ("class_name", "label"),
+    [
+        ("DIP34A05", "ДИП-34А-05"),
+        ("C2000IP03", "С2000-ИП-03"),
+        ("C2000RDIP", "С2000Р-ДИП"),
+        ("C2000RIP", "С2000Р-ИП"),
+    ],
+)
+def test_equipment_selector_uses_real_model_labels(class_name, label):
+    assert get_equipment_display_name("Bolid", class_name) == label
+
+
+def test_radio_detector_names_remain_canonical():
+    assert get_class("Bolid", "C2000RDIP") is C2000RDIP
+    assert get_class("Bolid", "C2000RIP") is C2000RIP

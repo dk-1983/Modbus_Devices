@@ -38,7 +38,7 @@ from ..s2000_pp import (
     validated_bits,
     validated_registers,
 )
-from .equipment import validate_write_response
+from .equipment import canonical_equipment_class_name, validate_write_response
 
 _LOGGER = getLogger(__name__)
 
@@ -1431,7 +1431,7 @@ class BolidDPLSDetectorBase:
         return {}
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
-        if mapping.identity.model != self.__class__.__name__:
+        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
             raise ValueError("Gateway mapping model does not match detector")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match detector")
@@ -1522,7 +1522,7 @@ class BolidDPLSDetectorBase:
         return cls.STATE_NAMES.get(code, f"unknown_{code}")
 
 
-class C2000DIP(BolidDPLSDetectorBase):
+class DIP34A05(BolidDPLSDetectorBase):
     """Current wired optical smoke detector ДИП-34А-05."""
 
     detector_model = "ДИП-34А-05"
@@ -1555,10 +1555,10 @@ class C2000RDIP(BolidDPLSDetectorBase):
         + "; RSSI, channel, repeater route, radio identifier, and battery voltage "
         "are not exposed"
     )
-    capability_requirements = C2000DIP.capability_requirements
+    capability_requirements = DIP34A05.capability_requirements
 
 
-class C2000IP(BolidDPLSDetectorBase):
+class C2000IP03(BolidDPLSDetectorBase):
     """Wired temperature detector С2000-ИП-03 with two PP mapping modes."""
 
     detector_model = "С2000-ИП-03"
@@ -1650,7 +1650,505 @@ class C2000RIP(BolidDPLSDetectorBase):
         + "; numeric temperature through S2000-PP is not confirmed; RSSI, channel, "
         "repeater route, radio identifier, and battery voltage are not exposed"
     )
-    capability_requirements = C2000DIP.capability_requirements
+    capability_requirements = DIP34A05.capability_requirements
+
+
+class BolidDPLSOutputBase:
+    """Shared exact-mapping and output lifecycle for DPLS radio outputs."""
+
+    required_gateway = GatewayType.S2000_PP
+    uses_dpls_identity = True
+    variant_optional = True
+    variants: dict = {}
+    topologies: dict[str, str] = {}
+    topology_dpls_address_counts: dict[str, int] = {}
+    capability_requirements: tuple[GatewayCapabilitySpec, ...] = ()
+    output_specs: dict[str, tuple[int, str, str]] = {}
+    STATE_NAMES = C2000KPB.STATE_NAMES
+    gateway_transport_limitation = (
+        "S2000-PP exposes configured relay/zone rows but not radio identifier, "
+        "RSSI, channel, route, actual firmware, hardware revision, battery "
+        "voltage, enrollment, test, or output program configuration"
+    )
+
+    def __init__(self, client, device_id) -> None:
+        if self.__class__ is BolidDPLSOutputBase:
+            raise TypeError("BolidDPLSOutputBase is not equipment")
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = self.model_name
+        self.attr_description = self.description
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._relay_mappings: dict[int, ResolvedObjectMapping] = {}
+        self._zone_mappings: dict[str, ResolvedObjectMapping] = {}
+        self._outputs: dict[int, dict[str, Any]] = {}
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        return cls.capability_requirements
+
+    @classmethod
+    def get_variant_options(cls) -> dict[str, str]:
+        return dict(cls.variants)
+
+    def _validate_identity(self, mapping: ResolvedDeviceMapping) -> None:
+        if mapping.identity.model != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match output device")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match output device")
+
+    def _validate_configuration(self, mapping: ResolvedDeviceMapping) -> None:
+        """Validate model-specific variant and topology metadata."""
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        self._validate_identity(mapping)
+        identity = mapping.identity
+        dpls = identity.dpls
+        if dpls is None:
+            raise ValueError("DPLS output device requires a DPLS identity")
+        self._validate_configuration(mapping)
+        specs = {
+            (
+                spec.object_kind,
+                spec.resolved_local_object_number(dpls.base_address),
+                spec.zone_type,
+            ): spec
+            for spec in self.capability_requirements
+        }
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for item in mapping.objects:
+            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            spec = specs.get((item.object_kind, item.local_object_number, zone_type))
+            if spec is None:
+                raise ValueError("Mapping contains an unsupported output-device object")
+            expected = (
+                ModbusDataArea.COIL
+                if item.object_kind is ObjectKind.RELAY
+                else ModbusDataArea.HOLDING_REGISTER
+            )
+            if item.data_area is not expected:
+                raise ValueError("Output-device mapping uses an invalid data area")
+            if spec.key in resolved:
+                raise ValueError("Duplicate output-device capability mapping")
+            resolved[spec.key] = item
+        required = {
+            spec.key for spec in self.capability_requirements
+            if spec.requirement is CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION
+        }
+        if not required <= resolved.keys():
+            raise ValueError("Output-device mapping is missing a required object")
+        self._validate_resolved_capabilities(mapping, resolved)
+
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = identity.stable_id
+        self.attr_unique_id_prefix = identity.stable_id
+        self.attr_device_metadata = self._device_metadata(mapping)
+        self._relay_mappings = {}
+        self._zone_mappings = {}
+        self._outputs = {}
+        for key, item in resolved.items():
+            if item.object_kind is ObjectKind.RELAY:
+                number, label, output_type = self.output_specs[key]
+                self._relay_mappings[number] = item
+                self._outputs[number] = {
+                    "out_number": number,
+                    "out_number_view": label,
+                    "out_type": output_type,
+                    "data_type": "coil_register",
+                    "address": item.modbus_address,
+                    "address_hex": hex(item.modbus_address),
+                    "state": None,
+                    "func_mode": [1, 5, 15],
+                    "device_class": SwitchDeviceClass.SWITCH,
+                    "icon_on": "mdi:toggle-switch-variant",
+                    "icon_off": "mdi:toggle-switch-variant-off",
+                }
+            else:
+                self._zone_mappings[key] = item
+        self.attr_platforms = [Platform.SWITCH]
+        if self._zone_mappings:
+            self.attr_platforms.append(Platform.SENSOR)
+
+    def _validate_resolved_capabilities(
+        self,
+        mapping: ResolvedDeviceMapping,
+        resolved: dict[str, ResolvedObjectMapping],
+    ) -> None:
+        """Validate model-specific capability combinations."""
+
+    def _device_metadata(self, mapping: ResolvedDeviceMapping) -> dict[str, Any]:
+        identity = mapping.identity
+        return {
+            "kdl_orion_address": identity.orion_address,
+            "gateway_identity": identity.gateway.stable_id,
+            "dpls_base_address": identity.dpls.base_address,
+            "dpls_address_count": identity.dpls.address_count,
+            "transport_limitation": self.gateway_transport_limitation,
+        }
+
+    async def data_init(self) -> bool:
+        await self.async_get_snapshot()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_output_descriptions(self) -> list[dict[str, Any]]:
+        return [self._outputs[number] for number in sorted(self._outputs)]
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        names = {spec.key: spec.name for spec in self.capability_requirements}
+        return [
+            {"sensor_id": key, "name": names[key], "device_class": None,
+             "icon": "mdi:state-machine"}
+            for key in self._zone_mappings
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        if not self._relay_mappings:
+            raise ValueError("Output mappings are not configured")
+        reader = S2000PPRuntimeReader(self.attr_client, self.attr_device_id)
+        states = await reader.async_read_coils(
+            tuple(item.modbus_address for item in self._relay_mappings.values())
+        )
+        outputs = {}
+        for number, item in self._relay_mappings.items():
+            output = dict(self._outputs[number])
+            output["state"] = states[item.modbus_address]
+            self._outputs[number] = output
+            outputs[number] = output
+        snapshot: dict[str, dict] = {"outputs": outputs}
+        if self._zone_mappings:
+            zone_states = await reader.async_read_zone_states(
+                self._zone_mappings.values()
+            )
+            snapshot["state_sensors"] = {
+                key: self._state_value(zone_states[item.gateway_object_number])
+                for key, item in self._zone_mappings.items()
+            }
+        return snapshot
+
+    @classmethod
+    def _state_value(cls, state: S2000PPZoneState) -> dict[str, Any]:
+        active = tuple(code for code in state.expanded_states if code != 0)
+        return {
+            "state": cls.STATE_NAMES.get(
+                state.primary_state, f"unknown_{state.primary_state}"
+            ),
+            "primary_code": state.primary_state,
+            "expanded_codes": state.expanded_states,
+            "expanded_states": tuple(
+                cls.STATE_NAMES.get(code, f"unknown_{code}") for code in active
+            ),
+        }
+
+    async def get_output(self, out: int = 1) -> dict[str, Any]:
+        if out not in self._relay_mappings:
+            raise ValueError("Output is not configured")
+        item = self._relay_mappings[out]
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_coils((item.modbus_address,))
+        output = dict(self._outputs[out])
+        output["state"] = states[item.modbus_address]
+        self._outputs[out] = output
+        return output
+
+    async def get_outputs(self, outputs: list[int] | None = None) -> list[dict[str, Any]]:
+        selected = outputs or sorted(self._relay_mappings)
+        if set(selected) - self._relay_mappings.keys():
+            raise ValueError("Output is not configured")
+        return [await self.get_output(number) for number in selected]
+
+    async def set_output(self, output: int = 1, value: bool = False) -> dict[str, Any]:
+        if output not in self._relay_mappings:
+            raise ValueError("Output is not configured")
+        address = self._relay_mappings[output].modbus_address
+        response = await self.attr_client.write_coil(
+            address=address, value=value, device_id=self.attr_device_id
+        )
+        validate_write_response(response, f"set {self.__class__.__name__} output {output}")
+        if getattr(response, "address", None) != address:
+            raise ModbusException("FC05 response does not echo the requested address")
+        echoed = getattr(response, "value", None)
+        accepted_values = ({True, 0xFF00} if value else {False, 0x0000})
+        if echoed not in accepted_values:
+            raise ModbusException("FC05 response does not echo the requested value")
+        updated = dict(self._outputs[output])
+        updated["state"] = bool(value)
+        self._outputs[output] = updated
+        return updated
+
+    async def set_outputs(
+        self,
+        outputs: list[int] | None = None,
+        values: list[bool] | None = None,
+    ) -> list[dict[str, Any]]:
+        if values is None:
+            return []
+        selected = outputs or sorted(self._relay_mappings)
+        return [
+            await self.set_output(number, value)
+            for number, value in zip(selected, values)
+        ]
+
+
+class C2000RRM(BolidDPLSOutputBase):
+    """Two-output radio relay module С2000Р-РМ and исп.01."""
+
+    model_name = "С2000Р-РМ"
+    description = "Radio relay module"
+    dpls_address_count = 2
+    variant_optional = False
+    variants = {"standard": "С2000Р-РМ", "isp_01": "С2000Р-РМ исп.01"}
+    topologies = {
+        "outputs_only": "Two relay outputs",
+        "outputs_and_input": "Two relay outputs + controlled circuit",
+    }
+    topology_dpls_address_counts = {"outputs_only": 2, "outputs_and_input": 3}
+    supported_controlled_circuit_kdl_input_types = (
+        1, 2, 3, 4, 5, 6, 7, 11, 16, 17, 18, 21, 22
+    )
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="relay_1", name="Relay 1", object_kind=ObjectKind.RELAY,
+            local_object_number=0, local_object_offset=0,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+        GatewayCapabilitySpec(
+            key="relay_2", name="Relay 2", object_kind=ObjectKind.RELAY,
+            local_object_number=0, local_object_offset=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+        GatewayCapabilitySpec(
+            key="controlled_circuit", name="Controlled circuit state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=2, zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+    )
+    output_specs = {
+        "relay_1": (1, "Relay 1", "Relay"),
+        "relay_2": (2, "Relay 2", "Relay"),
+    }
+
+    @classmethod
+    def get_gateway_capabilities_for_metadata(
+        cls, metadata: Any
+    ) -> tuple[GatewayCapabilitySpec, ...]:
+        """Expose only the objects owned by the selected topology."""
+        if metadata.topology == "outputs_and_input":
+            return cls.capability_requirements
+        return cls.capability_requirements[:2]
+
+    def _validate_configuration(self, mapping: ResolvedDeviceMapping) -> None:
+        variant = mapping.identity.metadata.variant
+        topology = mapping.identity.metadata.topology
+        if variant not in self.variants or topology not in self.topologies:
+            raise ValueError("C2000RRM requires a supported variant and topology")
+        if variant == "isp_01" and topology != "outputs_only":
+            raise ValueError("С2000Р-РМ исп.01 does not support a controlled circuit")
+        expected = self.topology_dpls_address_counts[topology]
+        if mapping.identity.dpls.address_count != expected:
+            raise ValueError("C2000RRM DPLS range does not match its topology")
+
+    def _validate_resolved_capabilities(
+        self, mapping: ResolvedDeviceMapping, resolved: dict[str, ResolvedObjectMapping]
+    ) -> None:
+        wants_input = mapping.identity.metadata.topology == "outputs_and_input"
+        if ("controlled_circuit" in resolved) != wants_input:
+            raise ValueError("C2000RRM controlled-circuit mapping does not match topology")
+
+    def _device_metadata(self, mapping: ResolvedDeviceMapping) -> dict[str, Any]:
+        return {
+            **super()._device_metadata(mapping),
+            "variant": self.variants[mapping.identity.metadata.variant],
+            "topology": mapping.identity.metadata.topology,
+            "supported_controlled_circuit_kdl_input_types": (
+                self.supported_controlled_circuit_kdl_input_types
+            ),
+        }
+
+
+class C2000RSirena(BolidDPLSOutputBase):
+    """Independent light and sound outputs of С2000Р-Сирена."""
+
+    model_name = "С2000Р-Сирена"
+    description = "Radio light and sound annunciator"
+    dpls_address_count = 2
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="light", name="Light", object_kind=ObjectKind.RELAY,
+            local_object_number=0, local_object_offset=0,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+        GatewayCapabilitySpec(
+            key="sound", name="Sound", object_kind=ObjectKind.RELAY,
+            local_object_number=0, local_object_offset=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    output_specs = {
+        "light": (1, "Light", "Output"),
+        "sound": (2, "Sound", "Output"),
+    }
+
+    def _validate_configuration(self, mapping: ResolvedDeviceMapping) -> None:
+        if mapping.identity.dpls.address_count != 2:
+            raise ValueError("C2000RSirena requires two DPLS addresses")
+
+
+class C2000DZ:
+    """One-address wired water-leak detector С2000-ДЗ."""
+
+    required_gateway = GatewayType.S2000_PP
+    uses_dpls_identity = True
+    dpls_address_count = 1
+    variant_optional = True
+    variants = {
+        "v1_06": "С2000-ДЗ 1.06",
+        "v1_10": "С2000-ДЗ 1.10",
+        "v1_13": "С2000-ДЗ 1.13",
+    }
+    variant_metadata = {
+        "v1_06": {"dpls_current": "≤0.5 mA", "galvanic_isolation": False},
+        "v1_10": {"dpls_current": "≤1 mA", "galvanic_isolation": True},
+        "v1_13": {"dpls_current": "≤0.5 mA", "galvanic_isolation": True},
+    }
+    supported_kdl_input_types = (6, 17)
+    documented_classic_kdl_minimum = "2.10"
+    STATE_NAMES = {**C2000KPB.STATE_NAMES, 79: "water_alarm", 80: "water_alarm_restored"}
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="water_leak_state", name="Water leak state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=0, zone_type=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    gateway_transport_limitation = (
+        "S2000-PP does not expose configured KDL input type, DPLS voltage, ADC, "
+        "serial, actual firmware, hardware revision, or address programming"
+    )
+
+    def __init__(self, client, device_id) -> None:
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = "С2000-ДЗ"
+        self.attr_description = "Addressable water leak detector"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._state_mapping: ResolvedObjectMapping | None = None
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        return cls.capability_requirements
+
+    @classmethod
+    def get_variant_options(cls) -> dict[str, str]:
+        return dict(cls.variants)
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        identity = mapping.identity
+        if identity.model != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match C2000DZ")
+        if identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match C2000DZ")
+        dpls = identity.dpls
+        if dpls is None or dpls.address_count != 1:
+            raise ValueError("C2000DZ requires exactly one DPLS address")
+        if identity.metadata.variant not in {None, *self.variants}:
+            raise ValueError("Unsupported C2000DZ variant")
+        if len(mapping.objects) != 1:
+            raise ValueError("C2000DZ requires exactly one own zone mapping")
+        item = mapping.objects[0]
+        if (
+            item.object_kind is not ObjectKind.ZONE
+            or item.local_object_number != dpls.base_address
+            or item.zone_details is None
+            or item.zone_details.zone_type != 1
+            or item.data_area is not ModbusDataArea.HOLDING_REGISTER
+        ):
+            raise ValueError("C2000DZ mapping must be zone type 1 at its DPLS address")
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = identity.stable_id
+        self.attr_unique_id_prefix = identity.stable_id
+        metadata = self.variant_metadata.get(identity.metadata.variant, {})
+        self.attr_device_metadata = {
+            "variant": identity.metadata.variant,
+            **metadata,
+            "kdl_orion_address": identity.orion_address,
+            "gateway_identity": identity.gateway.stable_id,
+            "dpls_address": dpls.base_address,
+            "supported_kdl_input_types": self.supported_kdl_input_types,
+            "documented_classic_kdl_minimum": self.documented_classic_kdl_minimum,
+            "transport_limitation": self.gateway_transport_limitation,
+        }
+        self._state_mapping = item
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        await self.async_get_snapshot()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        return [] if self._state_mapping is None else [{
+            "sensor_id": "water_leak_state", "name": "Water leak state",
+            "device_class": None, "icon": "mdi:water-alert",
+        }]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        if self._state_mapping is None:
+            raise ValueError("C2000DZ zone mapping is not configured")
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states((self._state_mapping,))
+        state = states[self._state_mapping.gateway_object_number]
+        active = tuple(code for code in state.expanded_states if code != 0)
+        return {"state_sensors": {"water_leak_state": {
+            "state": self.STATE_NAMES.get(
+                state.primary_state, f"unknown_{state.primary_state}"
+            ),
+            "primary_code": state.primary_state,
+            "expanded_codes": state.expanded_states,
+            "expanded_states": tuple(
+                self.STATE_NAMES.get(code, f"unknown_{code}") for code in active
+            ),
+        }}}
 
 
 class BolidDPLSNumericDeviceBase:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from custom_components.modbus_devices.equipment.bolid import C2000DIP
+from custom_components.modbus_devices.equipment.bolid import DIP34A05
 from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
@@ -11,19 +11,19 @@ from custom_components.modbus_devices.gateway import (
 from custom_components.modbus_devices.s2000_pp import manual_relay_mapping, manual_zone_mapping
 
 
-def mapping(*objects, base=20, kdl=10, connection="tcp:pp-a"):
+def mapping(*objects, base=20, kdl=10, connection="tcp:pp-a", model="DIP34A05"):
     return ResolvedDeviceMapping(
         DownstreamDeviceIdentity(
             GatewayContext(GatewayType.S2000_PP, "pp", connection, 1),
-            "C2000DIP", kdl, DPLSSubIdentity(base, 1), DownstreamDeviceMetadata(),
+            model, kdl, DPLSSubIdentity(base, 1), DownstreamDeviceMetadata(),
         ), MappingSource.MANUAL, objects,
     )
 
 
 def test_registration_model_identity_and_metadata():
-    device = C2000DIP(None, 1)
+    device = DIP34A05(None, 1)
     device.apply_gateway_mapping(mapping(manual_zone_mapping(20, 1, 1, 0, None)))
-    assert "C2000DIP" in get_classes_from_files()["Bolid"]
+    assert "DIP34A05" in get_classes_from_files()["Bolid"]
     assert device.attr_model_name == "ДИП-34А-05"
     assert device.attr_gateway_mapping.identity.dpls == DPLSSubIdentity(20, 1)
     assert device.attr_serial_number is None
@@ -39,7 +39,7 @@ def test_registration_model_identity_and_metadata():
 ])
 def test_exact_own_zone_only(wrong):
     with pytest.raises(ValueError):
-        C2000DIP(None, 1).apply_gateway_mapping(mapping(wrong))
+        DIP34A05(None, 1).apply_gateway_mapping(mapping(wrong))
 
 
 def test_identity_distinguishes_kdl_and_gateway():
@@ -48,3 +48,12 @@ def test_identity_distinguishes_kdl_and_gateway():
         for kdl, connection in ((10, "tcp:a"), (11, "tcp:a"), (10, "tcp:b"))
     }
     assert len(identities) == 3
+
+
+def test_legacy_model_mapping_loads_without_identity_rewrite():
+    legacy = mapping(manual_zone_mapping(20, 1, 1, 0, None), model="C2000DIP")
+    canonical = mapping(manual_zone_mapping(20, 1, 1, 0, None))
+    device = DIP34A05(None, 1)
+    device.apply_gateway_mapping(legacy)
+    assert device.attr_gateway_mapping.identity.model == "C2000DIP"
+    assert legacy.identity.stable_id == canonical.identity.stable_id

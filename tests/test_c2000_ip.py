@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import custom_components.modbus_devices.equipment.bolid as bolid
-from custom_components.modbus_devices.equipment.bolid import C2000IP
+from custom_components.modbus_devices.equipment.bolid import C2000IP03
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
     GatewayContext, GatewayType, MappingSource, ResolvedDeviceMapping,
@@ -20,19 +20,19 @@ from custom_components.modbus_devices.s2000_pp import (
 )
 
 
-def mapping(zone_type, *, table=7):
+def mapping(zone_type, *, table=7, model="C2000IP03"):
     return ResolvedDeviceMapping(
         DownstreamDeviceIdentity(
             GatewayContext(GatewayType.S2000_PP, "pp", "tcp:pp", 1),
-            "C2000IP", 10, DPLSSubIdentity(20, 1), DownstreamDeviceMetadata(),
+            model, 10, DPLSSubIdentity(20, 1), DownstreamDeviceMetadata(),
         ), MappingSource.MANUAL, (manual_zone_mapping(20, table, zone_type, 0, None),),
     )
 
 
 def test_two_exact_alternative_mapping_modes():
-    state = C2000IP(None, 1)
+    state = C2000IP03(None, 1)
     state.apply_gateway_mapping(mapping(1))
-    numeric = C2000IP(None, 1)
+    numeric = C2000IP03(None, 1)
     numeric.apply_gateway_mapping(mapping(6))
     assert state.attr_model_name == "С2000-ИП-03"
     assert state.attr_device_metadata["mapping_mode"] == "state_only"
@@ -48,13 +48,13 @@ def test_both_alternatives_and_neighbor_are_rejected_by_equipment():
         (manual_zone_mapping(20, 1, 1, 0, None), manual_zone_mapping(20, 2, 6, 0, None)),
     )
     with pytest.raises(ValueError):
-        C2000IP(None, 1).apply_gateway_mapping(both)
+        C2000IP03(None, 1).apply_gateway_mapping(both)
     wrong = ResolvedDeviceMapping(
         mapping(1).identity, MappingSource.MANUAL,
         (manual_zone_mapping(21, 1, 1, 0, None),),
     )
     with pytest.raises(ValueError):
-        C2000IP(None, 1).apply_gateway_mapping(wrong)
+        C2000IP03(None, 1).apply_gateway_mapping(wrong)
 
 
 def test_configuration_assisted_mapping_reports_ambiguous_alternatives():
@@ -69,9 +69,9 @@ def test_configuration_assisted_mapping_reports_ambiguous_alternatives():
         asyncio.run(AutomaticDeviceMappingProvider(
             Reader(), S2000PPConfigurationCache()
         ).async_resolve(
-            mapping(1).identity.gateway, "C2000IP", 10,
+            mapping(1).identity.gateway, "C2000IP03", 10,
             dpls=DPLSSubIdentity(20, 1),
-            capabilities=C2000IP.get_gateway_capabilities(),
+            capabilities=C2000IP03.get_gateway_capabilities(),
         ))
 
 
@@ -86,9 +86,9 @@ def test_manual_and_configuration_assisted_modes_are_equivalent(zone_type):
     automatic = asyncio.run(AutomaticDeviceMappingProvider(
         Reader(), S2000PPConfigurationCache()
     ).async_resolve(
-        mapping(zone_type).identity.gateway, "C2000IP", 10,
+        mapping(zone_type).identity.gateway, "C2000IP03", 10,
         dpls=DPLSSubIdentity(20, 1),
-        capabilities=C2000IP.get_gateway_capabilities(),
+        capabilities=C2000IP03.get_gateway_capabilities(),
     ))
     assert automatic.objects == mapping(zone_type).objects
 
@@ -108,7 +108,7 @@ async def test_numeric_temperature_reuses_reader(monkeypatch, value, raw):
             return {7: SimpleNamespace(primary_state=39, expanded_states=(39, 0))}
     monkeypatch.setattr(bolid, "S2000PPNumericValueReader", NumericReader)
     monkeypatch.setattr(bolid, "S2000PPRuntimeReader", RuntimeReader)
-    device = C2000IP(None, 1)
+    device = C2000IP03(None, 1)
     device.apply_gateway_mapping(mapping(6))
     snapshot = await device.async_get_snapshot()
     assert snapshot["numeric_sensors"]["temperature"]["value"] == value
@@ -128,7 +128,7 @@ async def test_pending_preserves_last_confirmed_temperature(monkeypatch):
             return {7: SimpleNamespace(primary_state=41, expanded_states=(41, 0))}
     monkeypatch.setattr(bolid, "S2000PPNumericValueReader", NumericReader)
     monkeypatch.setattr(bolid, "S2000PPRuntimeReader", RuntimeReader)
-    device = C2000IP(None, 1)
+    device = C2000IP03(None, 1)
     device.apply_gateway_mapping(mapping(6))
     device._temperature_value = {"value": 21.25, "raw_register": 5440,
                                  "parameter_kind": "temperature"}

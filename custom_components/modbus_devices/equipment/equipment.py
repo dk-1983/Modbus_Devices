@@ -18,6 +18,16 @@ from ..manufacturer import canonical_manufacturer_name, manufacturer_module_name
 
 _LOGGER = logging.getLogger(__name__)
 
+LEGACY_EQUIPMENT_CLASS_ALIASES: dict[str, str] = {
+    "C2000DIP": "DIP34A05",
+    "C2000IP": "C2000IP03",
+}
+
+
+def canonical_equipment_class_name(cls_name: str) -> str:
+    """Normalize persisted legacy equipment class names at one boundary."""
+    return LEGACY_EQUIPMENT_CLASS_ALIASES.get(cls_name, cls_name)
+
 
 def validate_write_response(response: Any, operation: str) -> None:
     """Validate that a Modbus write request was accepted."""
@@ -41,7 +51,14 @@ def get_class(module: str, cls_name: str) -> type[Any]:
         locals=locals(),
         level=1,
     )
-    return getattr(imported_module, cls_name)
+    return getattr(imported_module, canonical_equipment_class_name(cls_name))
+
+
+def get_equipment_display_name(module: str, cls_name: str) -> str:
+    """Return the physical model label for a canonical selector value."""
+    equipment_class = get_class(module, cls_name)
+    instance = equipment_class(None, 1)
+    return str(instance.attr_model_name)
 
 
 def get_gateway_requirement(module: str, cls_name: str):
@@ -60,9 +77,15 @@ def get_manual_io_mapping_spec(module: str, cls_name: str) -> dict[str, Any] | N
 def get_gateway_capabilities(
     module: str,
     cls_name: str,
+    metadata: Any = None,
 ) -> tuple[GatewayCapabilitySpec, ...]:
     """Return equipment-owned gateway capability definitions."""
     equipment_class = get_class(module, cls_name)
+    configured_reader = getattr(
+        equipment_class, "get_gateway_capabilities_for_metadata", None
+    )
+    if metadata is not None and callable(configured_reader):
+        return tuple(configured_reader(metadata))
     reader = getattr(equipment_class, "get_gateway_capabilities", None)
     return tuple(reader()) if callable(reader) else ()
 
@@ -85,6 +108,10 @@ def get_gateway_device_metadata(module: str, cls_name: str) -> dict[str, Any]:
         ),
         "variant_dpls_address_counts": dict(
             getattr(equipment_class, "variant_dpls_address_counts", {})
+        ),
+        "topologies": dict(getattr(equipment_class, "topologies", {})),
+        "topology_dpls_address_counts": dict(
+            getattr(equipment_class, "topology_dpls_address_counts", {})
         ),
         "gateway_transport_supported": bool(
             getattr(equipment_class, "gateway_transport_supported", True)
