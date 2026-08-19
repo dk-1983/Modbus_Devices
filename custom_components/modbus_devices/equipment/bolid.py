@@ -651,7 +651,13 @@ class C2000KPB:
     STATE_NAMES = {
         1: "mains_restored",
         2: "mains_fault",
+        3: "intrusion_alarm",
+        4: "interference",
+        6: "interference_restored",
         17: "arming_failed",
+        19: "test",
+        20: "test_mode_started",
+        21: "test_mode_finished",
         22: "control_restored",
         24: "armed",
         35: "technological_input_restored",
@@ -663,6 +669,9 @@ class C2000KPB:
         43: "warning",
         44: "attention",
         45: "input_open_circuit",
+        46: "dpls_open_circuit",
+        47: "dpls_restored",
+        58: "silent_alarm",
         71: "level_low",
         72: "level_normal",
         74: "level_high",
@@ -673,6 +682,7 @@ class C2000KPB:
         82: "temperature_sensor_fault",
         83: "temperature_sensor_restored",
         109: "disarmed",
+        110: "alarm_reset",
         111: "input_control_enabled",
         112: "input_control_disabled",
         113: "output_control_enabled",
@@ -693,7 +703,9 @@ class C2000KPB:
         140: "internal_test_started",
         149: "enclosure_tamper",
         152: "enclosure_tamper_restored",
+        164: "sabotage",
         165: "input_parameter_error",
+        186: "battery_replacement_required",
         187: "input_communication_lost",
         188: "input_communication_restored",
         194: "power_overload",
@@ -709,6 +721,8 @@ class C2000KPB:
         212: "reserve_battery_low",
         213: "reserve_battery_restored",
         214: "input_short_circuit",
+        224: "invalid_dpls_response",
+        225: "unstable_dpls_response",
         250: "device_communication_lost",
         251: "device_communication_restored",
     }
@@ -1382,14 +1396,17 @@ class C2000RARR125:
 
 
 class BolidDPLSDetectorBase:
-    """Shared one-address state mechanics for distinct DPLS fire detectors."""
+    """Shared exact-zone state mechanics for distinct DPLS detectors."""
 
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 1
     variant_optional = True
     variants: dict = {}
+    topologies: dict[str, str] = {}
+    topology_dpls_address_counts: dict[str, int] = {}
     capability_requirements: tuple[GatewayCapabilitySpec, ...] = ()
+    state_sensor_definitions: dict[str, tuple[str, str, str]] = {}
     STATE_NAMES = C2000KPB.STATE_NAMES
     detector_model = ""
     detector_description = "Addressable fire detector"
@@ -1421,6 +1438,7 @@ class BolidDPLSDetectorBase:
         self.attr_unique_id_prefix: str | None = None
         self.attr_device_metadata: dict[str, Any] = {}
         self._state_mapping: ResolvedObjectMapping | None = None
+        self._state_mappings: dict[str, ResolvedObjectMapping] = {}
 
     @classmethod
     def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
@@ -1428,7 +1446,14 @@ class BolidDPLSDetectorBase:
 
     @classmethod
     def get_variant_options(cls) -> dict[str, str]:
-        return {}
+        return dict(cls.variants)
+
+    @classmethod
+    def get_gateway_capabilities_for_metadata(
+        cls, metadata
+    ) -> tuple[GatewayCapabilitySpec, ...]:
+        """Return the exact capability set selected by typed topology metadata."""
+        return cls.capability_requirements
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
@@ -1436,28 +1461,57 @@ class BolidDPLSDetectorBase:
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match detector")
         dpls = mapping.identity.dpls
-        if dpls is None or dpls.address_count != 1:
-            raise ValueError("DPLS detector requires exactly one DPLS address")
-        if len(mapping.objects) != 1:
-            raise ValueError("DPLS detector requires exactly one own zone mapping")
-        state_mapping = mapping.objects[0]
+        if dpls is None:
+            raise ValueError("DPLS detector requires a DPLS identity")
+        metadata = mapping.identity.metadata
+        expected_count = self.topology_dpls_address_counts.get(
+            metadata.topology, self.dpls_address_count
+        )
+        if dpls.address_count != expected_count:
+            raise ValueError("DPLS detector address count does not match its topology")
+        capabilities = self.get_gateway_capabilities_for_metadata(metadata)
         accepted = {
             (
                 spec.resolved_local_object_number(dpls.base_address),
                 spec.zone_type,
-            )
-            for spec in self.capability_requirements
+            ): spec
+            for spec in capabilities
         }
-        if (
-            state_mapping.object_kind is not ObjectKind.ZONE
-            or state_mapping.zone_details is None
-            or (state_mapping.local_object_number, state_mapping.zone_details.zone_type)
-            not in accepted
-            or state_mapping.data_area is not ModbusDataArea.HOLDING_REGISTER
-        ):
-            raise ValueError(
-                "Detector mapping must be an accepted zone at its configured DPLS address"
-            )
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for state_mapping in mapping.objects:
+            spec = None
+            if state_mapping.zone_details is not None:
+                spec = accepted.get(
+                    (state_mapping.local_object_number, state_mapping.zone_details.zone_type)
+                )
+            if (
+                state_mapping.object_kind is not ObjectKind.ZONE
+                or spec is None
+                or state_mapping.data_area is not ModbusDataArea.HOLDING_REGISTER
+                or spec.key in resolved
+            ):
+                raise ValueError(
+                    "Detector mapping must contain only exact configured DPLS zones"
+                )
+            resolved[spec.key] = state_mapping
+
+        required = {
+            spec.key for spec in capabilities
+            if spec.requirement is CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION
+            and spec.alternative_group is None
+        }
+        if not required.issubset(resolved):
+            raise ValueError("Detector mapping is missing a required own zone")
+        for group in {
+            spec.alternative_group for spec in capabilities
+            if spec.alternative_group is not None
+        }:
+            matches = [
+                spec.key for spec in capabilities
+                if spec.alternative_group == group and spec.key in resolved
+            ]
+            if len(matches) != 1:
+                raise ValueError("Detector mapping must select exactly one alternative")
 
         identity = mapping.identity
         self.attr_gateway_mapping = mapping
@@ -1467,13 +1521,18 @@ class BolidDPLSDetectorBase:
             "kdl_orion_address": identity.orion_address,
             "gateway_identity": identity.gateway.stable_id,
             "dpls_address": dpls.base_address,
-            "dpls_address_count": 1,
+            "dpls_address_count": dpls.address_count,
             "supported_kdl_input_types": self.supported_kdl_input_types,
             "documented_target_firmware": self.documented_target_firmware,
             "physical_capabilities": self.physical_capabilities,
             "transport_limitation": self.gateway_transport_limitation,
         }
-        self._state_mapping = state_mapping
+        if metadata.variant is not None:
+            self.attr_device_metadata["hardware_variant"] = metadata.variant
+        if metadata.topology is not None:
+            self.attr_device_metadata["topology"] = metadata.topology
+        self._state_mappings = resolved
+        self._state_mapping = next(iter(resolved.values()), None)
         self.attr_platforms = [Platform.SENSOR]
 
     async def data_init(self) -> bool:
@@ -1492,30 +1551,45 @@ class BolidDPLSDetectorBase:
         }
 
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
-        if self._state_mapping is None:
+        if not self._state_mappings:
             return []
-        return [{
-            "sensor_id": "detector_state",
-            "name": "Detector state",
-            "device_class": None,
-            "icon": "mdi:smoke-detector",
-        }]
+        descriptions = []
+        for capability_key in self._state_mappings:
+            sensor_id, name, icon = self.state_sensor_definitions.get(
+                capability_key,
+                ("detector_state", "Detector state", "mdi:smoke-detector"),
+            )
+            descriptions.append({
+                "sensor_id": sensor_id,
+                "name": name,
+                "device_class": None,
+                "icon": icon,
+            })
+        return descriptions
 
     async def async_get_snapshot(self) -> dict[str, dict]:
         if self._state_mapping is None:
             raise ValueError("Detector zone mapping is not configured")
+        mappings = tuple(self._state_mappings.values())
         states = await S2000PPRuntimeReader(
             self.attr_client, self.attr_device_id
-        ).async_read_zone_states((self._state_mapping,))
-        state = states[self._state_mapping.gateway_object_number]
-        active = tuple(code for code in state.expanded_states if code != 0)
-        return {"state_sensors": {"detector_state": {
-            "sensor_id": "detector_state",
-            "state": self._state_name(state.primary_state),
-            "primary_code": state.primary_state,
-            "expanded_codes": state.expanded_states,
-            "expanded_states": tuple(self._state_name(code) for code in active),
-        }}}
+        ).async_read_zone_states(mappings)
+        snapshot = {}
+        for capability_key, state_mapping in self._state_mappings.items():
+            sensor_id, _, _ = self.state_sensor_definitions.get(
+                capability_key,
+                ("detector_state", "Detector state", "mdi:smoke-detector"),
+            )
+            state = states[state_mapping.gateway_object_number]
+            active = tuple(code for code in state.expanded_states if code != 0)
+            snapshot[sensor_id] = {
+                "sensor_id": sensor_id,
+                "state": self._state_name(state.primary_state),
+                "primary_code": state.primary_state,
+                "expanded_codes": state.expanded_states,
+                "expanded_states": tuple(self._state_name(code) for code in active),
+            }
+        return {"state_sensors": snapshot}
 
     @classmethod
     def _state_name(cls, code: int) -> str:
@@ -1527,7 +1601,7 @@ class DIP34A05(BolidDPLSDetectorBase):
 
     detector_model = "ДИП-34А-05"
     documented_variant = "dip_34a_05"
-    documented_target_firmware = "1.22"
+    documented_target_firmware = "1.24"
     supported_kdl_input_types = (6, 21)
     physical_capabilities = ("smoke_detection", "dust_compensation", "test")
     capability_requirements = (
@@ -1651,6 +1725,148 @@ class C2000RIP(BolidDPLSDetectorBase):
         "repeater route, radio identifier, and battery voltage are not exposed"
     )
     capability_requirements = DIP34A05.capability_requirements
+
+
+class C2000RST01(BolidDPLSDetectorBase):
+    """Radio glass-break detector С2000Р-СТ исп.01."""
+
+    detector_model = "С2000Р-СТ исп.01"
+    detector_description = "Radio glass-break detector"
+    documented_target_firmware = "1.03"
+    supported_kdl_input_types = (5,)
+    physical_capabilities = (
+        "glass_break_detection", "tamper", "radio_supervision", "battery", "test",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; RSSI, channel, repeater route, radio identifier, battery voltage, "
+        "sensitivity, acoustic level, and detector-local commands are not exposed"
+    )
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="glass_break_state", name="Glass break detector state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=0, zone_type=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    state_sensor_definitions = {
+        "glass_break_state": (
+            "glass_break_state", "Glass break detector state", "mdi:glass-fragile"
+        ),
+    }
+
+
+class C2000ST04(BolidDPLSDetectorBase):
+    """Wired DPLS glass-break detector С2000-СТ исп.04."""
+
+    detector_model = "С2000-СТ исп.04"
+    detector_description = "DPLS glass-break detector"
+    documented_target_firmware = "1.22"
+    supported_kdl_input_types = (5,)
+    physical_capabilities = (
+        "glass_break_detection", "tamper", "anti_masking", "test",
+        "dpls_service_voltage",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; DPLS service voltage, sensitivity, acoustic level, and detector-local "
+        "commands are not exposed through S2000-PP"
+    )
+    capability_requirements = C2000RST01.capability_requirements
+    state_sensor_definitions = C2000RST01.state_sensor_definitions
+
+
+class C2000RSMK(BolidDPLSDetectorBase):
+    """Radio magnetic-contact detector with an optional external circuit."""
+
+    detector_model = "С2000Р-СМК"
+    detector_description = "Radio magnetic-contact detector"
+    dpls_address_count = 1
+    variants = {
+        "hardware_1_0": "Hardware 1.0",
+        "hardware_2_0": "Hardware 2.0",
+    }
+    topologies = {
+        "contact_only": "Magnetic contact only",
+        "contact_and_external_input": "Magnetic contact + external input",
+    }
+    topology_dpls_address_counts = {
+        "contact_only": 1,
+        "contact_and_external_input": 2,
+    }
+    documented_target_firmware = "1.29"
+    supported_kdl_input_types = (4, 5, 6, 7, 11)
+    external_input_kdl_types = (4, 5, 6, 7, 11, 17, 22)
+    physical_capabilities = (
+        "magnetic_contact", "optional_external_dry_contact", "tamper",
+        "anti_sabotage", "radio_supervision", "battery", "test",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; external-circuit ADC/resistance, RSSI, channel, repeater route, radio "
+        "identifier, battery voltage, and detector-local commands are not exposed"
+    )
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="opening_state", name="Opening state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=0, zone_type=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+        GatewayCapabilitySpec(
+            key="external_input_state", name="External input state",
+            object_kind=ObjectKind.ZONE, local_object_number=0,
+            local_object_offset=1, zone_type=1,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    state_sensor_definitions = {
+        "opening_state": ("opening_state", "Opening state", "mdi:door"),
+        "external_input_state": (
+            "external_input_state", "External input state", "mdi:electric-switch"
+        ),
+    }
+
+    @classmethod
+    def get_gateway_capabilities_for_metadata(
+        cls, metadata
+    ) -> tuple[GatewayCapabilitySpec, ...]:
+        if metadata.topology == "contact_only":
+            return cls.capability_requirements[:1]
+        if metadata.topology == "contact_and_external_input":
+            return cls.capability_requirements
+        raise ValueError("C2000RSMK requires a supported topology")
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        variant = mapping.identity.metadata.variant
+        if variant is not None and variant not in self.variants:
+            raise ValueError("C2000RSMK hardware variant is not supported")
+        super().apply_gateway_mapping(mapping)
+        self.attr_device_metadata["external_input_kdl_types"] = (
+            self.external_input_kdl_types
+        )
+
+
+class C2000SMK(BolidDPLSDetectorBase):
+    """Wired one-address magnetic-contact detector С2000-СМК."""
+
+    detector_model = "С2000-СМК"
+    detector_description = "DPLS magnetic-contact detector"
+    documented_target_firmware = "1.04"
+    supported_kdl_input_types = (4, 5, 6, 7, 11, 22)
+    physical_capabilities = (
+        "magnetic_contact", "magnetic_test", "dpls_service_voltage",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; DPLS service voltage and address-programming operations are not exposed "
+        "through S2000-PP"
+    )
+    capability_requirements = C2000RSMK.capability_requirements[:1]
+    state_sensor_definitions = {
+        "opening_state": ("opening_state", "Opening state", "mdi:door"),
+    }
 
 
 class BolidDPLSOutputBase:
