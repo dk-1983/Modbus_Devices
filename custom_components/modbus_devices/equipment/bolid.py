@@ -672,6 +672,8 @@ class C2000KPB:
         46: "dpls_open_circuit",
         47: "dpls_restored",
         58: "silent_alarm",
+        61: "configuration_reset",
+        62: "configuration_changed",
         71: "level_low",
         72: "level_normal",
         74: "level_high",
@@ -708,14 +710,19 @@ class C2000KPB:
         186: "battery_replacement_required",
         187: "input_communication_lost",
         188: "input_communication_restored",
+        192: "output_voltage_disconnected",
+        193: "output_voltage_connected",
         194: "power_overload",
         195: "power_overload_restored",
+        196: "charger_fault",
+        197: "charger_restored",
         198: "power_fault",
         199: "power_restored",
         200: "battery_restored",
         202: "battery_fault",
         203: "device_restarted",
         204: "maintenance_required",
+        205: "battery_test_failed",
         206: "temperature_low",
         211: "battery_low",
         212: "reserve_battery_low",
@@ -1037,6 +1044,213 @@ class C2000KPB:
             f"software_version: {self.attr_software_version}, "
             f"description: {self.attr_description}"
         )
+
+
+class MIP24Isp20:
+    """Bolid MIP-24 isp.20 direct Orion state model behind S2000-PP."""
+
+    required_gateway = GatewayType.S2000_PP
+    full_designation = "МИП-24-2/П5-Р-RS"
+    documented_target_firmware = "5.10"
+    physical_numeric_capabilities = (
+        "output_voltage",
+        "output_current",
+        "battery_voltage",
+        "mains_voltage",
+        "temperature",
+    )
+    gateway_transport_limitation = (
+        "Physical and Orion numeric measurements are documented, but the "
+        "S2000-PP 3.01 Modbus numeric path does not confirm MIP-24 isp.20; "
+        "runtime service information and autonomous alarm-output control are "
+        "also unavailable through this transport"
+    )
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="device_state",
+            name="Device state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            zone_type=3,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+        GatewayCapabilitySpec(
+            key="output_power_state",
+            name="Output power state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=1,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="output_load_state",
+            name="Output load state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=2,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="battery_state",
+            name="Battery state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=3,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="charger_state",
+            name="Charger state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=4,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="mains_state",
+            name="Mains state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=5,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+    )
+    STATE_NAMES = C2000KPB.STATE_NAMES
+    _STATE_PRESENTATION = {
+        "device_state": ("mdi:state-machine", EntityCategory.DIAGNOSTIC),
+        "output_power_state": ("mdi:power-plug", None),
+        "output_load_state": ("mdi:current-ac", None),
+        "battery_state": ("mdi:battery", None),
+        "charger_state": ("mdi:battery-charging", EntityCategory.DIAGNOSTIC),
+        "mains_state": ("mdi:transmission-tower", None),
+    }
+
+    def __init__(self, client, device_id) -> None:
+        """Initialize the state-only equipment model."""
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = "МИП-24 исп.20"
+        self.attr_description = "Power supply module"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time: datetime | None = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {
+            "full_designation": self.full_designation,
+            "documented_target_firmware": self.documented_target_firmware,
+            "documented_orion_state_objects": 6,
+            "physical_numeric_capabilities": self.physical_numeric_capabilities,
+            "gateway_transport_limitation": self.gateway_transport_limitation,
+        }
+        self._state_mappings: dict[str, ResolvedObjectMapping] = {}
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        """Return required and optional exact S2000-PP capabilities."""
+        return cls.capability_requirements
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Validate and apply the configured Orion object subset."""
+        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match MIP-24 isp.20")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match MIP-24 isp.20")
+        if mapping.identity.dpls is not None:
+            raise ValueError("MIP-24 isp.20 identity must not contain DPLS identity")
+
+        specs = {
+            (spec.object_kind, spec.local_object_number, spec.zone_type): spec
+            for spec in self.capability_requirements
+        }
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for item in mapping.objects:
+            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            spec = specs.get((item.object_kind, item.local_object_number, zone_type))
+            if spec is None:
+                raise ValueError("Mapping contains an unsupported MIP-24 isp.20 object")
+            if item.data_area is not ModbusDataArea.HOLDING_REGISTER:
+                raise ValueError("MIP-24 isp.20 state mapping must use holding registers")
+            if spec.key in resolved:
+                raise ValueError("Duplicate MIP-24 isp.20 capability mapping")
+            resolved[spec.key] = item
+
+        if "device_state" not in resolved:
+            raise ValueError("MIP-24 isp.20 requires zone type 3, local object 0")
+
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = mapping.identity.stable_id
+        self.attr_unique_id_prefix = mapping.identity.stable_id
+        self._state_mappings = resolved
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def get_device_info(self) -> dict[str, Any]:
+        """Return only runtime service fields exposed by the transport."""
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe only state objects configured in S2000-PP."""
+        specs = {spec.key: spec for spec in self.capability_requirements}
+        return [
+            {
+                "sensor_id": key,
+                "name": specs[key].name,
+                "device_class": None,
+                "icon": self._STATE_PRESENTATION[key][0],
+                "entity_category": self._STATE_PRESENTATION[key][1],
+            }
+            for key in self._state_mappings
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Read all mapped state objects into one atomic snapshot."""
+        if not self._state_mappings:
+            raise ValueError("MIP-24 isp.20 requires a validated S2000-PP mapping")
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states(self._state_mappings.values())
+        return {
+            "state_sensors": {
+                key: self._state_sensor_value(key, states[item.gateway_object_number])
+                for key, item in self._state_mappings.items()
+            }
+        }
+
+    async def data_init(self) -> bool:
+        """Validate communication and initialize the first atomic snapshot."""
+        await self.get_device_info()
+        await self.async_get_snapshot()
+        self.attr_init_time = datetime.now()
+        return True
+
+    @classmethod
+    def _state_name(cls, code: int) -> str:
+        return cls.STATE_NAMES.get(code, f"unknown_{code}")
+
+    @classmethod
+    def _state_sensor_value(
+        cls, key: str, state: S2000PPZoneState
+    ) -> dict[str, Any]:
+        expanded_codes = state.expanded_states
+        return {
+            "sensor_id": key,
+            "state": cls._state_name(state.primary_state),
+            "primary_code": state.primary_state,
+            "expanded_codes": expanded_codes,
+            "expanded_states": tuple(
+                cls._state_name(code) for code in expanded_codes if code != 0
+            ),
+        }
 
 
 class C2000KDL:
