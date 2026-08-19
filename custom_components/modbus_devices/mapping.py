@@ -8,6 +8,7 @@ from .gateway import (
     DPLSSubIdentity,
     DownstreamDeviceIdentity,
     DownstreamDeviceMetadata,
+    GatewayCapabilitySpec,
     GatewayContext,
     MappingSource,
     ResolvedDeviceMapping,
@@ -38,6 +39,7 @@ class DeviceMappingProvider(Protocol):
         objects: tuple[ResolvedObjectMapping, ...] = (),
         dpls: DPLSSubIdentity | None = None,
         metadata: DownstreamDeviceMetadata = DownstreamDeviceMetadata(),
+        capabilities: tuple[GatewayCapabilitySpec, ...] = (),
     ) -> ResolvedDeviceMapping:
         """Return a validated resolved device mapping."""
 
@@ -55,6 +57,7 @@ class ManualDeviceMappingProvider:
         objects: tuple[ResolvedObjectMapping, ...] = (),
         dpls: DPLSSubIdentity | None = None,
         metadata: DownstreamDeviceMetadata = DownstreamDeviceMetadata(),
+        capabilities: tuple[GatewayCapabilitySpec, ...] = (),
     ) -> ResolvedDeviceMapping:
         """Validate and return manual mapping data."""
         return ResolvedDeviceMapping(
@@ -91,12 +94,23 @@ class AutomaticDeviceMappingProvider:
         objects: tuple[ResolvedObjectMapping, ...] = (),
         dpls: DPLSSubIdentity | None = None,
         metadata: DownstreamDeviceMetadata = DownstreamDeviceMetadata(),
+        capabilities: tuple[GatewayCapabilitySpec, ...] = (),
     ) -> ResolvedDeviceMapping:
         """Read configuration and resolve rows for one Orion device."""
         configuration = await self._cache.async_get_or_load(
             gateway.stable_id,
             self._reader.async_read,
         )
+        capability_keys = {
+            (
+                spec.object_kind,
+                spec.resolved_local_object_number(
+                    None if dpls is None else dpls.base_address
+                ),
+                spec.zone_type,
+            )
+            for spec in capabilities
+        }
         relay_objects = tuple(
             resolve_relay_row(row)
             for row in configuration.relays_for_device(orion_address)
@@ -114,6 +128,23 @@ class AutomaticDeviceMappingProvider:
             or dpls.base_address <= row.local_zone_number
             < dpls.base_address + dpls.address_count
         )
+        if capability_keys:
+            relay_objects = tuple(
+                item
+                for item in relay_objects
+                if (item.object_kind, item.local_object_number, None)
+                in capability_keys
+            )
+            zone_objects = tuple(
+                item
+                for item in zone_objects
+                if (
+                    item.object_kind,
+                    item.local_object_number,
+                    item.zone_details.zone_type,
+                )
+                in capability_keys
+            )
         if not relay_objects and not zone_objects:
             raise DeviceMappingNotFoundError(
                 f"No S2000-PP rows found for Orion address {orion_address}"

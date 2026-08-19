@@ -18,6 +18,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
 from homeassistant.const import PERCENTAGE, Platform, UnitOfTemperature
+from homeassistant.helpers.entity import EntityCategory
 
 from ..gateway import (
     CapabilityRequirement,
@@ -1019,6 +1020,163 @@ class C2000KPB:
             f"software_version: {self.attr_software_version}, "
             f"description: {self.attr_description}"
         )
+
+
+class C2000KDL:
+    """Classic Bolid C2000-KDL through an S2000-PP gateway.
+
+    The documented S2000-PP transport exposes the controller itself only as
+    zone type 3, local object 0. Rows for other local objects belong to DPLS
+    devices and are deliberately outside this equipment model.
+    """
+
+    required_gateway = GatewayType.S2000_PP
+    gateway_transport_limitation = (
+        "S2000-PP does not expose documented Modbus requests for C2000-KDL "
+        "serial, firmware, hardware revision, product cipher, DPLS catalog, "
+        "or DPLS electrical measurements"
+    )
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="device_state",
+            name="Device state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            zone_type=3,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    STATE_NAMES = {
+        **C2000KPB.STATE_NAMES,
+        46: "dpls_open_circuit",
+        215: "dpls_short_circuit",
+        217: "dpls_branch_communication_lost",
+        218: "dpls_branch_communication_restored",
+        222: "dpls_voltage_high",
+    }
+
+    def __init__(self, client, device_id) -> None:
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = "С2000-КДЛ"
+        self.attr_description = "DPLS line controller"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._device_state_mapping: ResolvedObjectMapping | None = None
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        """Return the one controller-owned S2000-PP object."""
+        return cls.capability_requirements
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Accept only the exact device-level type-3/local-0 zone."""
+        if mapping.identity.model != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match C2000-KDL")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match C2000-KDL")
+        if mapping.identity.dpls is not None:
+            raise ValueError("C2000-KDL identity must not contain a DPLS subidentity")
+        if len(mapping.objects) != 1:
+            raise ValueError("C2000-KDL requires exactly one device-state mapping")
+
+        device_state = mapping.objects[0]
+        if (
+            device_state.object_kind is not ObjectKind.ZONE
+            or device_state.local_object_number != 0
+            or device_state.zone_details is None
+            or device_state.zone_details.zone_type != 3
+            or device_state.data_area is not ModbusDataArea.HOLDING_REGISTER
+        ):
+            raise ValueError(
+                "C2000-KDL requires S2000-PP zone type 3, local object 0"
+            )
+
+        identity = mapping.identity
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = identity.stable_id
+        self.attr_unique_id_prefix = identity.stable_id
+        self.attr_device_metadata = {
+            "orion_address": identity.orion_address,
+            "gateway_identity": identity.gateway.stable_id,
+            "maximum_dpls_addresses": 127,
+            "maximum_dpls_output_current": "120 mA",
+            "maximum_dpls_device_current": "84 mA",
+            "recommended_dpls_device_current": "64 mA",
+            "dpls_topologies": "ring, tree, mixed",
+            "transport_limitation": self.gateway_transport_limitation,
+        }
+        self._device_state_mapping = device_state
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        """Initialize the required aggregate state without service guesses."""
+        if self._device_state_mapping is None:
+            raise ValueError(
+                "C2000-KDL requires zone type 3, local object 0 in S2000-PP"
+            )
+        await self.async_get_snapshot()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        """Return only service information available through this transport."""
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Return one aggregate multistate diagnostic entity."""
+        if self._device_state_mapping is None:
+            return []
+        return [
+            {
+                "sensor_id": "device_state",
+                "name": "Device state",
+                "device_class": None,
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "icon": "mdi:state-machine",
+            }
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Read primary and expanded state as one atomic snapshot."""
+        if self._device_state_mapping is None:
+            raise ValueError("C2000-KDL device-state mapping is not configured")
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states((self._device_state_mapping,))
+        state = states[self._device_state_mapping.gateway_object_number]
+        active_codes = tuple(code for code in state.expanded_states if code != 0)
+        return {
+            "state_sensors": {
+                "device_state": {
+                    "sensor_id": "device_state",
+                    "state": self._state_name(state.primary_state),
+                    "primary_code": state.primary_state,
+                    "expanded_codes": state.expanded_states,
+                    "expanded_states": tuple(
+                        self._state_name(code) for code in active_codes
+                    ),
+                }
+            }
+        }
+
+    @classmethod
+    def _state_name(cls, code: int) -> str:
+        return cls.STATE_NAMES.get(code, f"unknown_{code}")
 
 
 class BolidDPLSNumericDeviceBase:

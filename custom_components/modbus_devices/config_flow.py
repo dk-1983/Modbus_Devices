@@ -651,7 +651,13 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         )
 
     async def async_step_mapping_source(self, user_input=None):
-        """Select manual mapping or the future automatic provider."""
+        """Select manual or configuration-assisted exact capability mapping."""
+        if not self._gateway_capabilities:
+            self._gateway_capabilities = await self.hass.async_add_executor_job(
+                get_gateway_capabilities,
+                self._selected_manufacturer,
+                self._data[Config.CONF_DEVICE_CLASS],
+            )
         if user_input is not None:
             source = MappingSource(user_input[Config.CONF_MAPPING_SOURCE])
             if source is MappingSource.AUTOMATIC:
@@ -933,6 +939,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         orion_address=self._orion_address,
                         dpls=self._dpls_identity,
                         metadata=self._device_metadata,
+                        capabilities=self._gateway_capabilities,
                     )
                     if await self._async_validate_and_store_mapping(mapping):
                         return self._create_device_entry(
