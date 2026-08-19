@@ -1,4 +1,4 @@
-"""Tests for the old-family OWEN PLC110-24.60.K-M equipment model."""
+"""Tests for the old-family Owen PLC110-24.60.K-M equipment model."""
 
 import pytest
 
@@ -6,7 +6,7 @@ from pymodbus.exceptions import ModbusException
 
 from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.coordinator import ModbusDeviceCoordinator
-from custom_components.modbus_devices.equipment.oven import PLC110_24_60_K_M
+from custom_components.modbus_devices.equipment.owen import PLC110_24_60_K_M
 
 
 class Response:

@@ -12,6 +12,7 @@ from .const import Config
 from .coordinator import ModbusDeviceCoordinator
 from .equipment.equipment import get_class
 from .gateway import ResolvedDeviceMapping
+from .manufacturer import canonicalize_manufacturer_options
 from .modbus_client import connect_modbus
 
 _LOGGER = getLogger(__name__)
@@ -25,15 +26,20 @@ async def async_setup_entry(
 
     hass.data.setdefault(Config.DOMAIN, {})
 
-    # migrate old data -> options (safe)
-    if entry.data and not entry.options:
+    # Migrate old data -> options and canonicalize persisted manufacturer values.
+    try:
+        options = canonicalize_manufacturer_options(entry.options or entry.data)
+    except ValueError as exc:
+        raise ConfigEntryNotReady(str(exc)) from exc
+
+    if options != dict(entry.options) or (entry.data and not entry.options):
         hass.config_entries.async_update_entry(
             entry,
             data={},
-            options=dict(entry.data),
+            options=options,
         )
 
-    options = entry.options or {}
+    manufacturer = options.get(Config.CONF_MANUFACTURER)
 
     try:
         # -----------------------------------
@@ -56,14 +62,12 @@ async def async_setup_entry(
                 f"Missing config: manufacturer={manufacturer}, device={device_name}"
             )
 
-        manufacturer_module = manufacturer.strip().lower()
-
         # -----------------------------------
         # Load device class
         # -----------------------------------
         device_class = await hass.async_add_executor_job(
             get_class,
-            manufacturer_module,
+            manufacturer,
             device_name,
         )
 

@@ -1,4 +1,4 @@
-"""Классы описывают содержание каждого прибора компании OVEN."""
+"""Equipment models manufactured by Owen."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -19,7 +19,7 @@ from .equipment import validate_write_response
 
 
 class TRM138:
-    """OVEN TRM-138."""
+    """Owen TRM-138."""
 
     def __init__(self, client, device_id) -> None:
         """Inicialization variables."""
@@ -27,7 +27,7 @@ class TRM138:
         self.attr_client: (
             AsyncModbusSerialClient | AsyncModbusTcpClient | AsyncModbusUdpClient | None
         ) = client
-        self.attr_manufactures_name: str = "Oven"
+        self.attr_manufactures_name: str = "Owen"
         self.attr_model_name: str = "TRM-138"
         self.attr_device_type: int | None = None
         self.attr_serial_number: str | None = None
@@ -244,7 +244,7 @@ class TRM138:
         return data
 
     def __repr__(self) -> str:
-        """Output representation information from Oven Class."""
+        """Output representation information from Owen class."""
         cls = self.__class__.__name__
         return (
             f"class: {cls}, "
@@ -270,7 +270,7 @@ class TRM138:
 
 
 class PLC110_24_60_K_M:
-    """OWEN ПЛК110-24.60.К-М with a user-program-defined Modbus slave map."""
+    """Owen ПЛК110-24.60.К-М with a user-program-defined Modbus slave map."""
 
     uses_stable_entry_identity = True
     input_count = 36
@@ -287,7 +287,7 @@ class PLC110_24_60_K_M:
     def __init__(self, client, device_id) -> None:
         self.attr_client = client
         self.attr_device_id = device_id
-        self.attr_manufactures_name = "OWEN"
+        self.attr_manufactures_name = "Owen"
         self.attr_model_name = "ПЛК110-24.60.К-М"
         self.attr_description = "Programmable logic controller"
         self.attr_device_type = None

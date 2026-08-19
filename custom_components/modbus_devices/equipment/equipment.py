@@ -14,6 +14,7 @@ from serial.tools import list_ports
 
 from ..const import Config
 from ..gateway import GatewayCapabilitySpec, ResolvedDeviceMapping
+from ..manufacturer import canonical_manufacturer_name, manufacturer_module_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def validate_write_response(response: Any, operation: str) -> None:
 
 def get_class(module: str, cls_name: str) -> type[Any]:
     """Return an equipment class from a driver module."""
+    module = manufacturer_module_name(module)
     imported_module = __import__(
         name=module,
         globals=globals(),
@@ -135,7 +137,9 @@ def get_classes_from_files() -> dict[str, list[str]]:
 
             try:
                 instance = equipment_class(None, 1)
-                manufacturer = instance.attr_manufactures_name
+                manufacturer = canonical_manufacturer_name(
+                    instance.attr_manufactures_name
+                )
             except Exception:
                 _LOGGER.debug(
                     "Unable to inspect equipment class %s from module %s",

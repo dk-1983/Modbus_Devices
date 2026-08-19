@@ -18,7 +18,7 @@
 
 **Например:**
 
-    Для контроллера M3000-ВВ-1020 компании Bolid создан файл bolid.py в папке equipment, а класс носит название одноимённое с названием модели контроллера: class M3000BB1020:, а для контроллера температуры ТРМ-138 компании Oven файл называется oven.py, а класс class TRM138: и так далее.
+    Для контроллера M3000-ВВ-1020 компании Bolid создан файл bolid.py в папке equipment, а класс носит название одноимённое с названием модели контроллера: class M3000BB1020:, а для контроллера температуры ТРМ-138 компании Owen файл называется owen.py, а класс class TRM138: и так далее.
 
 Такой подход позволяет интегрировать совершенно различные по функционалу устройства в умный дом Home Assistant далее HA используя одни и те же платформы, не затрагивая логику работы основной части программы с возможностью при подключении других разработчиков сообщества создать большую базу устройств, которые будут доступны после установки компонента.
 Программа написана в базовом варианте и будет усовершенствована по мере дальнейшей работы над проектом. Как логика работы программы компонента, так и увеличение устройств в безе данных по количеству и фирмам производителям.
@@ -32,9 +32,9 @@
 
 <div display="flex" justify-content="space-between">
     <img src="pictures/after_atuto_creating_all_components.png" width="40%" height="40%" name="Bolid M3000-BB-1020"/>
-    <img src="pictures/after_atuto_creating_all_components_1.png" width="40%" height="40%" name="Oven TRM138"/>
+    <img src="pictures/after_atuto_creating_all_components_1.png" width="40%" height="40%" name="Owen TRM138"/>
     <img src="pictures/bolid_m3000vv1020.png" width="40%" height="40%" name="Bolid M3000-BB-1020 Pic">
-    <img src="pictures/oven_trm138.png" width="40%" height="40%" name="Oven TRM138 Pic">
+    <img src="pictures/oven_trm138.png" width="40%" height="40%" name="Owen TRM138 Pic">
 </div>
 
 ## Установка
@@ -47,7 +47,7 @@
 ## Ссылки на поддерживаемые приборы
 
 - [Bolid M3000-BB-1020](https://bolid.ru/production/disp/inout-modules/m3000_vv_1020.html)
-- [Oven TRM-138](https://owen-ufa.ru/shop/proizvoditeli/owen/trm138v-izmeritel-regulyator-8-kanalnyj/?ybaip=1&yclid=14875081144885575679)
+- [Owen TRM-138](https://owen-ufa.ru/shop/proizvoditeli/owen/trm138v-izmeritel-regulyator-8-kanalnyj/?ybaip=1&yclid=14875081144885575679)
 
 ## Использованные технологии
 

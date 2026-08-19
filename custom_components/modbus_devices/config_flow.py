@@ -40,6 +40,10 @@ from .mapping import (
     DeviceMappingNotFoundError,
     ManualDeviceMappingProvider,
 )
+from .manufacturer import (
+    canonical_manufacturer_name,
+    canonicalize_manufacturer_unique_id,
+)
 from .modbus_client import connect_modbus
 from .s2000_pp import (
     S2000PPConfigurationCache,
@@ -124,7 +128,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             return self.async_abort(reason="no_devices")
 
         if user_input is not None:
-            self._selected_manufacturer = user_input[Config.CONF_MANUFACTURER]
+            self._selected_manufacturer = canonical_manufacturer_name(
+                user_input[Config.CONF_MANUFACTURER]
+            )
 
             self._manufacturer_devices = self._device_classes.get(
                 self._selected_manufacturer, []
@@ -170,13 +176,13 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
             self._required_gateway = await self.hass.async_add_executor_job(
                 get_gateway_requirement,
-                self._selected_manufacturer.lower(),
+                self._selected_manufacturer,
                 device_name,
             )
 
             self._manual_io_mapping_spec = await self.hass.async_add_executor_job(
                 get_manual_io_mapping_spec,
-                self._selected_manufacturer.lower(),
+                self._selected_manufacturer,
                 device_name,
             )
 
@@ -454,6 +460,14 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         if self._required_gateway is not None:
             return await self.async_step_gateway_context()
 
+        normalized_unique_id = canonicalize_manufacturer_unique_id(legacy_unique_id)
+        for entry in self.hass.config_entries.async_entries(Config.DOMAIN):
+            if entry.unique_id and canonicalize_manufacturer_unique_id(
+                entry.unique_id
+            ) == normalized_unique_id:
+                await self.async_set_unique_id(entry.unique_id)
+                self._abort_if_unique_id_configured()
+
         await self.async_set_unique_id(legacy_unique_id)
         self._abort_if_unique_id_configured()
         return self._create_device_entry()
@@ -571,7 +585,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         if not self._gateway_device_metadata:
             self._gateway_device_metadata = await self.hass.async_add_executor_job(
                 get_gateway_device_metadata,
-                self._selected_manufacturer.lower(),
+                self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
             )
         if not self._gateway_device_metadata["gateway_transport_supported"]:
@@ -666,7 +680,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         if self._dpls_identity is not None and self._orion_address is not None:
             self._gateway_capabilities = await self.hass.async_add_executor_job(
                 get_gateway_capabilities,
-                self._selected_manufacturer.lower(),
+                self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
             )
             return await self.async_step_manual_object()
@@ -674,7 +688,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
             self._gateway_capabilities = await self.hass.async_add_executor_job(
                 get_gateway_capabilities,
-                self._selected_manufacturer.lower(),
+                self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
             )
             return await self.async_step_manual_object()
@@ -960,7 +974,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         try:
             await self.hass.async_add_executor_job(
                 validate_equipment_gateway_mapping,
-                self._selected_manufacturer.lower(),
+                self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
                 mapping,
             )
