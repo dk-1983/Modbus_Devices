@@ -36,6 +36,10 @@ S2000_PP_RUNTIME_READ_CHUNK_SIZE = 120
 S2000_PP_NUMERIC_SELECTOR = 46179
 S2000_PP_NUMERIC_RESULT = 46328
 S2000_PP_NUMERIC_ZONE_TYPE = 6
+S2000_PP_COUNTER_SELECTOR = 46180
+S2000_PP_COUNTER_RESULT = 46332
+S2000_PP_COUNTER_REGISTER_COUNT = 3
+S2000_PP_COUNTER_ZONE_TYPE = 7
 
 
 class NumericParameterKind(str, Enum):
@@ -68,13 +72,31 @@ class S2000PPNumericResult:
     message: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class S2000PPCounterResult:
+    """Typed result of one documented unsigned 48-bit counter request."""
+
+    status: NumericResultStatus
+    zone_table_number: int
+    raw_count: int | None = None
+    exception_code: int | None = None
+    message: str | None = None
+
+
 @dataclass(slots=True)
-class _NumericGatewaySession:
+class _SelectorGatewaySession:
     lock: asyncio.Lock
-    pending_zone: int | None = None
+    pending_request: tuple[str, int] | None = None
 
 
-_NUMERIC_GATEWAY_SESSIONS: dict[str, _NumericGatewaySession] = {}
+_SELECTOR_GATEWAY_SESSIONS: dict[str, _SelectorGatewaySession] = {}
+
+
+def _gateway_selector_session(gateway_key: str) -> _SelectorGatewaySession:
+    """Return the shared serialization boundary for S2000-PP selectors."""
+    return _SELECTOR_GATEWAY_SESSIONS.setdefault(
+        gateway_key, _SelectorGatewaySession(asyncio.Lock())
+    )
 
 
 def decode_s2000_pp_q8_8(raw: int) -> float:
@@ -85,15 +107,27 @@ def decode_s2000_pp_q8_8(raw: int) -> float:
     return signed / 256
 
 
+def decode_s2000_pp_counter(registers: list[int]) -> int:
+    """Decode the documented three-register unsigned big-endian counter."""
+    if not isinstance(registers, list) or len(registers) != 3:
+        raise ValueError("S2000-PP counter result must contain exactly three registers")
+    if any(
+        isinstance(register, bool)
+        or not isinstance(register, int)
+        or not 0 <= register <= 0xFFFF
+        for register in registers
+    ):
+        raise ValueError("S2000-PP counter registers must be unsigned 16-bit values")
+    return (registers[0] << 32) | (registers[1] << 16) | registers[2]
+
+
 class S2000PPNumericValueReader:
     """Serialize and execute documented selector/result numeric transactions."""
 
     def __init__(self, client, modbus_unit_id: int, gateway_key: str) -> None:
         self._client = client
         self._modbus_unit_id = modbus_unit_id
-        self._session = _NUMERIC_GATEWAY_SESSIONS.setdefault(
-            gateway_key, _NumericGatewaySession(asyncio.Lock())
-        )
+        self._session = _gateway_selector_session(gateway_key)
 
     async def async_read(
         self,
@@ -103,27 +137,28 @@ class S2000PPNumericValueReader:
         """Advance one transaction once; never sleep or busy-loop."""
         _validate_table_number(zone_table_number, S2000_PP_ZONE_COUNT, "zone")
         async with self._session.lock:
-            pending = self._session.pending_zone
-            if pending is not None and pending != zone_table_number:
+            request = ("numeric", zone_table_number)
+            pending = self._session.pending_request
+            if pending is not None and pending != request:
                 return S2000PPNumericResult(
                     NumericResultStatus.RETRYABLE,
                     parameter_kind,
                     zone_table_number,
                     exception_code=6,
-                    message=f"numeric selector is parked for zone {pending}",
+                    message=f"S2000-PP selector is parked for {pending[0]} zone {pending[1]}",
                 )
             if pending is None:
                 selected = await self._select(zone_table_number, parameter_kind)
                 if selected is not None:
                     return selected
-                self._session.pending_zone = zone_table_number
+                self._session.pending_request = request
 
             result = await self._read_result(zone_table_number, parameter_kind)
             if result.status not in {
                 NumericResultStatus.PENDING,
                 NumericResultStatus.RETRYABLE,
             }:
-                self._session.pending_zone = None
+                self._session.pending_request = None
             return result
 
     async def _select(self, zone: int, kind: NumericParameterKind):
@@ -185,6 +220,122 @@ class S2000PPNumericValueReader:
             value=value,
             raw_register=raw,
         )
+
+
+class S2000PPCounterValueReader:
+    """Execute documented selector/result counter transactions without scaling."""
+
+    def __init__(self, client, modbus_unit_id: int, gateway_key: str) -> None:
+        self._client = client
+        self._modbus_unit_id = modbus_unit_id
+        self._session = _gateway_selector_session(gateway_key)
+
+    async def async_read(self, zone_table_number: int) -> S2000PPCounterResult:
+        """Advance one serialized transaction once; never retry or sleep."""
+        _validate_table_number(zone_table_number, S2000_PP_ZONE_COUNT, "zone")
+        async with self._session.lock:
+            request = ("counter", zone_table_number)
+            pending = self._session.pending_request
+            if pending is not None and pending != request:
+                return S2000PPCounterResult(
+                    NumericResultStatus.RETRYABLE,
+                    zone_table_number,
+                    exception_code=6,
+                    message=(
+                        f"S2000-PP selector is parked for {pending[0]} "
+                        f"zone {pending[1]}"
+                    ),
+                )
+            if pending is None:
+                selected = await self._select(zone_table_number)
+                if selected is not None:
+                    return selected
+                self._session.pending_request = request
+
+            result = await self._read_result(zone_table_number)
+            if result.status not in {
+                NumericResultStatus.PENDING,
+                NumericResultStatus.RETRYABLE,
+            }:
+                self._session.pending_request = None
+            return result
+
+    async def _select(self, zone: int) -> S2000PPCounterResult | None:
+        response = await self._client.write_register(
+            address=S2000_PP_COUNTER_SELECTOR,
+            value=zone,
+            device_id=self._modbus_unit_id,
+        )
+        error = _counter_error_result(response, zone, "select counter zone")
+        if error is not None:
+            return error
+        address = getattr(response, "address", None)
+        registers = getattr(response, "registers", None)
+        echoed = getattr(response, "value", None)
+        if echoed is None and isinstance(registers, list) and registers:
+            echoed = registers[0]
+        if address != S2000_PP_COUNTER_SELECTOR or echoed != zone:
+            return S2000PPCounterResult(
+                NumericResultStatus.PROTOCOL_ERROR,
+                zone,
+                message="invalid FC06 counter selector echo",
+            )
+        return None
+
+    async def _read_result(self, zone: int) -> S2000PPCounterResult:
+        response = await self._client.read_holding_registers(
+            address=S2000_PP_COUNTER_RESULT,
+            count=S2000_PP_COUNTER_REGISTER_COUNT,
+            device_id=self._modbus_unit_id,
+        )
+        error = _counter_error_result(response, zone, "read counter result")
+        if error is not None:
+            return error
+        try:
+            raw_count = decode_s2000_pp_counter(getattr(response, "registers", None))
+        except (TypeError, ValueError) as exc:
+            return S2000PPCounterResult(
+                NumericResultStatus.PROTOCOL_ERROR,
+                zone,
+                message=str(exc),
+            )
+        return S2000PPCounterResult(
+            NumericResultStatus.READY,
+            zone,
+            raw_count=raw_count,
+        )
+
+
+def _counter_error_result(response, zone, operation):
+    if response is None:
+        return S2000PPCounterResult(
+            NumericResultStatus.PROTOCOL_ERROR,
+            zone,
+            message=f"empty response for {operation}",
+        )
+    is_error = getattr(response, "isError", None)
+    if not callable(is_error):
+        return S2000PPCounterResult(
+            NumericResultStatus.PROTOCOL_ERROR,
+            zone,
+            message=f"invalid response for {operation}",
+        )
+    if not is_error():
+        return None
+    code = getattr(response, "exception_code", None)
+    status = (
+        NumericResultStatus.PENDING
+        if code == 15
+        else NumericResultStatus.RETRYABLE
+        if code == 6
+        else NumericResultStatus.PROTOCOL_ERROR
+    )
+    return S2000PPCounterResult(
+        status,
+        zone,
+        exception_code=code,
+        message=f"Modbus exception during {operation}: {response}",
+    )
 
 
 def _numeric_error_result(response, kind, zone, operation):

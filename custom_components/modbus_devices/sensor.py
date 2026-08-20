@@ -299,6 +299,9 @@ class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
             return metadata
         return {
             **metadata,
-            "raw_register": current["raw_register"],
-            "parameter_kind": current["parameter_kind"],
+            **{
+                key: current[key]
+                for key in ("raw_register", "raw_count", "parameter_kind")
+                if key in current
+            },
         }

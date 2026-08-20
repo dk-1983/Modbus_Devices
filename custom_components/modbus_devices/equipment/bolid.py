@@ -17,7 +17,7 @@ from pymodbus.exceptions import ModbusException
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
-from homeassistant.const import PERCENTAGE, Platform, UnitOfTemperature
+from homeassistant.const import PERCENTAGE, Platform, UnitOfTemperature, UnitOfVolume
 from homeassistant.helpers.entity import EntityCategory
 
 from ..gateway import (
@@ -30,6 +30,7 @@ from ..gateway import (
     ResolvedObjectMapping,
 )
 from ..s2000_pp import (
+    S2000PPCounterValueReader,
     S2000PPRuntimeReader,
     S2000PPNumericValueReader,
     S2000PPZoneState,
@@ -2081,6 +2082,109 @@ class C2000SMK(BolidDPLSDetectorBase):
     state_sensor_definitions = {
         "opening_state": ("opening_state", "Opening state", "mdi:door"),
     }
+
+
+class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
+    """Shared state and unscaled S2000-PP counter mechanics for water meters."""
+
+    detector_description = "DPLS water meter"
+    supported_kdl_input_types = (13,)
+    dpls_address_count = 1
+    pulse_volume_m3 = 0.001
+    physical_capabilities = (
+        "cumulative_water_consumption",
+        "initial_reading",
+        "serial_number",
+        "magnetic_influence_detection",
+        "battery_supervision",
+    )
+    gateway_transport_limitation = (
+        "S2000-PP exposes the current pulse total and Orion states, but not the "
+        "initial reading, meter serial number, actual firmware, hardware revision, "
+        "battery voltage, percentage, DPLS voltage, or registrar service data"
+    )
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="meter_state",
+            name="Meter state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=7,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    state_sensor_definitions = {
+        "meter_state": ("meter_state", "Meter state", "mdi:counter"),
+    }
+
+    def __init__(self, client, device_id) -> None:
+        if self.__class__ is BolidDPLSWaterMeterBase:
+            raise TypeError("BolidDPLSWaterMeterBase is not equipment")
+        super().__init__(client, device_id)
+        self._water_value: dict[str, Any] | None = None
+
+    def get_numeric_sensor_descriptions(self) -> list[dict[str, Any]]:
+        return [{
+            "sensor_id": "water_consumption",
+            "name": "Water consumption",
+            "device_class": SensorDeviceClass.WATER,
+            "state_class": SensorStateClass.TOTAL_INCREASING,
+            "unit": UnitOfVolume.CUBIC_METERS,
+            "precision": 3,
+        }]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        snapshot = await super().async_get_snapshot()
+        mapping = self.attr_gateway_mapping
+        if mapping is None or self._state_mapping is None:
+            raise ValueError("Water meter counter mapping is not configured")
+        result = await S2000PPCounterValueReader(
+            self.attr_client,
+            self.attr_device_id,
+            mapping.identity.gateway.stable_id,
+        ).async_read(self._state_mapping.gateway_object_number)
+        if result.status is NumericResultStatus.READY:
+            self._water_value = {
+                "value": result.raw_count * self.pulse_volume_m3,
+                "raw_count": result.raw_count,
+            }
+        elif result.status is NumericResultStatus.PROTOCOL_ERROR:
+            raise ModbusException(result.message or "counter protocol error")
+        snapshot["numeric_sensors"] = (
+            {} if self._water_value is None
+            else {"water_consumption": dict(self._water_value)}
+        )
+        return snapshot
+
+
+class SVK15_3_8_1_B3(BolidDPLSWaterMeterBase):
+    """Radio water meter with integrated С2000Р-АСР1 исп.01."""
+
+    detector_model = "СВК15-3-8-1-Б3"
+    detector_description = "Radio DPLS-visible water meter"
+    documented_target_firmware = "1.07"
+    physical_capabilities = BolidDPLSWaterMeterBase.physical_capabilities + (
+        "radio_supervision",
+        "radio_signal_quality",
+        "replaceable_er14505_battery",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSWaterMeterBase.gateway_transport_limitation
+        + "; ARR125 is not part of stable identity; ARR32 transport, RSSI, RF channel, "
+        "repeater route, and radio identifier are not exposed"
+    )
+
+
+class SVK15_3_2_B(BolidDPLSWaterMeterBase):
+    """Wired DPLS water meter with integrated С2000-АСР1."""
+
+    detector_model = "СВК15-3-2-Б"
+    detector_description = "Wired DPLS water meter"
+    physical_capabilities = BolidDPLSWaterMeterBase.physical_capabilities + (
+        "dpls_line_supervision",
+        "cr2032_reserve_power",
+    )
 
 
 class BolidDPLSOutputBase:
