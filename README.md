@@ -78,6 +78,7 @@ The following table is generated from the canonical equipment registry in the cu
 | Bolid | [M3000-BB-1020](https://bolid.ru/production/disp/inout-modules/m3000_vv_1020.html) | Direct Modbus | 12 binary inputs, 6 relay switches, device clock | Runtime service information is read from the device |
 | Bolid | [С2000-ПП](https://bolid.ru/production/s2000-pp.html) | Direct Modbus | Gateway diagnostic binary sensors | Orion master mode/communication, enclosure tamper, and power fault; device service information where exposed |
 | Bolid | С2000-КПБ | С2000-ПП → Orion | Configured output switches and multistate sensors | Up to 6 outputs/circuit states, 2 technological inputs, and device state; entities follow the configured subset |
+| Bolid | [МИП-24 исп.20](https://bolid.ru/production/mip-24_20.html) | С2000-ПП / Orion RS-485 | Device, output power, output load, battery, charger, and mains multistate sensors | Full designation МИП-24-2/П5-Р-RS; device state is required and the other five states follow the configured mapping subset; physical numeric measurements are not exposed because their current С2000-ПП Modbus path is not confirmed |
 
 ### Bolid — С2000-КДЛ and wired DPLS equipment
 
@@ -87,6 +88,8 @@ The following table is generated from the canonical equipment registry in the cu
 | Bolid | ДИП-34А-05 | С2000-ПП → С2000-КДЛ → DPLS | Operational multistate detector state | One DPLS address; no synthetic smoke/dust sensors |
 | Bolid | С2000-ИП-03 | С2000-ПП → С2000-КДЛ → DPLS | Multistate detector state; optional temperature sensor | Type-1 state-only or type-6 state-and-temperature mapping; both modes use one DPLS identity |
 | Bolid | [С2000-ДЗ](https://bolid.ru/production/s_2000_dz.html) | С2000-ПП → С2000-КДЛ → DPLS | Multistate water-leak state | Static variants 1.06, 1.10, and 1.13; no derived moisture binary sensor |
+| Bolid | [С2000-СТ исп.04](https://bolid.ru/production/s2_st_04.html) | С2000-ПП → С2000-КДЛ → DPLS | Operational glass-break multistate state | Wired one-address DPLS detector; DPLS service voltage is not exposed as a numeric entity through the current С2000-ПП path |
+| Bolid | [С2000-СМК](https://bolid.ru/production/amrs/addr-amrs-detection-hdw/) | С2000-ПП → С2000-КДЛ → DPLS | Opening multistate state | Wired one-address model; discontinued by the manufacturer but documented and supported by the integration |
 | Bolid | С2000-ВТ / С2000-ВТ исп.01 | С2000-ПП → С2000-КДЛ → DPLS | Temperature and relative-humidity sensors | Numeric values use the documented С2000-ПП numeric request lifecycle |
 | Bolid | С2000-ВТИ / С2000-ВТИ исп.01 | С2000-ПП → С2000-КДЛ → DPLS | No currently available entities through this path | Models are registered, but numeric transport through the current С2000-ПП path is not confirmed and configuration is blocked |
 | Bolid | [С2000-СП4](https://bolid.ru/production/s2000-sp4.html) | С2000-ПП → С2000-КДЛ → DPLS | Configured actuator switch and multistate position/circuit sensors | Supported variants are listed below; entities follow the configured mapping subset |
@@ -109,6 +112,8 @@ Supported С2000-СП4 variants:
 | Bolid | С2000Р-ИП | С2000-ПП → С2000-КДЛ → DPLS | Operational multistate detector/radio state | Physical temperature capability exists, but numeric temperature through the current PP path is not confirmed |
 | Bolid | С2000Р-РМ / С2000Р-РМ исп.01 | С2000-ПП → С2000-КДЛ → DPLS | Two independent relay switches; optional controlled-circuit state | Standard variant supports two-output or two-output-plus-input topology; исп.01 is outputs-only |
 | Bolid | С2000Р-Сирена | С2000-ПП → С2000-КДЛ → DPLS | Independent Light and Sound switches | No combined switch, pattern, duration, or radio-service controls |
+| Bolid | [С2000Р-СТ исп.01](https://bolid.ru/production/s2000r-st_01.html) | С2000-ПП → С2000-КДЛ → DPLS via С2000Р-АРР125 | Operational glass-break multistate state | Battery, tamper, and radio communication remain Orion multistate semantics; no RSSI entity |
+| Bolid | [С2000Р-СМК](https://bolid.ru/production/s2000r_smk.html) | С2000-ПП → С2000-КДЛ → DPLS via С2000Р-АРР125 | Opening multistate state; optional External input multistate state | Uses one or two DPLS addresses according to the configured topology; no derived opening binary sensor |
 
 ### Owen — direct Modbus equipment
 
@@ -162,6 +167,42 @@ For Bolid downstream equipment, select or create the С2000-ПП gateway context
 - manual or configuration-assisted mapping.
 
 The UI presents physical model names and capability choices; internal class names, object kinds, register addresses, and derived local numbers are not normal user inputs.
+
+## Adding a device
+
+These screenshots show a real Home Assistant Config Flow. Start from **Settings → Devices & services → Modbus Devices**, then select **Add hub**.
+
+### 1. Select the transport
+
+Choose ModBus TCP/IP, ModBus UDP/IP, or SerialPort according to the device connection.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Modbus Devices transport selection" width="78%"></p>
+
+### 2. Select the manufacturer
+
+Choose the canonical manufacturer, currently Bolid or Owen.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step2.jpg" alt="Modbus Devices manufacturer selection" width="78%"></p>
+
+### 3. Select the equipment model
+
+Choose the physical model by its manufacturer-facing display name. This list is built from the supported equipment registry.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step3.jpg" alt="Modbus Devices equipment model selection" width="78%"></p>
+
+### 4. Configure the connection
+
+Enter the transport and device settings. The TCP/IP example below uses host, port, device ID, and name.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step4.jpg" alt="Modbus Devices TCP/IP connection settings" width="78%"></p>
+
+Further steps depend on the selected model and its transport or gateway. Bolid equipment behind С2000-ПП may additionally request gateway selection, Orion/KDL/DPLS addresses, topology, mapping source, and manual or configuration-assisted mapping.
+
+### 5. Result
+
+After successful setup, Home Assistant creates one Device and the entities supported by its equipment class. This example shows an M3000-BB-1020 with its device information, controls, and sensors; other models create their own documented entity sets.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_result.jpg" alt="M3000-BB-1020 Home Assistant Device and generated entities" width="92%"></p>
 
 ## Installation
 
