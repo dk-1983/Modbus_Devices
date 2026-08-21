@@ -287,10 +287,12 @@ def test_direct_identity_remains_entry_transport_and_slave_scoped():
 async def test_button_platform_setup_creates_only_dn310_buttons():
     device = DN310(Client(), 1)
     coordinator = Mock(last_update_success=True)
-    entry = SimpleNamespace(entry_id="entry-1", title="DN310")
-    hass = SimpleNamespace(
-        data={Config.DOMAIN: {"entry-1": {"device": device, "coordinator": coordinator}}}
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="DN310",
+        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
     )
+    hass = SimpleNamespace(data={})
     entities = []
 
     await async_setup_button_entry(hass, entry, lambda values: entities.extend(values))
@@ -303,10 +305,11 @@ async def test_button_platform_setup_creates_only_dn310_buttons():
 async def test_button_platform_is_a_noop_for_equipment_without_descriptions():
     device = SimpleNamespace()
     coordinator = Mock(last_update_success=True)
-    entry = SimpleNamespace(entry_id="entry-1")
-    hass = SimpleNamespace(
-        data={Config.DOMAIN: {"entry-1": {"device": device, "coordinator": coordinator}}}
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
     )
+    hass = SimpleNamespace(data={})
     entities = []
 
     await async_setup_button_entry(hass, entry, lambda values: entities.extend(values))
@@ -343,27 +346,24 @@ async def test_button_identity_device_link_and_user_press_lifecycle():
 async def test_unload_uses_same_platform_set_and_releases_entry_resources():
     device = DN310(Client(), 1)
     client = Mock()
-    entry = SimpleNamespace(entry_id="entry-1", title="DN310")
-    config_entries = SimpleNamespace(async_unload_platforms=AsyncMock(return_value=True))
-    hass = SimpleNamespace(
-        data={
-            Config.DOMAIN: {
-                "entry-1": {
-                    "device": device,
-                    "client": client,
-                    "coordinator": Mock(),
-                }
-            }
-        },
-        config_entries=config_entries,
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="DN310",
+        runtime_data=SimpleNamespace(
+            device=device,
+            client=client,
+            coordinator=Mock(),
+        ),
     )
+    config_entries = SimpleNamespace(async_unload_platforms=AsyncMock(return_value=True))
+    hass = SimpleNamespace(data={}, config_entries=config_entries)
 
     assert await async_unload_entry(hass, entry) is True
     config_entries.async_unload_platforms.assert_awaited_once_with(
         entry, [Platform.SENSOR, Platform.BUTTON]
     )
     client.close.assert_called_once_with()
-    assert "entry-1" not in hass.data[Config.DOMAIN]
+    assert entry.runtime_data.client is client
 
 
 def test_pymodbus_exception_responses_are_not_default_values():

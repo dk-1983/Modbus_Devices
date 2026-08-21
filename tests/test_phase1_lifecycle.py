@@ -31,6 +31,7 @@ from custom_components.modbus_devices.gateway import (
     ResolvedDeviceMapping,
 )
 from custom_components.modbus_devices.s2000_pp import manual_zone_mapping
+from custom_components.modbus_devices.runtime import ModbusDevicesRuntimeData
 
 
 class FakeHass:
@@ -396,15 +397,27 @@ async def test_setup_first_refresh_platform_forward_unload_and_reload(monkeypatc
     assert await integration.async_setup_entry(hass, entry) is True
     assert devices[0].attr_unique_id_prefix == "frozen-direct-id"
     assert devices[0].attr_device_identifier == "frozen-direct-id"
+    first_runtime = entry.runtime_data
+    assert isinstance(first_runtime, ModbusDevicesRuntimeData)
+    assert first_runtime.client is clients[0]
+    assert first_runtime.device is devices[0]
+    assert first_runtime.coordinator is coordinators[0]
+    assert first_runtime.gateway_mapping is None
     devices[0].data_init.assert_awaited_once_with()
     coordinators[0].async_config_entry_first_refresh.assert_awaited_once_with()
     hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(entry, [Platform.SENSOR])
 
     assert await integration.async_unload_entry(hass, entry) is True
     clients[0].close.assert_called_once_with()
-    assert entry.entry_id not in hass.data[Config.DOMAIN]
+    assert entry.runtime_data is first_runtime
+
+    # Home Assistant clears runtime_data after a successful unload callback.
+    del entry.runtime_data
 
     assert await integration.async_setup_entry(hass, entry) is True
+    assert entry.runtime_data is not first_runtime
+    assert entry.runtime_data.client is clients[1]
+    assert entry.runtime_data.device is devices[1]
     assert devices[1].attr_unique_id_prefix == "frozen-direct-id"
 
 
@@ -435,6 +448,7 @@ async def test_device_unavailable_during_initialization_becomes_not_ready(monkey
     with pytest.raises(ConfigEntryNotReady, match="device unavailable"):
         await integration.async_setup_entry(hass, entry)
     client.close.assert_called_once_with()
+    assert not hasattr(entry, "runtime_data")
 
 
 @pytest.mark.asyncio
@@ -465,6 +479,7 @@ async def test_first_refresh_failure_never_attempts_post_refresh_maintenance(mon
 
     devices[0].async_post_first_refresh.assert_not_awaited()
     client.close.assert_called_once_with()
+    assert not hasattr(entry, "runtime_data")
 
 
 @pytest.mark.asyncio
@@ -485,6 +500,7 @@ async def test_invalid_persisted_configuration_becomes_config_entry_error(monkey
 
     with pytest.raises(ConfigEntryError):
         await integration.async_setup_entry(hass, entry)
+    assert not hasattr(entry, "runtime_data")
 
 
 @pytest.mark.asyncio
@@ -505,7 +521,7 @@ async def test_unexpected_platform_failure_is_not_swallowed_and_resources_close(
     with pytest.raises(RuntimeError, match="platform bug"):
         await integration.async_setup_entry(hass, entry)
     client.close.assert_called_once_with()
-    assert entry.entry_id not in hass.data[Config.DOMAIN]
+    assert not hasattr(entry, "runtime_data")
 
 
 @pytest.mark.asyncio
@@ -551,7 +567,7 @@ async def test_optional_post_refresh_transport_failure_does_not_block_setup(monk
     monkeypatch.setattr(integration, "ModbusDeviceCoordinator", Coordinator)
 
     assert await integration.async_setup_entry(hass, entry) is True
-    runtime_device = hass.data[Config.DOMAIN][entry.entry_id]["device"]
+    runtime_device = entry.runtime_data.device
     runtime_device.async_post_first_refresh.assert_awaited_once_with(
         {"time": datetime(2000, 1, 1)}
     )
@@ -562,8 +578,11 @@ async def test_optional_post_refresh_transport_failure_does_not_block_setup(monk
 async def test_binary_sensor_platform_uses_first_refresh_snapshot_without_io():
     device = SimpleNamespace(get_inputs=AsyncMock(side_effect=RuntimeError("input bug")))
     coordinator = Mock(data={"inputs": {}})
-    hass = SimpleNamespace(data={Config.DOMAIN: {"entry-1": {"device": device, "coordinator": coordinator}}})
-    entry = SimpleNamespace(entry_id="entry-1")
+    hass = SimpleNamespace(data={})
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+    )
     add_entities = Mock()
 
     await async_setup_binary_sensor_entry(hass, entry, add_entities)

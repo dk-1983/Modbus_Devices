@@ -149,15 +149,44 @@ async def test_platform_setup_uses_snapshot_or_static_descriptions_without_io(
         **extra,
     )
     coordinator = Mock(data=snapshot, last_update_success=True)
-    entry = SimpleNamespace(entry_id="entry-1")
-    hass = SimpleNamespace(
-        data={Config.DOMAIN: {entry.entry_id: {"device": device, "coordinator": coordinator}}}
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
     )
+    hass = SimpleNamespace(data={})
     added = []
 
     await setup(hass, entry, lambda entities: added.extend(entities))
 
     assert added == []
+    device.get_inputs.assert_not_awaited()
+    device.get_outputs.assert_not_awaited()
+    device.get_chanels.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_all_platforms_resolve_one_shared_entry_runtime_object():
+    device = SimpleNamespace(
+        attr_clock_iter=[],
+        get_inputs=AsyncMock(),
+        get_outputs=AsyncMock(),
+        get_chanels=AsyncMock(),
+    )
+    coordinator = Mock(data={"inputs": {}, "outputs": {}, "chanels": {}})
+    runtime = SimpleNamespace(device=device, coordinator=coordinator)
+    entry = SimpleNamespace(entry_id="entry-1", runtime_data=runtime)
+    hass = SimpleNamespace(data={})
+
+    for setup in (
+        setup_sensor,
+        setup_binary,
+        setup_switch,
+        setup_datetime,
+        setup_button,
+    ):
+        await setup(hass, entry, lambda _entities: None)
+        assert entry.runtime_data is runtime
+
     device.get_inputs.assert_not_awaited()
     device.get_outputs.assert_not_awaited()
     device.get_chanels.assert_not_awaited()

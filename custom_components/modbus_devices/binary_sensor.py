@@ -19,21 +19,21 @@ from homeassistant.helpers.update_coordinator import (
 
 from .const import Config
 from .coordinator import ModbusDeviceCoordinator
+from .runtime import ModbusDevicesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ModbusDevicesConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up binary sensors."""
 
-    entry_data = hass.data[Config.DOMAIN][entry.entry_id]
-
-    device = entry_data["device"]
-    coordinator = entry_data["coordinator"]
+    runtime = entry.runtime_data
+    device = runtime.device
+    coordinator = runtime.coordinator
 
     entities = []
 

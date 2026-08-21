@@ -10,17 +10,18 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import Config
+from .runtime import ModbusDevicesConfigEntry
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ModbusDevicesConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up documented finite Modbus command buttons."""
-    data = hass.data[Config.DOMAIN][entry.entry_id]
-    device = data["device"]
-    coordinator = data["coordinator"]
+    runtime = entry.runtime_data
+    device = runtime.device
+    coordinator = runtime.coordinator
     description_reader = getattr(device, "get_button_descriptions", None)
     descriptions = description_reader() if callable(description_reader) else []
     async_add_entities(

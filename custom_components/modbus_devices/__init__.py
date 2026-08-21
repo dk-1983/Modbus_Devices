@@ -4,7 +4,6 @@ from logging import getLogger
 
 from pymodbus.exceptions import ConnectionException, ModbusException
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 
@@ -14,6 +13,7 @@ from .equipment.equipment import get_class
 from .gateway import ResolvedDeviceMapping
 from .manufacturer import canonicalize_manufacturer_options
 from .modbus_client import connect_modbus
+from .runtime import ModbusDevicesConfigEntry, ModbusDevicesRuntimeData
 
 _LOGGER = getLogger(__name__)
 
@@ -28,13 +28,17 @@ def _close_client(client) -> None:
         _LOGGER.exception("Error closing Modbus client")
 
 
+def _clear_runtime_data(entry: ModbusDevicesConfigEntry) -> None:
+    """Discard runtime references after failed setup or successful unload."""
+    if hasattr(entry, "runtime_data"):
+        del entry.runtime_data
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ModbusDevicesConfigEntry,
 ) -> bool:
     """Set up ModbusDevices from a config entry."""
-
-    hass.data.setdefault(Config.DOMAIN, {})
 
     # Migrate old data -> options and canonicalize persisted manufacturer values.
     try:
@@ -171,12 +175,12 @@ async def async_setup_entry(
         # -----------------------------------
         # Store runtime objects
         # -----------------------------------
-        hass.data[Config.DOMAIN][entry.entry_id] = {
-            "client": client,
-            "device": device,
-            "coordinator": coordinator,
-            "gateway_mapping": gateway_mapping,
-        }
+        entry.runtime_data = ModbusDevicesRuntimeData(
+            client=client,
+            device=device,
+            coordinator=coordinator,
+            gateway_mapping=gateway_mapping,
+        )
 
         _LOGGER.info(
             "Modbus device initialized: %s (%s)",
@@ -200,34 +204,35 @@ async def async_setup_entry(
         return True
 
     except (ConnectionException, ModbusException, OSError, TimeoutError) as exc:
+        _clear_runtime_data(entry)
         _close_client(client)
         raise ConfigEntryNotReady(f"Modbus connection failed: {exc}") from exc
 
     except (ConfigEntryError, ConfigEntryNotReady):
+        _clear_runtime_data(entry)
         _close_client(client)
         raise
 
     except Exception:
         # Programming and platform errors must remain visible to Home Assistant.
-        hass.data[Config.DOMAIN].pop(entry.entry_id, None)
+        _clear_runtime_data(entry)
         _close_client(client)
         raise
 
 
 async def async_unload_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ModbusDevicesConfigEntry,
 ) -> bool:
     """Unload ModbusDevices config entry."""
 
-    entry_data = hass.data.get(Config.DOMAIN, {}).get(entry.entry_id)
-
-    if not entry_data:
+    if not hasattr(entry, "runtime_data"):
         _LOGGER.warning("Device already removed: %s", entry.entry_id)
         return True
 
-    device = entry_data["device"]
-    client = entry_data["client"]
+    runtime = entry.runtime_data
+    device = runtime.device
+    client = runtime.client
 
     unload_ok = await hass.config_entries.async_unload_platforms(
         entry,
@@ -236,8 +241,6 @@ async def async_unload_entry(
 
     if unload_ok:
         _close_client(client)
-
-        hass.data[Config.DOMAIN].pop(entry.entry_id, None)
 
         _LOGGER.info("Modbus device unloaded: %s", entry.title)
 
