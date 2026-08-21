@@ -20,6 +20,8 @@ from ..modbus_validation import validate_fc05_response, validated_bits
 class TRM138:
     """Owen TRM-138."""
 
+    equipment_manufacturer = "Owen"
+    equipment_model = "TRM-138"
     def __init__(self, client, device_id) -> None:
         """Inicialization variables."""
         self.attr_device_id: int = device_id
@@ -270,6 +272,8 @@ class TRM138:
 class PLC110_24_60_K_M:
     """Owen ПЛК110-24.60.К-М with a user-program-defined Modbus slave map."""
 
+    equipment_manufacturer = "Owen"
+    equipment_model = "ПЛК110-24.60.К-М"
     uses_stable_entry_identity = True
     input_count = 36
     output_count = 24
@@ -432,6 +436,7 @@ class PLC110_24_60_K_M:
             result.append(updated)
         return result
 
+
     async def get_outputs(self, outputs: list[int] | None = None) -> list[dict[str, Any]]:
         selected = list(self._outputs) if outputs is None else outputs
         unknown = set(selected) - set(self._outputs)
@@ -498,3 +503,9 @@ class PLC110_24_60_K_M:
                 {start + offset: state for offset, state in enumerate(bits)}
             )
         return result
+
+
+EQUIPMENT_CLASSES = (
+    PLC110_24_60_K_M,
+    TRM138,
+)

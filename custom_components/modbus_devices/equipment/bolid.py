@@ -51,6 +51,9 @@ _LOGGER = getLogger(__name__)
 class M3000BB1020:
     """Bolid M3000-BB-1020 hw: 1.00 sw: 1.00."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "M3000-BB-1020"
+
     CLOCK_SYNC_MAX_DRIFT_SECONDS = 120
 
     def __init__(self, client, device_id) -> None:
@@ -528,6 +531,9 @@ class M3000BB1020:
 class S2000PP:
     """Bolid С2000-ПП protocol converter, firmware 3.xx."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-ПП"
+
     SERVICE_INFO_ADDRESS = 46152
     DEVICE_TYPE = 36
     DIAGNOSTIC_START_ADDRESS = 8
@@ -661,6 +667,9 @@ class S2000PP:
 
 class C2000KPB:
     """Bolid C2000-KPB described by the version 3.04 documentation."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-КПБ"
 
     required_gateway = GatewayType.S2000_PP
 
@@ -1110,6 +1119,8 @@ class C2000KPB:
 class MIP24Isp20:
     """Bolid MIP-24 isp.20 direct Orion state model behind S2000-PP."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "МИП-24 исп.20"
     required_gateway = GatewayType.S2000_PP
     full_designation = "МИП-24-2/П5-Р-RS"
     documented_target_firmware = "5.10"
@@ -1321,6 +1332,8 @@ class C2000KDL:
     devices and are deliberately outside this equipment model.
     """
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-КДЛ"
     required_gateway = GatewayType.S2000_PP
     gateway_transport_limitation = (
         "S2000-PP does not expose documented Modbus requests for C2000-KDL "
@@ -1478,6 +1491,8 @@ class C2000RARR125:
     S2000-PP configuration table does not expose that KDL setting.
     """
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-АРР125"
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 1
@@ -1870,6 +1885,8 @@ class BolidDPLSDetectorBase:
 class DIP34A05(BolidDPLSDetectorBase):
     """Current wired optical smoke detector ДИП-34А-05."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "ДИП-34А-05"
     detector_model = "ДИП-34А-05"
     documented_variant = "dip_34a_05"
     documented_target_firmware = "1.24"
@@ -1888,6 +1905,8 @@ class DIP34A05(BolidDPLSDetectorBase):
 class C2000RDIP(BolidDPLSDetectorBase):
     """Radio optical smoke detector represented as its own DPLS object."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-ДИП"
     detector_model = "С2000Р-ДИП"
     documented_target_firmware = "1.29"
     supported_kdl_input_types = (1, 6, 8, 21)
@@ -1906,6 +1925,8 @@ class C2000RDIP(BolidDPLSDetectorBase):
 class C2000IP03(BolidDPLSDetectorBase):
     """Wired temperature detector С2000-ИП-03 with two PP mapping modes."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-ИП-03"
     detector_model = "С2000-ИП-03"
     documented_variant = "s2000_ip_03"
     documented_target_firmware = "1.15"
@@ -1983,6 +2004,8 @@ class C2000IP03(BolidDPLSDetectorBase):
 class C2000RIP(BolidDPLSDetectorBase):
     """Radio temperature detector; PP numeric transport is not confirmed."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-ИП"
     detector_model = "С2000Р-ИП"
     documented_target_firmware = "1.29"
     supported_kdl_input_types = (3, 6, 9, 10, 21)
@@ -2001,6 +2024,8 @@ class C2000RIP(BolidDPLSDetectorBase):
 class C2000RST01(BolidDPLSDetectorBase):
     """Radio glass-break detector С2000Р-СТ исп.01."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-СТ исп.01"
     detector_model = "С2000Р-СТ исп.01"
     detector_description = "Radio glass-break detector"
     documented_target_firmware = "1.03"
@@ -2031,6 +2056,8 @@ class C2000RST01(BolidDPLSDetectorBase):
 class C2000ST04(BolidDPLSDetectorBase):
     """Wired DPLS glass-break detector С2000-СТ исп.04."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-СТ исп.04"
     detector_model = "С2000-СТ исп.04"
     detector_description = "DPLS glass-break detector"
     documented_target_firmware = "1.22"
@@ -2051,6 +2078,8 @@ class C2000ST04(BolidDPLSDetectorBase):
 class C2000RSMK(BolidDPLSDetectorBase):
     """Radio magnetic-contact detector with an optional external circuit."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-СМК"
     detector_model = "С2000Р-СМК"
     detector_description = "Radio magnetic-contact detector"
     dpls_address_count = 1
@@ -2122,6 +2151,8 @@ class C2000RSMK(BolidDPLSDetectorBase):
 class C2000SMK(BolidDPLSDetectorBase):
     """Wired one-address magnetic-contact detector С2000-СМК."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-СМК"
     detector_model = "С2000-СМК"
     detector_description = "DPLS magnetic-contact detector"
     documented_target_firmware = "1.04"
@@ -2217,6 +2248,8 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
 class SVK15_3_8_1_B3(BolidDPLSWaterMeterBase):
     """Radio water meter with integrated С2000Р-АСР1 исп.01."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "СВК15-3-8-1-Б3"
     detector_model = "СВК15-3-8-1-Б3"
     detector_description = "Radio DPLS-visible water meter"
     documented_target_firmware = "1.07"
@@ -2235,6 +2268,8 @@ class SVK15_3_8_1_B3(BolidDPLSWaterMeterBase):
 class SVK15_3_2_B(BolidDPLSWaterMeterBase):
     """Wired DPLS water meter with integrated С2000-АСР1."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "СВК15-3-2-Б"
     detector_model = "СВК15-3-2-Б"
     detector_description = "Wired DPLS water meter"
     physical_capabilities = BolidDPLSWaterMeterBase.physical_capabilities + (
@@ -2507,6 +2542,8 @@ class BolidDPLSOutputBase:
 class C2000RRM(BolidDPLSOutputBase):
     """Two-output radio relay module С2000Р-РМ and исп.01."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-РМ"
     model_name = "С2000Р-РМ"
     description = "Radio relay module"
     dpls_address_count = 2
@@ -2584,6 +2621,8 @@ class C2000RRM(BolidDPLSOutputBase):
 class C2000RSirena(BolidDPLSOutputBase):
     """Independent light and sound outputs of С2000Р-Сирена."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-Сирена"
     model_name = "С2000Р-Сирена"
     description = "Radio light and sound annunciator"
     dpls_address_count = 2
@@ -2612,6 +2651,8 @@ class C2000RSirena(BolidDPLSOutputBase):
 class C2000DZ:
     """One-address wired water-leak detector С2000-ДЗ."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-ДЗ"
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 1
@@ -2940,6 +2981,8 @@ class BolidDPLSNumericDeviceBase:
 class C2000VT(BolidDPLSNumericDeviceBase):
     """Bolid С2000-ВТ and С2000-ВТ исп.01 DPLS thermohygrometers."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-ВТ"
     dpls_address_count = 2
 
     class Variant(str, Enum):
@@ -3001,6 +3044,8 @@ class C2000VT(BolidDPLSNumericDeviceBase):
 class C2000VTI(BolidDPLSNumericDeviceBase):
     """Bolid С2000-ВТИ and С2000-ВТИ исп.01 display thermohygrometers."""
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-ВТИ"
     dpls_address_count = 3
     gateway_transport_supported = False
     gateway_transport_limitation = (
@@ -3069,6 +3114,8 @@ class C2000SP4:
     С2000-СП4/220 исп.02 is explicitly not supported.
     """
 
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-СП4/24(220)"
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 5
@@ -3426,3 +3473,29 @@ class C2000SP4:
             f"out1: {self.attr_out1['state']}, "
             f"description: {self.attr_description}"
         )
+
+
+EQUIPMENT_CLASSES = (
+    C2000DZ,
+    C2000IP03,
+    C2000KDL,
+    C2000KPB,
+    C2000RARR125,
+    C2000RDIP,
+    C2000RIP,
+    C2000RRM,
+    C2000RSMK,
+    C2000RST01,
+    C2000RSirena,
+    C2000SMK,
+    C2000SP4,
+    C2000ST04,
+    C2000VT,
+    C2000VTI,
+    DIP34A05,
+    M3000BB1020,
+    MIP24Isp20,
+    S2000PP,
+    SVK15_3_2_B,
+    SVK15_3_8_1_B3,
+)

@@ -81,6 +81,9 @@ MONITORING_REGISTERS = (
 class DN310:
     """Dyna Drive DN310 variable-frequency drive."""
 
+    equipment_manufacturer = "Dyna Drive"
+    equipment_model = "DN310"
+
     uses_stable_entry_identity = True
     protocol = "Modbus RTU slave; FC03/FC06 word operations"
     persistent_write_ranges = ((0xF000, 0xFEFF), (0xA000, 0xACFF))
@@ -255,3 +258,6 @@ class DN310:
         if code in RESERVED_FAULTS:
             return f"reserved_0x{code:04x}"
         return f"unknown_{code}"
+
+
+EQUIPMENT_CLASSES = (DN310,)

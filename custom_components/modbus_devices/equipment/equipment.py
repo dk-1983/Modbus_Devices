@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from pathlib import Path
 import random
@@ -12,7 +11,7 @@ from serial.tools import list_ports
 
 from ..const import Config
 from ..gateway import GatewayCapabilitySpec, ResolvedDeviceMapping
-from ..manufacturer import canonical_manufacturer_name, manufacturer_module_name
+from ..manufacturer import MANUFACTURERS, canonical_manufacturer_name, manufacturer_module_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,22 +27,26 @@ def canonical_equipment_class_name(cls_name: str) -> str:
 
 
 def get_class(module: str, cls_name: str) -> type[Any]:
-    """Return an equipment class from a driver module."""
-    module = manufacturer_module_name(module)
-    imported_module = __import__(
-        name=module,
-        globals=globals(),
-        locals=locals(),
-        level=1,
+    """Return an explicitly registered equipment class."""
+    module_name = manufacturer_module_name(module)
+    canonical_name = next(
+        manufacturer.canonical_name
+        for manufacturer in MANUFACTURERS
+        if manufacturer.module_name == module_name
     )
-    return getattr(imported_module, canonical_equipment_class_name(cls_name))
+    target_name = canonical_equipment_class_name(cls_name)
+    for equipment_class in _get_equipment_classes(canonical_name):
+        if equipment_class.__name__ == target_name:
+            return equipment_class
+    raise ValueError(
+        f"Unsupported equipment class {cls_name!r} for {canonical_name}"
+    )
 
 
 def get_equipment_display_name(module: str, cls_name: str) -> str:
     """Return the physical model label for a canonical selector value."""
     equipment_class = get_class(module, cls_name)
-    instance = equipment_class(None, 1)
-    return str(instance.attr_model_name)
+    return equipment_class.equipment_model
 
 
 def get_gateway_requirement(module: str, cls_name: str):
@@ -122,54 +125,82 @@ def validate_equipment_gateway_mapping(
 
 
 def get_classes_from_files() -> dict[str, list[str]]:
-    """Return available equipment classes grouped by manufacturer."""
-    result: dict[str, list[str]] = {}
-    directory = Path(__file__).parent
+    """Return explicitly registered equipment classes by manufacturer."""
+    return {
+        manufacturer.canonical_name: [
+            equipment_class.__name__
+            for equipment_class in _get_equipment_classes(
+                manufacturer.canonical_name
+            )
+        ]
+        for manufacturer in MANUFACTURERS
+    }
 
-    driver_files = (
-        path
-        for path in directory.iterdir()
-        if path.is_file()
-        and path.suffix == ".py"
-        and path.stem not in {"__init__", "equipment"}
+
+def _get_equipment_classes(manufacturer: str) -> tuple[type[Any], ...]:
+    """Load and validate a manufacturer's explicit equipment export."""
+    canonical_name = canonical_manufacturer_name(manufacturer)
+    module_name = manufacturer_module_name(canonical_name)
+    module = __import__(
+        name=module_name,
+        globals=globals(),
+        locals=locals(),
+        level=1,
+    )
+    try:
+        exported = module.EQUIPMENT_CLASSES
+    except AttributeError as exc:
+        raise RuntimeError(
+            f"Equipment module {module_name!r} has no EQUIPMENT_CLASSES export"
+        ) from exc
+    return _validate_equipment_classes(
+        canonical_name,
+        module_name,
+        exported,
     )
 
-    for driver_file in driver_files:
-        module_name = driver_file.stem
-        module = __import__(
-            name=module_name,
-            globals=globals(),
-            locals=locals(),
-            level=1,
-        )
 
-        for class_name, equipment_class in inspect.getmembers(
-            module,
-            inspect.isclass,
-        ):
-            if equipment_class.__module__.split(".")[-1] != module_name:
-                continue
+def _validate_equipment_classes(
+    manufacturer: str,
+    module_name: str,
+    exported: object,
+) -> tuple[type[Any], ...]:
+    """Validate an explicit equipment-class registry without instantiation."""
+    if not isinstance(exported, tuple):
+        raise TypeError(f"{module_name}.EQUIPMENT_CLASSES must be a tuple")
 
-            try:
-                instance = equipment_class(None, 1)
-                manufacturer = canonical_manufacturer_name(
-                    instance.attr_manufactures_name
-                )
-            except Exception:
-                _LOGGER.debug(
-                    "Unable to inspect equipment class %s from module %s",
-                    class_name,
-                    module_name,
-                    exc_info=True,
-                )
-                continue
+    classes: list[type[Any]] = []
+    seen_classes: set[type[Any]] = set()
+    seen_models: set[str] = set()
+    for entry in exported:
+        if not isinstance(entry, type):
+            raise TypeError(
+                f"{module_name}.EQUIPMENT_CLASSES contains a non-class entry"
+            )
+        if entry.__module__.split(".")[-1] != module_name:
+            raise TypeError(
+                f"{entry.__name__} does not belong to equipment module {module_name}"
+            )
+        if entry in seen_classes:
+            raise ValueError(f"Duplicate equipment class: {entry.__name__}")
 
-            result.setdefault(manufacturer, []).append(class_name)
+        class_manufacturer = getattr(entry, "equipment_manufacturer", None)
+        if class_manufacturer != manufacturer:
+            raise ValueError(
+                f"{entry.__name__} declares manufacturer {class_manufacturer!r}, "
+                f"expected {manufacturer!r}"
+            )
+        model = getattr(entry, "equipment_model", None)
+        if not isinstance(model, str) or not model:
+            raise ValueError(f"{entry.__name__} has no canonical equipment_model")
+        if model in seen_models:
+            raise ValueError(f"Duplicate equipment model: {model}")
 
-    for class_names in result.values():
-        class_names.sort()
+        seen_classes.add(entry)
+        seen_models.add(model)
+        classes.append(entry)
 
-    return result
+    return tuple(classes)
 
 
 def get_serial_ports() -> list[str]:
