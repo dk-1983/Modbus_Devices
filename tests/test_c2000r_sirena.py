@@ -16,11 +16,13 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, *, bits=None, error=False, address=None, value=None):
+    def __init__(self, *, bits=None, error=False, address=None, value=None,
+                 function_code=None):
         self.bits = bits
         self._error = error
         self.address = address
         self.value = value
+        self.function_code = function_code
 
     def isError(self):
         return self._error
@@ -31,11 +33,11 @@ class Client:
         self.writes = []
 
     async def read_coils(self, *, address, count, device_id):
-        return Response(bits=[True, False][:count])
+        return Response(bits=[True, False][:count], function_code=1)
 
     async def write_coil(self, *, address, value, device_id):
         self.writes.append((address, value))
-        return Response(address=address, value=value)
+        return Response(address=address, value=value, function_code=5)
 
 
 def mapping(*objects, base=40, count=2, kdl=10, connection="tcp:a"):

@@ -1,5 +1,7 @@
-"""Modbus client connection."""
+"""Modbus client connection and per-client request serialization."""
 
+import asyncio
+from functools import wraps
 import logging
 from typing import Any
 
@@ -18,6 +20,38 @@ from homeassistant.const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class SerializedModbusClient:
+    """Serialize every physical Modbus request for one client lifecycle."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._request_lock = asyncio.Lock()
+
+    @property
+    def request_lock(self) -> asyncio.Lock:
+        """Expose the physical-request boundary for protocol-level tests."""
+        return self._request_lock
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self._client, name)
+        if not callable(attribute) or not name.startswith(("read_", "write_")):
+            return attribute
+
+        @wraps(attribute)
+        async def serialized_request(*args, **kwargs):
+            async with self._request_lock:
+                return await attribute(*args, **kwargs)
+
+        return serialized_request
+
+
+def ensure_serialized_client(client: Any) -> SerializedModbusClient | None:
+    """Return one idempotent serialized logical client contract."""
+    if client is None or isinstance(client, SerializedModbusClient):
+        return client
+    return SerializedModbusClient(client)
 
 
 async def connect_modbus(data: dict[str, Any]):
@@ -45,7 +79,7 @@ async def connect_modbus(data: dict[str, Any]):
                 data[Config.CONF_COM_PORT],
             )
 
-            return client
+            return ensure_serialized_client(client)
 
         # -------------------------
         # TCP
@@ -64,7 +98,7 @@ async def connect_modbus(data: dict[str, Any]):
                 data[CONF_PORT],
             )
 
-            return client
+            return ensure_serialized_client(client)
 
         # -------------------------
         # UDP
@@ -83,7 +117,7 @@ async def connect_modbus(data: dict[str, Any]):
                 data[CONF_PORT],
             )
 
-            return client
+            return ensure_serialized_client(client)
 
         raise ValueError(f"Unknown Modbus mode: {mode}")
 

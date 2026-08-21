@@ -14,8 +14,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
 from homeassistant.const import Platform, UnitOfTemperature
 
-from ..s2000_pp import validated_bits
-from .equipment import validate_write_response
+from ..modbus_validation import validate_fc05_response, validated_bits
 
 
 class TRM138:
@@ -460,7 +459,13 @@ class PLC110_24_60_K_M:
             value=bool(value),
             device_id=self.attr_device_id,
         )
-        validate_write_response(response, f"set PLC110 output {output}")
+        validate_fc05_response(
+            response,
+            address=current["address"],
+            value=bool(value),
+            device_id=self.attr_device_id,
+            operation=f"set PLC110 output {output}",
+        )
         current["state"] = bool(value)
         self._outputs[output] = current
         return current
@@ -485,7 +490,12 @@ class PLC110_24_60_K_M:
             response = await reader(
                 address=start, count=count, device_id=self.attr_device_id
             )
-            bits = validated_bits(response, count, f"read PLC110 {data_area} at {start}")
+            bits = validated_bits(
+                response,
+                count,
+                f"read PLC110 {data_area} at {start}",
+                expected_function=2 if data_area == "discrete_input" else 1,
+            )
             result.update(
                 {start + offset: state for offset, state in enumerate(bits)}
             )

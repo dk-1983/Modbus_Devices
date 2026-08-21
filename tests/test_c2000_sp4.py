@@ -32,10 +32,14 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, *, bits=None, registers=None, error=False):
+    def __init__(self, *, bits=None, registers=None, error=False,
+                 function_code=None, address=None, value=None):
         self.bits = bits
         self.registers = registers
         self._error = error
+        self.function_code = function_code
+        self.address = address
+        self.value = value
 
     def isError(self):
         return self._error
@@ -47,18 +51,23 @@ class Client:
         self.error = False
 
     async def read_coils(self, address, count, device_id):
-        return Response(bits=[False] * count, error=self.error)
+        return Response(bits=[False] * count, error=self.error, function_code=1)
 
     async def read_holding_registers(self, address, count, device_id):
-        return Response(registers=[54] * count, error=self.error)
+        return Response(registers=[54] * count, error=self.error, function_code=3)
 
     async def read_input_registers(self, address, count, device_id):
         values = ([54, 149, 198, 999] + [0] * 12) * (count // 16)
-        return Response(registers=values, error=self.error)
+        return Response(registers=values, error=self.error, function_code=4)
 
     async def write_coil(self, address, value, device_id):
         self.writes.append((address, value, device_id))
-        return Response(error=self.error)
+        return Response(
+            error=self.error,
+            function_code=5,
+            address=address,
+            value=value,
+        )
 
 
 def gateway(name="pp-a"):

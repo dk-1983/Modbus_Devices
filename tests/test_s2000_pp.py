@@ -89,6 +89,7 @@ def test_configuration_reader_uses_bounded_fc04_chunks() -> None:
     class Response:
         def __init__(self, registers: list[int]) -> None:
             self.registers = registers
+            self.function_code = 4
 
         @staticmethod
         def isError() -> bool:

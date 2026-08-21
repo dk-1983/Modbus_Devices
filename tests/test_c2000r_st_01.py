@@ -20,8 +20,9 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, registers=None, error=False):
+    def __init__(self, registers=None, error=False, function_code=None):
         self.registers, self._error = registers, error
+        self.function_code = function_code
 
     def isError(self):
         return self._error
@@ -36,10 +37,10 @@ class Client:
         if self.failure == "invalid": return object()
         if self.failure == "truncated": return Response([])
         if self.failure == "error": return Response(error=True)
-        return Response([3])
+        return Response([3], function_code=3)
 
     async def read_input_registers(self, **kwargs):
-        return Response([3, 149, 211, 187, 999] + [0] * 11)
+        return Response([3, 149, 211, 187, 999] + [0] * 11, function_code=4)
 
 
 def mapping(*objects, base=30, kdl=10, connection="tcp:pp"):

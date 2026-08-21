@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from typing import Awaitable, Callable, Iterable
+from weakref import WeakKeyDictionary
 
 from pymodbus.exceptions import ModbusException
 
@@ -14,6 +15,11 @@ from .gateway import (
     ObjectKind,
     ResolvedObjectMapping,
     ResolvedZoneDetails,
+)
+from .modbus_validation import (
+    validate_fc06_response,
+    validated_bits,
+    validated_registers,
 )
 
 S2000_PP_CONFIGURATION_START = 0
@@ -89,14 +95,15 @@ class _SelectorGatewaySession:
     pending_request: tuple[str, int] | None = None
 
 
-_SELECTOR_GATEWAY_SESSIONS: dict[str, _SelectorGatewaySession] = {}
+_SELECTOR_CLIENT_SESSIONS: WeakKeyDictionary[
+    object, dict[str, _SelectorGatewaySession]
+] = WeakKeyDictionary()
 
 
-def _gateway_selector_session(gateway_key: str) -> _SelectorGatewaySession:
-    """Return the shared serialization boundary for S2000-PP selectors."""
-    return _SELECTOR_GATEWAY_SESSIONS.setdefault(
-        gateway_key, _SelectorGatewaySession(asyncio.Lock())
-    )
+def _gateway_selector_session(client, gateway_key: str) -> _SelectorGatewaySession:
+    """Return a selector session scoped to one client and gateway lifecycle."""
+    sessions = _SELECTOR_CLIENT_SESSIONS.setdefault(client, {})
+    return sessions.setdefault(gateway_key, _SelectorGatewaySession(asyncio.Lock()))
 
 
 def decode_s2000_pp_q8_8(raw: int) -> float:
@@ -127,7 +134,7 @@ class S2000PPNumericValueReader:
     def __init__(self, client, modbus_unit_id: int, gateway_key: str) -> None:
         self._client = client
         self._modbus_unit_id = modbus_unit_id
-        self._session = _gateway_selector_session(gateway_key)
+        self._session = _gateway_selector_session(client, gateway_key)
 
     async def async_read(
         self,
@@ -170,12 +177,15 @@ class S2000PPNumericValueReader:
         error = _numeric_error_result(response, kind, zone, "select numeric zone")
         if error is not None:
             return error
-        address = getattr(response, "address", None)
-        values = getattr(response, "registers", None)
-        echoed = getattr(response, "value", None)
-        if echoed is None and isinstance(values, list) and values:
-            echoed = values[0]
-        if address != S2000_PP_NUMERIC_SELECTOR or echoed != zone:
+        try:
+            validate_fc06_response(
+                response,
+                address=S2000_PP_NUMERIC_SELECTOR,
+                value=zone,
+                device_id=self._modbus_unit_id,
+                operation="select numeric zone",
+            )
+        except ModbusException:
             return S2000PPNumericResult(
                 NumericResultStatus.PROTOCOL_ERROR,
                 kind,
@@ -195,18 +205,24 @@ class S2000PPNumericValueReader:
         error = _numeric_error_result(response, kind, zone, "read numeric result")
         if error is not None:
             return error
-        registers = getattr(response, "registers", None)
-        if not isinstance(registers, list) or len(registers) != 1:
+        try:
+            registers = validated_registers(
+                response,
+                1,
+                "read numeric result",
+                expected_function=3,
+            )
+        except ModbusException as exc:
             return S2000PPNumericResult(
                 NumericResultStatus.PROTOCOL_ERROR,
                 kind,
                 zone,
-                message="numeric result must contain exactly one register",
+                message=str(exc),
             )
         raw = registers[0]
         try:
             value = decode_s2000_pp_q8_8(raw)
-        except (TypeError, ValueError) as exc:
+        except (ModbusException, TypeError, ValueError) as exc:
             return S2000PPNumericResult(
                 NumericResultStatus.PROTOCOL_ERROR,
                 kind,
@@ -228,7 +244,7 @@ class S2000PPCounterValueReader:
     def __init__(self, client, modbus_unit_id: int, gateway_key: str) -> None:
         self._client = client
         self._modbus_unit_id = modbus_unit_id
-        self._session = _gateway_selector_session(gateway_key)
+        self._session = _gateway_selector_session(client, gateway_key)
 
     async def async_read(self, zone_table_number: int) -> S2000PPCounterResult:
         """Advance one serialized transaction once; never retry or sleep."""
@@ -269,12 +285,15 @@ class S2000PPCounterValueReader:
         error = _counter_error_result(response, zone, "select counter zone")
         if error is not None:
             return error
-        address = getattr(response, "address", None)
-        registers = getattr(response, "registers", None)
-        echoed = getattr(response, "value", None)
-        if echoed is None and isinstance(registers, list) and registers:
-            echoed = registers[0]
-        if address != S2000_PP_COUNTER_SELECTOR or echoed != zone:
+        try:
+            validate_fc06_response(
+                response,
+                address=S2000_PP_COUNTER_SELECTOR,
+                value=zone,
+                device_id=self._modbus_unit_id,
+                operation="select counter zone",
+            )
+        except ModbusException:
             return S2000PPCounterResult(
                 NumericResultStatus.PROTOCOL_ERROR,
                 zone,
@@ -292,8 +311,14 @@ class S2000PPCounterValueReader:
         if error is not None:
             return error
         try:
-            raw_count = decode_s2000_pp_counter(getattr(response, "registers", None))
-        except (TypeError, ValueError) as exc:
+            registers = validated_registers(
+                response,
+                S2000_PP_COUNTER_REGISTER_COUNT,
+                "read counter result",
+                expected_function=3,
+            )
+            raw_count = decode_s2000_pp_counter(registers)
+        except (ModbusException, TypeError, ValueError) as exc:
             return S2000PPCounterResult(
                 NumericResultStatus.PROTOCOL_ERROR,
                 zone,
@@ -642,6 +667,7 @@ class S2000PPConfigurationReader:
                     response,
                     chunk_count,
                     f"{operation} at {chunk_start}",
+                    expected_function=4,
                 )
             )
         return registers
@@ -686,7 +712,12 @@ class S2000PPRuntimeReader:
                 count=count,
                 device_id=self._modbus_unit_id,
             )
-            bits = validated_bits(response, count, f"read coils at {start}")
+            bits = validated_bits(
+                response,
+                count,
+                f"read coils at {start}",
+                expected_function=1,
+            )
             result.update({start + offset: value for offset, value in enumerate(bits)})
         return result
 
@@ -726,6 +757,7 @@ class S2000PPRuntimeReader:
                 response,
                 count,
                 f"read zone states at {start}",
+                expected_function=3,
             )
             result.update(
                 {start + offset: value for offset, value in enumerate(registers)}
@@ -768,6 +800,7 @@ class S2000PPRuntimeReader:
                 response,
                 count,
                 f"read expanded zone states at {start}",
+                expected_function=4,
             )
             for offset, mapping in enumerate(group):
                 block_start = offset * S2000_PP_EXPANDED_ZONE_SIZE
@@ -777,41 +810,6 @@ class S2000PPRuntimeReader:
                     ]
                 )
         return result
-
-
-def validated_registers(response, expected: int, operation: str) -> list[int]:
-    """Validate a Modbus read response and its exact register count."""
-    if response is None:
-        raise ModbusException(f"Empty Modbus response for {operation}")
-    is_error = getattr(response, "isError", None)
-    if not callable(is_error):
-        raise ModbusException(f"Invalid Modbus response for {operation}")
-    if is_error():
-        raise ModbusException(f"Modbus error response for {operation}: {response}")
-    registers = getattr(response, "registers", None)
-    if not isinstance(registers, list):
-        raise ModbusException(f"Missing registers in response for {operation}")
-    _validate_register_count(registers, expected, operation)
-    return registers
-
-
-def validated_bits(response, expected: int, operation: str) -> list[bool]:
-    """Validate a Modbus bit response, allowing protocol byte padding."""
-    if response is None:
-        raise ModbusException(f"Empty Modbus response for {operation}")
-    is_error = getattr(response, "isError", None)
-    if not callable(is_error):
-        raise ModbusException(f"Invalid Modbus response for {operation}")
-    if is_error():
-        raise ModbusException(f"Modbus error response for {operation}: {response}")
-    bits = getattr(response, "bits", None)
-    if not isinstance(bits, list) or len(bits) < expected:
-        actual = 0 if not isinstance(bits, list) else len(bits)
-        raise ModbusException(
-            f"Short Modbus response for {operation}: "
-            f"expected at least {expected}, got {actual}"
-        )
-    return [bool(bit) for bit in bits[:expected]]
 
 
 def _validate_register_count(

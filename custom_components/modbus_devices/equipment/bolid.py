@@ -29,6 +29,12 @@ from ..gateway import (
     ResolvedDeviceMapping,
     ResolvedObjectMapping,
 )
+from ..modbus_validation import (
+    validate_fc05_response,
+    validate_modbus_response,
+    validated_bits,
+    validated_registers,
+)
 from ..s2000_pp import (
     S2000PPCounterValueReader,
     S2000PPRuntimeReader,
@@ -36,10 +42,8 @@ from ..s2000_pp import (
     S2000PPZoneState,
     NumericParameterKind,
     NumericResultStatus,
-    validated_bits,
-    validated_registers,
 )
-from .equipment import canonical_equipment_class_name, validate_write_response
+from .equipment import canonical_equipment_class_name
 
 _LOGGER = getLogger(__name__)
 
@@ -335,7 +339,7 @@ class M3000BB1020:
         response = await self.attr_client.write_registers(
             address=60007, values=time_values, device_id=self.attr_device_id
         )
-        validate_write_response(response, "set M3000-BB-1020 time")
+        validate_modbus_response(response, "set M3000-BB-1020 time")
         self.attr_init_time = value
         return self.attr_init_time
 
@@ -406,7 +410,13 @@ class M3000BB1020:
         response = await self.attr_client.write_coil(
             address=attr["address"], value=value, device_id=self.attr_device_id
         )
-        validate_write_response(response, f"set M3000-BB-1020 output {output}")
+        validate_fc05_response(
+            response,
+            address=attr["address"],
+            value=bool(value),
+            device_id=self.attr_device_id,
+            operation=f"set M3000-BB-1020 output {output}",
+        )
         attr["state"] = bool(value)
         setattr(self, f"attr_out{output}", attr)
         return getattr(self, f"attr_out{output}")
@@ -429,9 +439,12 @@ class M3000BB1020:
                     value=values[index],
                     device_id=self.attr_device_id,
                 )
-                validate_write_response(
+                validate_fc05_response(
                     response,
-                    f"set M3000-BB-1020 output {output}",
+                    address=attr["address"],
+                    value=bool(values[index]),
+                    device_id=self.attr_device_id,
+                    operation=f"set M3000-BB-1020 output {output}",
                 )
                 attr["state"] = bool(values[index])
                 setattr(self, f"attr_out{output}", attr)
@@ -568,6 +581,7 @@ class S2000PP:
             response,
             2,
             "read S2000-PP type and firmware version",
+            expected_function=3,
         )
         if registers[0] != self.DEVICE_TYPE:
             raise ModbusException(
@@ -595,6 +609,7 @@ class S2000PP:
             response,
             4,
             "read S2000-PP diagnostics",
+            expected_function=2,
         )
         result = []
         for number, state in enumerate(states, start=1):
@@ -1001,7 +1016,13 @@ class C2000KPB:
             value=value,
             device_id=self.attr_device_id,
         )
-        validate_write_response(response, f"set C2000-KPB output {output}")
+        validate_fc05_response(
+            response,
+            address=attr["address"],
+            value=bool(value),
+            device_id=self.attr_device_id,
+            operation=f"set C2000-KPB output {output}",
+        )
         attr["state"] = bool(value)
         setattr(self, f"attr_out{output}", attr)
         return attr
@@ -2417,7 +2438,13 @@ class BolidDPLSOutputBase:
         response = await self.attr_client.write_coil(
             address=address, value=value, device_id=self.attr_device_id
         )
-        validate_write_response(response, f"set {self.__class__.__name__} output {output}")
+        validate_fc05_response(
+            response,
+            address=address,
+            value=bool(value),
+            device_id=self.attr_device_id,
+            operation=f"set {self.__class__.__name__} output {output}",
+        )
         if getattr(response, "address", None) != address:
             raise ModbusException("FC05 response does not echo the requested address")
         echoed = getattr(response, "value", None)
@@ -3322,7 +3349,13 @@ class C2000SP4:
             value=value,
             device_id=self.attr_device_id,
         )
-        validate_write_response(result, f"set C2000-SP4 output {output}")
+        validate_fc05_response(
+            result,
+            address=attr["address"],
+            value=bool(value),
+            device_id=self.attr_device_id,
+            operation=f"set C2000-SP4 output {output}",
+        )
 
         attr["state"] = bool(value)
 

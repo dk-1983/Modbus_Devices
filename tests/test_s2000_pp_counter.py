@@ -14,12 +14,14 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, *, registers=None, error=False, code=None, address=None, value=None):
+    def __init__(self, *, registers=None, error=False, code=None, address=None,
+                 value=None, function_code=None):
         self.registers = registers
         self._error = error
         self.exception_code = code
         self.address = address
         self.value = value
+        self.function_code = function_code
 
     def isError(self):
         return self._error
@@ -33,10 +35,16 @@ class Client:
 
     async def write_register(self, **kwargs):
         self.writes.append(kwargs)
-        return Response(address=kwargs["address"], value=kwargs["value"])
+        return Response(
+            address=kwargs["address"],
+            value=kwargs["value"],
+            function_code=6,
+        )
 
     async def read_holding_registers(self, **kwargs):
         self.reads.append(kwargs)
+        if hasattr(self.result, "_error") and not self.result._error:
+            self.result.function_code = 3
         return self.result
 
 

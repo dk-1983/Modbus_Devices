@@ -50,10 +50,14 @@ def mapping(*objects, orion_address: int = 10) -> ResolvedDeviceMapping:
 
 
 class Response:
-    def __init__(self, *, bits=None, registers=None, error: bool = False) -> None:
+    def __init__(self, *, bits=None, registers=None, error: bool = False,
+                 function_code=None, address=None, value=None) -> None:
         self.bits = bits
         self.registers = registers
         self._error = error
+        self.function_code = function_code
+        self.address = address
+        self.value = value
 
     def isError(self) -> bool:
         return self._error
@@ -68,20 +72,27 @@ class Client:
 
     async def read_coils(self, address: int, count: int, device_id: int):
         self.coil_reads.append((address, count, device_id))
-        return Response(bits=[True] * count, error=self.read_error)
+        return Response(bits=[True] * count, error=self.read_error, function_code=1)
 
     async def read_holding_registers(self, address: int, count: int, device_id: int):
-        return Response(registers=[121] * count, error=self.read_error)
+        return Response(
+            registers=[121] * count, error=self.read_error, function_code=3
+        )
 
     async def read_input_registers(self, address: int, count: int, device_id: int):
         registers = []
         for _ in range(count // 16):
             registers.extend([121, 122, 123] + [0] * 13)
-        return Response(registers=registers, error=self.read_error)
+        return Response(registers=registers, error=self.read_error, function_code=4)
 
     async def write_coil(self, address: int, value: bool, device_id: int):
         self.writes.append((address, value, device_id))
-        return Response(error=self.write_error)
+        return Response(
+            error=self.write_error,
+            function_code=5,
+            address=address,
+            value=value,
+        )
 
 
 def test_rejects_missing_mapping_before_io() -> None:

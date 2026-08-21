@@ -10,9 +10,12 @@ from custom_components.modbus_devices.equipment.owen import PLC110_24_60_K_M
 
 
 class Response:
-    def __init__(self, *, bits=None, error=False):
+    def __init__(self, *, bits=None, error=False, function_code=None, address=None, value=None):
         self.bits = bits
         self._error = error
+        self.function_code = function_code
+        self.address = address
+        self.value = value
 
     def isError(self):
         return self._error
@@ -26,14 +29,26 @@ class Client:
         self.write_response = Response()
 
     async def read_discrete_inputs(self, *, address, count, device_id):
-        return Response(bits=[self.discrete.get(address + item, False) for item in range(count)])
+        return Response(
+            bits=[self.discrete.get(address + item, False) for item in range(count)],
+            function_code=2,
+        )
 
     async def read_coils(self, *, address, count, device_id):
-        return Response(bits=[self.coils.get(address + item, False) for item in range(count)])
+        return Response(
+            bits=[self.coils.get(address + item, False) for item in range(count)],
+            function_code=1,
+        )
 
     async def write_coil(self, **kwargs):
         self.writes.append(kwargs)
-        return self.write_response
+        if self.write_response._error:
+            return self.write_response
+        return Response(
+            function_code=5,
+            address=kwargs["address"],
+            value=kwargs["value"],
+        )
 
 
 def compact_mapping(di_area="discrete_input", di_base=100, di_stride=1, do_base=200, do_stride=1):

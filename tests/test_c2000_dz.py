@@ -16,9 +16,10 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, *, registers=None, error=False):
+    def __init__(self, *, registers=None, error=False, function_code=None):
         self.registers = registers
         self._error = error
+        self.function_code = function_code
 
     def isError(self):
         return self._error
@@ -39,10 +40,12 @@ class Client:
             return Response(registers=[])
         if self.failure == "error":
             return Response(error=True)
-        return Response(registers=[self.primary] * count)
+        return Response(registers=[self.primary] * count, function_code=3)
 
     async def read_input_registers(self, *, address, count, device_id):
-        return Response(registers=(self.expanded + [0] * count)[:count])
+        return Response(
+            registers=(self.expanded + [0] * count)[:count], function_code=4
+        )
 
 
 def mapping(*objects, base=30, variant="v1_13"):

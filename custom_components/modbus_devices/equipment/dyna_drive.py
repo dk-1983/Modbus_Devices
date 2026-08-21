@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import IntEnum
 from typing import Any
 
-from pymodbus.exceptions import ModbusException
+from ..modbus_validation import validate_fc06_response, validated_registers
 
 from homeassistant.const import EntityCategory, Platform
 
@@ -218,7 +218,13 @@ class DN310:
             value=int(command),
             device_id=self.attr_device_id,
         )
-        self._validate_command_response(response, command)
+        validate_fc06_response(
+            response,
+            address=0x2000,
+            value=int(command),
+            device_id=self.attr_device_id,
+            operation="send DN310 command",
+        )
 
     async def _read_words(self, address: int, count: int, operation: str) -> list[int]:
         response = await self.attr_client.read_holding_registers(
@@ -226,50 +232,12 @@ class DN310:
             count=count,
             device_id=self.attr_device_id,
         )
-        if response is None:
-            raise ModbusException(f"Empty DN310 response for {operation}")
-        is_error = getattr(response, "isError", None)
-        if not callable(is_error):
-            raise ModbusException(f"Invalid DN310 response for {operation}")
-        if is_error():
-            raise ModbusException(f"DN310 Modbus error for {operation}: {response}")
-        if getattr(response, "function_code", None) != 3:
-            raise ModbusException(f"DN310 response has wrong function for {operation}")
-        registers = getattr(response, "registers", None)
-        if not isinstance(registers, (list, tuple)) or len(registers) != count:
-            raise ModbusException(f"Truncated DN310 response for {operation}")
-        if any(
-            type(value) is not int or not 0 <= value <= 0xFFFF for value in registers
-        ):
-            raise ModbusException(f"Invalid DN310 register payload for {operation}")
-        return list(registers)
-
-    def _validate_command_response(self, response: Any, command: DN310Command) -> None:
-        if response is None:
-            raise ModbusException("Empty DN310 command response")
-        is_error = getattr(response, "isError", None)
-        if not callable(is_error):
-            raise ModbusException("Invalid DN310 command response")
-        if is_error():
-            raise ModbusException(f"DN310 command error response: {response}")
-        if getattr(response, "function_code", None) != 6:
-            raise ModbusException("DN310 command response has wrong function code")
-        if getattr(response, "address", None) != 0x2000:
-            raise ModbusException("DN310 command response has wrong register echo")
-        echoed_value = getattr(response, "value", None)
-        if echoed_value is None:
-            registers = getattr(response, "registers", None)
-            echoed_value = (
-                registers[0]
-                if isinstance(registers, (list, tuple)) and registers
-                else None
-            )
-        if echoed_value != int(command):
-            raise ModbusException("DN310 command response has wrong value echo")
-        for attribute in ("dev_id", "device_id", "slave_id", "unit_id"):
-            echoed_device_id = getattr(response, attribute, None)
-            if echoed_device_id is not None and echoed_device_id != self.attr_device_id:
-                raise ModbusException("DN310 command response has wrong device id")
+        return validated_registers(
+            response,
+            count,
+            f"DN310 {operation}",
+            expected_function=3,
+        )
 
     @staticmethod
     def _state_snapshot(state: str, code: int) -> dict[str, Any]:

@@ -32,9 +32,10 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, registers=None, *, error=False):
+    def __init__(self, registers=None, *, error=False, function_code=None):
         self.registers = registers
         self._error = error
+        self.function_code = function_code
 
     def isError(self):
         return self._error
@@ -59,7 +60,7 @@ class Client:
         values = self.primary[:count]
         if self.failure == "truncated":
             values = values[:-1]
-        return Response(values)
+        return Response(values, function_code=3)
 
     async def read_input_registers(self, *, address, count, device_id):
         self.input_calls.append((address, count, device_id))
@@ -69,7 +70,7 @@ class Client:
         values = []
         for index in range(block_count):
             values.extend([self.expanded[index], *([0] * 15)])
-        return Response(values)
+        return Response(values, function_code=4)
 
 
 def gateway(name="pp-a", connection="serial:COM1"):

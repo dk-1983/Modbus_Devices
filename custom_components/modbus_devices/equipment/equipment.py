@@ -8,8 +8,6 @@ from pathlib import Path
 import random
 import sys
 from typing import Any
-
-from pymodbus.exceptions import ModbusException
 from serial.tools import list_ports
 
 from ..const import Config
@@ -27,19 +25,6 @@ LEGACY_EQUIPMENT_CLASS_ALIASES: dict[str, str] = {
 def canonical_equipment_class_name(cls_name: str) -> str:
     """Normalize persisted legacy equipment class names at one boundary."""
     return LEGACY_EQUIPMENT_CLASS_ALIASES.get(cls_name, cls_name)
-
-
-def validate_write_response(response: Any, operation: str) -> None:
-    """Validate that a Modbus write request was accepted."""
-    if response is None:
-        raise ModbusException(f"Empty Modbus response for {operation}")
-
-    is_error = getattr(response, "isError", None)
-    if not callable(is_error):
-        raise ModbusException(f"Invalid Modbus response for {operation}")
-
-    if is_error():
-        raise ModbusException(f"Modbus error response for {operation}: {response}")
 
 
 def get_class(module: str, cls_name: str) -> type[Any]:

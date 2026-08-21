@@ -19,17 +19,19 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, registers): self.registers = registers
+    def __init__(self, registers, function_code):
+        self.registers = registers
+        self.function_code = function_code
     def isError(self): return False
 
 
 class Client:
     async def read_holding_registers(self, *, address, count, device_id):
-        return Response([3, 35][:count])
+        return Response([3, 35][:count], 3)
 
     async def read_input_registers(self, *, address, count, device_id):
         code = 3 if address < 30000 else 35
-        return Response([code, 149, 211, 187, 999] + [0] * (count - 5))
+        return Response([code, 149, 211, 187, 999] + [0] * (count - 5), 4)
 
 
 def mapping(*objects, topology="contact_only", variant=None, base=20, connection="tcp:pp"):

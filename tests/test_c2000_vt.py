@@ -97,27 +97,33 @@ def test_manual_and_automatic_objects_are_equivalent():
 @pytest.mark.asyncio
 async def test_pending_preserves_previous_confirmed_value():
     class Response:
-        def __init__(self, registers=None, error=False, code=None, address=None, value=None):
+        def __init__(self, registers=None, error=False, code=None, address=None,
+                     value=None, function_code=None):
             self.registers = registers
             self._error = error
             self.exception_code = code
             self.address = address
             self.value = value
+            self.function_code = function_code
 
         def isError(self):
             return self._error
 
     class Client:
         async def write_register(self, **kwargs):
-            return Response(address=kwargs["address"], value=kwargs["value"])
+            return Response(
+                address=kwargs["address"],
+                value=kwargs["value"],
+                function_code=6,
+            )
 
         async def read_holding_registers(self, *, address, count, device_id):
             if address == 46328:
                 return Response(error=True, code=15)
-            return Response(registers=[0] * count)
+            return Response(registers=[0] * count, function_code=3)
 
         async def read_input_registers(self, *, address, count, device_id):
-            return Response(registers=[0] * count)
+            return Response(registers=[0] * count, function_code=4)
 
     device = C2000VT(Client(), 1)
     device.apply_gateway_mapping(
