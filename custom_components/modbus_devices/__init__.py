@@ -2,11 +2,11 @@
 
 from logging import getLogger
 
-from pymodbus.exceptions import ConnectionException
+from pymodbus.exceptions import ConnectionException, ModbusException
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 
 from .const import Config
 from .coordinator import ModbusDeviceCoordinator
@@ -16,6 +16,16 @@ from .manufacturer import canonicalize_manufacturer_options
 from .modbus_client import connect_modbus
 
 _LOGGER = getLogger(__name__)
+
+
+def _close_client(client) -> None:
+    """Close a client without masking the lifecycle exception being handled."""
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        _LOGGER.exception("Error closing Modbus client")
 
 
 async def async_setup_entry(
@@ -30,7 +40,7 @@ async def async_setup_entry(
     try:
         options = canonicalize_manufacturer_options(entry.options or entry.data)
     except ValueError as exc:
-        raise ConfigEntryNotReady(str(exc)) from exc
+        raise ConfigEntryError(str(exc)) from exc
 
     if options != dict(entry.options) or (entry.data and not entry.options):
         hass.config_entries.async_update_entry(
@@ -40,6 +50,7 @@ async def async_setup_entry(
         )
 
     manufacturer = options.get(Config.CONF_MANUFACTURER)
+    client = None
 
     try:
         # -----------------------------------
@@ -58,35 +69,43 @@ async def async_setup_entry(
         device_id = options.get("device_id") or options.get(Config.CONF_DEVICE_ID)
 
         if not manufacturer or not device_name:
-            raise ConfigEntryNotReady(
+            raise ConfigEntryError(
                 f"Missing config: manufacturer={manufacturer}, device={device_name}"
             )
 
         # -----------------------------------
         # Load device class
         # -----------------------------------
-        device_class = await hass.async_add_executor_job(
-            get_class,
-            manufacturer,
-            device_name,
-        )
+        try:
+            device_class = await hass.async_add_executor_job(
+                get_class,
+                manufacturer,
+                device_name,
+            )
+        except (AttributeError, ImportError, ValueError) as exc:
+            raise ConfigEntryError(
+                f"Invalid equipment configuration: {manufacturer}/{device_name}"
+            ) from exc
 
         mapping_data = options.get(Config.CONF_GATEWAY_MAPPING)
-        gateway_mapping = (
-            None
-            if mapping_data is None
-            else ResolvedDeviceMapping.from_dict(mapping_data)
-        )
+        try:
+            gateway_mapping = (
+                None
+                if mapping_data is None
+                else ResolvedDeviceMapping.from_dict(mapping_data)
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigEntryError("Invalid persisted gateway mapping") from exc
         required_gateway = getattr(device_class, "required_gateway", None)
         if required_gateway is not None and gateway_mapping is None:
-            raise ConfigEntryNotReady(
+            raise ConfigEntryError(
                 f"{device_name} requires a validated gateway mapping"
             )
         if (
             required_gateway is not None
             and gateway_mapping.identity.gateway.gateway_type is not required_gateway
         ):
-            raise ConfigEntryNotReady(
+            raise ConfigEntryError(
                 f"Gateway mapping type does not match {device_name}"
             )
 
@@ -102,10 +121,13 @@ async def async_setup_entry(
         if io_mapping is not None:
             apply_io_mapping = getattr(device, "apply_io_mapping", None)
             if not callable(apply_io_mapping):
-                raise ConfigEntryNotReady(
+                raise ConfigEntryError(
                     f"{device_name} does not support direct I/O mappings"
                 )
-            apply_io_mapping(io_mapping)
+            try:
+                apply_io_mapping(io_mapping)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ConfigEntryError("Invalid persisted direct I/O mapping") from exc
 
         if getattr(device, "uses_stable_entry_identity", False):
             stable_identity = entry.unique_id or entry.entry_id
@@ -115,10 +137,13 @@ async def async_setup_entry(
         if gateway_mapping is not None:
             apply_mapping = getattr(device, "apply_gateway_mapping", None)
             if not callable(apply_mapping):
-                raise ConfigEntryNotReady(
+                raise ConfigEntryError(
                     f"{device_name} does not support gateway mappings"
                 )
-            apply_mapping(gateway_mapping)
+            try:
+                apply_mapping(gateway_mapping)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ConfigEntryError("Invalid equipment gateway mapping") from exc
 
         await device.data_init()
 
@@ -163,15 +188,19 @@ async def async_setup_entry(
 
         return True
 
-    except ConnectionException as exc:
+    except (ConnectionException, ModbusException, OSError, TimeoutError) as exc:
+        _close_client(client)
         raise ConfigEntryNotReady(f"Modbus connection failed: {exc}") from exc
 
-    except ConfigEntryNotReady:
+    except (ConfigEntryError, ConfigEntryNotReady):
+        _close_client(client)
         raise
 
-    except Exception as exc:
-        _LOGGER.exception("Setup failed: %s", exc)
-        return False
+    except Exception:
+        # Programming and platform errors must remain visible to Home Assistant.
+        hass.data[Config.DOMAIN].pop(entry.entry_id, None)
+        _close_client(client)
+        raise
 
 
 async def async_unload_entry(
@@ -195,11 +224,7 @@ async def async_unload_entry(
     )
 
     if unload_ok:
-        if client:
-            try:
-                client.close()
-            except Exception:
-                _LOGGER.exception("Error closing Modbus client")
+        _close_client(client)
 
         hass.data[Config.DOMAIN].pop(entry.entry_id, None)
 

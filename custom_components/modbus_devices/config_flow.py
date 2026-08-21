@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from logging import getLogger
 from typing import Any
 
 from pymodbus.exceptions import ModbusException
@@ -50,9 +49,6 @@ from .s2000_pp import (
     manual_relay_mapping,
     manual_zone_mapping,
 )
-
-_LOGGER = getLogger(__name__)
-
 
 class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     """Handle config flow."""
@@ -336,7 +332,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                     )
                     return await self._async_connection_ready(unique_id)
 
-            except ModbusException:
+            except (ModbusException, OSError, TimeoutError):
                 errors["base"] = "cannot_connect"
 
         schema = vol.Schema(
@@ -383,7 +379,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                     )
                     return await self._async_connection_ready(unique_id)
 
-            except ModbusException:
+            except (ModbusException, OSError, TimeoutError):
                 errors["base"] = "cannot_connect"
 
         # -------------------------
@@ -585,7 +581,6 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 get_gateway_device_metadata,
                 self._selected_manufacturer,
                 self._data[Config.CONF_DEVICE_CLASS],
-                self._device_metadata,
             )
         if not self._gateway_device_metadata["gateway_transport_supported"]:
             return self.async_show_form(
@@ -979,8 +974,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 errors["base"] = "cannot_read_gateway_configuration"
             except ValueError:
                 errors["base"] = "invalid_mapping"
-            except Exception as exc:  # pymodbus transports expose backend exceptions
-                _LOGGER.exception("Failed to read S2000-PP configuration: %s", exc)
+            except (OSError, TimeoutError):
                 errors["base"] = "cannot_read_gateway_configuration"
             finally:
                 if client is not None:

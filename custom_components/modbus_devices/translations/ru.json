@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {"title": "Тип подключения", "description": "Выберите транспорт Modbus.", "data": {"modbus_mode": "Транспорт"}},
+      "manufacturer": {"title": "Производитель", "description": "Выберите производителя оборудования.", "data": {"manufacturer": "Производитель"}},
+      "device": {"title": "Модель прибора", "description": "Выберите физическую модель оборудования.", "data": {"device_class": "Модель прибора"}},
+      "io_mapping": {"title": "Прямая привязка входов и выходов", "description": "Настройте расположение входов и выходов прибора в Modbus.", "data": {"di_data_area": "Область данных дискретных входов", "di_base_address": "Начальный адрес дискретных входов", "di_address_stride": "Шаг адресов дискретных входов", "do_base_address": "Начальный адрес дискретных выходов", "do_address_stride": "Шаг адресов дискретных выходов"}},
+      "network": {"title": "Сетевое подключение", "description": "Настройте сетевой узел Modbus.", "data": {"host": "Хост", "port": "Порт", "device_id": "Адрес прибора", "name": "Имя"}},
+      "serial": {"title": "Последовательное подключение", "description": "Настройте последовательное подключение Modbus.", "data": {"device_id": "Адрес прибора", "com_port": "Последовательный порт", "baudrate": "Скорость обмена", "bytesize": "Биты данных", "parity": "Чётность", "stopbits": "Стоповые биты", "name": "Имя"}},
+      "gateway_context": {"title": "Шлюз С2000-ПП", "description": "Выберите существующий контекст шлюза или добавьте новый.", "data": {"gateway_selection": "Шлюз"}},
+      "gateway_new": {"title": "Новый шлюз С2000-ПП", "description": "Задайте стабильное имя физического шлюза.", "data": {"gateway_id": "Имя шлюза"}},
+      "gateway_device": {"title": "Подключённый прибор", "description": "Настройте идентификаторы Orion и ДПЛС для выбранного прибора.", "data": {"device_variant": "Исполнение", "device_topology": "Топология", "orion_address": "Адрес КДЛ в Orion", "dpls_base_address": "Базовый адрес ДПЛС"}},
+      "mapping_source": {"title": "Источник привязки", "description": "Выберите ручную привязку или привязку по настроенным таблицам С2000-ПП.", "data": {"mapping_source": "Источник привязки"}},
+      "manual_device": {"title": "Прибор Orion", "description": "Укажите адрес подключённого прибора в Orion.", "data": {"orion_address": "Адрес Orion"}},
+      "manual_object": {"title": "Ручная привязка объекта", "description": "Свяжите объект Orion с настроенной строкой таблицы С2000-ПП.", "data": {"object_kind": "Тип объекта", "local_object_number": "Локальный номер объекта", "gateway_object_number": "Номер строки С2000-ПП", "zone_type": "Тип зоны С2000-ПП", "partition_number": "Номер раздела", "partition_id": "Идентификатор раздела", "add_another_object": "Добавить ещё объект"}},
+      "manual_capability": {"title": "Ручная привязка функции", "description": "Свяжите функцию прибора с настроенной строкой таблицы С2000-ПП.", "data": {"capability_key": "Функция", "gateway_object_number": "Номер строки С2000-ПП", "add_another_object": "Добавить ещё функцию"}},
+      "automatic_device": {"title": "Привязка по конфигурации", "description": "Найдите точное соответствие в настроенных таблицах С2000-ПП. Это не аппаратное обнаружение.", "data": {"orion_address": "Адрес Orion"}}
+    },
+    "error": {
+      "cannot_connect": "Не удалось подключиться к прибору Modbus.",
+      "invalid_io_mapping": "Некорректная прямая привязка входов и выходов.",
+      "invalid_gateway": "Некорректная конфигурация шлюза.",
+      "unsupported_gateway_transport": "Этот прибор не поддерживается через выбранный шлюз.",
+      "unsupported_variant": "Это исполнение прибора не поддерживается.",
+      "invalid_mapping": "Некорректная привязка шлюза.",
+      "invalid_equipment_mapping": "Привязка не соответствует функциям выбранного прибора.",
+      "ambiguous_device_mapping": "Прибору соответствуют несколько настроенных строк. Уточните конфигурацию или используйте ручную привязку.",
+      "downstream_device_not_found": "Точное соответствие для прибора в настроенной конфигурации не найдено.",
+      "cannot_read_gateway_configuration": "Не удалось прочитать настроенные таблицы С2000-ПП."
+    },
+    "abort": {
+      "already_configured": "Этот прибор уже настроен.",
+      "no_devices": "Нет доступных моделей оборудования.",
+      "no_manufacturers": "Нет доступных производителей.",
+      "no_devices_for_manufacturer": "Для этого производителя нет доступных моделей оборудования."
+    }
+  }
+}

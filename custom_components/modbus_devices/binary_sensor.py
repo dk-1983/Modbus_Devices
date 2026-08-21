@@ -30,37 +30,30 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensors."""
 
-    try:
-        entry_data = hass.data[Config.DOMAIN][entry.entry_id]
+    entry_data = hass.data[Config.DOMAIN][entry.entry_id]
 
-        device = entry_data["device"]
-        coordinator = entry_data["coordinator"]
+    device = entry_data["device"]
+    coordinator = entry_data["coordinator"]
 
-        entities = []
+    entities = []
 
-        for input_data in await device.get_inputs():
+    for input_data in await device.get_inputs():
 
-            entities.append(
-                ModBusBinarySensorEntity(
-                    coordinator=coordinator,
-                    device=device,
-                    entry=entry,
-                    input_data=input_data,
-                )
+        entities.append(
+            ModBusBinarySensorEntity(
+                coordinator=coordinator,
+                device=device,
+                entry=entry,
+                input_data=input_data,
             )
-
-        async_add_entities(entities)
-
-        _LOGGER.info(
-            "Loaded %s binary sensors",
-            len(entities),
         )
 
-    except Exception as exc:
-        _LOGGER.exception(
-            "Failed setup binary_sensor: %s",
-            exc,
-        )
+    async_add_entities(entities)
+
+    _LOGGER.info(
+        "Loaded %s binary sensors",
+        len(entities),
+    )
 
 
 class ModBusBinarySensorEntity(

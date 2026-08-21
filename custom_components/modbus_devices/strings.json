@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {"title": "Connection type", "description": "Select the Modbus transport.", "data": {"modbus_mode": "Transport"}},
+      "manufacturer": {"title": "Manufacturer", "description": "Select the equipment manufacturer.", "data": {"manufacturer": "Manufacturer"}},
+      "device": {"title": "Equipment model", "description": "Select the physical equipment model.", "data": {"device_class": "Equipment model"}},
+      "io_mapping": {"title": "Direct I/O mapping", "description": "Configure the device's direct Modbus I/O layout.", "data": {"di_data_area": "Digital input data area", "di_base_address": "Digital input base address", "di_address_stride": "Digital input address stride", "do_base_address": "Digital output base address", "do_address_stride": "Digital output address stride"}},
+      "network": {"title": "Network connection", "description": "Configure the Modbus network endpoint.", "data": {"host": "Host", "port": "Port", "device_id": "Device ID", "name": "Name"}},
+      "serial": {"title": "Serial connection", "description": "Configure the Modbus serial connection.", "data": {"device_id": "Device ID", "com_port": "Serial port", "baudrate": "Baud rate", "bytesize": "Data bits", "parity": "Parity", "stopbits": "Stop bits", "name": "Name"}},
+      "gateway_context": {"title": "S2000-PP gateway", "description": "Select an existing gateway context or add a new one.", "data": {"gateway_selection": "Gateway"}},
+      "gateway_new": {"title": "New S2000-PP gateway", "description": "Give this physical gateway a stable name.", "data": {"gateway_id": "Gateway name"}},
+      "gateway_device": {"title": "Downstream equipment", "description": "Configure the Orion and DPLS identity for the selected equipment.", "data": {"device_variant": "Variant", "device_topology": "Topology", "orion_address": "KDL Orion address", "dpls_base_address": "DPLS base address"}},
+      "mapping_source": {"title": "Mapping source", "description": "Choose manual mapping or configuration-assisted mapping from configured S2000-PP tables.", "data": {"mapping_source": "Mapping source"}},
+      "manual_device": {"title": "Orion device", "description": "Enter the Orion address of the downstream equipment.", "data": {"orion_address": "Orion address"}},
+      "manual_object": {"title": "Manual object mapping", "description": "Map an Orion object to its configured S2000-PP table row.", "data": {"object_kind": "Object kind", "local_object_number": "Local object number", "gateway_object_number": "S2000-PP table number", "zone_type": "S2000-PP zone type", "partition_number": "Partition number", "partition_id": "Partition ID", "add_another_object": "Add another object"}},
+      "manual_capability": {"title": "Manual capability mapping", "description": "Map an equipment capability to its configured S2000-PP table row.", "data": {"capability_key": "Capability", "gateway_object_number": "S2000-PP table number", "add_another_object": "Add another capability"}},
+      "automatic_device": {"title": "Configuration-assisted mapping", "description": "Find exact matching rows in the configured S2000-PP tables. This is not hardware discovery.", "data": {"orion_address": "Orion address"}}
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the Modbus device.",
+      "invalid_io_mapping": "The direct I/O mapping is invalid.",
+      "invalid_gateway": "The gateway configuration is invalid.",
+      "unsupported_gateway_transport": "This equipment is not supported through the selected gateway transport.",
+      "unsupported_variant": "This equipment variant is not supported.",
+      "invalid_mapping": "The gateway mapping is invalid.",
+      "invalid_equipment_mapping": "The mapping does not match the selected equipment capabilities.",
+      "ambiguous_device_mapping": "Several configured rows match this equipment. Refine the configuration or use manual mapping.",
+      "downstream_device_not_found": "No exact configured mapping was found for this equipment.",
+      "cannot_read_gateway_configuration": "Cannot read the configured S2000-PP tables."
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "no_devices": "No equipment models are available.",
+      "no_manufacturers": "No manufacturers are available.",
+      "no_devices_for_manufacturer": "No equipment models are available for this manufacturer."
+    }
+  }
+}
