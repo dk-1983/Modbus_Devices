@@ -42,10 +42,7 @@ from .mapping import (
     DeviceMappingNotFoundError,
     ManualDeviceMappingProvider,
 )
-from .manufacturer import (
-    canonical_manufacturer_name,
-    canonicalize_manufacturer_unique_id,
-)
+from .manufacturer import canonical_manufacturer_name
 from .modbus_client import connect_modbus
 from .s2000_pp import (
     S2000PPConfigurationCache,
@@ -468,14 +465,6 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         """Continue with a gateway flow or create a static-device entry."""
         if self._required_gateway is not None:
             return await self.async_step_gateway_context()
-
-        normalized_unique_id = canonicalize_manufacturer_unique_id(legacy_unique_id)
-        for entry in self.hass.config_entries.async_entries(Config.DOMAIN):
-            if entry.unique_id and canonicalize_manufacturer_unique_id(
-                entry.unique_id
-            ) == normalized_unique_id:
-                await self.async_set_unique_id(entry.unique_id)
-                self._abort_if_unique_id_configured()
 
         await self.async_set_unique_id(legacy_unique_id)
         self._abort_if_unique_id_configured()

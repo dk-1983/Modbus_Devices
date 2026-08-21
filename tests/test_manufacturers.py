@@ -1,4 +1,4 @@
-"""Tests for canonical manufacturer discovery and legacy compatibility."""
+"""Tests for canonical manufacturer discovery and module resolution."""
 
 import pytest
 
@@ -23,9 +23,10 @@ from custom_components.modbus_devices.equipment.owen import (
 )
 from custom_components.modbus_devices.equipment.dyna_drive import DN310
 from custom_components.modbus_devices.manufacturer import (
+    MANUFACTURERS,
     canonical_manufacturer_name,
     canonicalize_manufacturer_options,
-    canonicalize_manufacturer_unique_id,
+    manufacturer_module_name,
 )
 from custom_components.modbus_devices.const import Config
 
@@ -33,36 +34,36 @@ from custom_components.modbus_devices.const import Config
 def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
     manufacturers = get_classes_from_files()
 
-    assert list(manufacturers).count("Bolid") == 1
-    assert list(manufacturers).count("Owen") == 1
-    assert list(manufacturers).count("Dyna Drive") == 1
-    assert "Oven" not in manufacturers
-    assert "OWEN" not in manufacturers
-    assert "OVEN" not in manufacturers
+    assert list(manufacturers) == ["Bolid", "Dyna Drive", "Owen"]
 
 
-@pytest.mark.parametrize("legacy_name", ["Oven", "OWEN", "OVEN"])
-def test_legacy_owen_names_normalize(legacy_name):
-    assert canonical_manufacturer_name(legacy_name) == "Owen"
+def test_registry_contains_only_canonical_manufacturers_and_modules():
+    assert [
+        (item.canonical_name, item.module_name) for item in MANUFACTURERS
+    ] == [
+        ("Bolid", "bolid"),
+        ("Dyna Drive", "dyna_drive"),
+        ("Owen", "owen"),
+    ]
+    assert manufacturer_module_name("Bolid") == "bolid"
+    assert manufacturer_module_name("Owen") == "owen"
+    assert manufacturer_module_name("Dyna Drive") == "dyna_drive"
+    assert manufacturer_module_name("bolid") == "bolid"
+    assert manufacturer_module_name("owen") == "owen"
+    assert manufacturer_module_name("dyna_drive") == "dyna_drive"
 
 
-@pytest.mark.parametrize("stored_name", ["Owen", "Oven", "OWEN", "OVEN"])
-def test_stored_owen_entries_still_resolve_equipment(stored_name):
-    assert get_class(stored_name, "TRM138") is TRM138
-    assert get_class(stored_name, "PLC110_24_60_K_M") is PLC110_24_60_K_M
-
-
-@pytest.mark.parametrize("stored_name", ["Oven", "OWEN", "OVEN"])
-def test_stored_entry_options_are_canonicalized_without_identity_fields(stored_name):
+@pytest.mark.parametrize("stored_name", ["Bolid", "Owen", "Dyna Drive"])
+def test_canonical_entry_options_remain_stable(stored_name):
     options = {
         Config.CONF_MANUFACTURER: stored_name,
-        Config.CONF_DEVICE_CLASS: "TRM138",
+        Config.CONF_DEVICE_CLASS: "model",
         "unrelated_identity": "keep-me",
     }
 
     normalized = canonicalize_manufacturer_options(options)
 
-    assert normalized[Config.CONF_MANUFACTURER] == "Owen"
+    assert normalized[Config.CONF_MANUFACTURER] == stored_name
     assert normalized["unrelated_identity"] == "keep-me"
     assert options[Config.CONF_MANUFACTURER] == stored_name
 
@@ -80,12 +81,22 @@ def test_bolid_resolution_is_unchanged():
     assert "C2000KPB" in get_classes_from_files()["Bolid"]
 
 
-@pytest.mark.parametrize("legacy_name", ["Oven", "OWEN", "OVEN"])
-def test_legacy_unique_ids_compare_as_existing_owen_identity(legacy_name):
-    legacy_unique_id = f"192.0.2.1_502_1_{legacy_name}_TRM138"
-    canonical_unique_id = "192.0.2.1_502_1_Owen_TRM138"
-
-    assert canonicalize_manufacturer_unique_id(legacy_unique_id) == canonical_unique_id
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        "bolid",
+        "owen",
+        "dyna_drive",
+        "Ov" + "en",
+        "OW" + "EN",
+        "OV" + "EN",
+        "ov" + "en",
+        "DYNA DRIVE",
+    ],
+)
+def test_unsupported_arbitrary_casing_is_rejected(unsupported):
+    with pytest.raises(ValueError, match="Unsupported manufacturer"):
+        canonical_manufacturer_name(unsupported)
 
 
 @pytest.mark.parametrize(

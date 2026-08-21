@@ -1,4 +1,4 @@
-"""Canonical manufacturer names and legacy compatibility."""
+"""Canonical manufacturer registry and internal module resolution."""
 
 from __future__ import annotations
 
@@ -14,30 +14,24 @@ class Manufacturer:
 
     canonical_name: str
     module_name: str
-    legacy_names: frozenset[str] = frozenset()
 
 
 MANUFACTURERS: tuple[Manufacturer, ...] = (
-    Manufacturer("Bolid", "bolid", frozenset({"bolid"})),
+    Manufacturer("Bolid", "bolid"),
     Manufacturer("Dyna Drive", "dyna_drive"),
-    Manufacturer(
-        "Owen",
-        "owen",
-        frozenset({"Oven", "OWEN", "OVEN", "oven", "owen"}),
-    ),
+    Manufacturer("Owen", "owen"),
 )
 
-_BY_NAME = {
-    name: manufacturer
-    for manufacturer in MANUFACTURERS
-    for name in {manufacturer.canonical_name, *manufacturer.legacy_names}
+_BY_NAME = {manufacturer.canonical_name: manufacturer for manufacturer in MANUFACTURERS}
+_BY_MODULE_NAME = {
+    manufacturer.module_name: manufacturer for manufacturer in MANUFACTURERS
 }
 
 
 def resolve_manufacturer(value: str) -> Manufacturer:
     """Resolve a canonical or explicitly supported legacy manufacturer value."""
     try:
-        return _BY_NAME[value.strip()]
+        return _BY_NAME[value]
     except (AttributeError, KeyError) as exc:
         raise ValueError(f"Unsupported manufacturer: {value!r}") from exc
 
@@ -48,7 +42,9 @@ def canonical_manufacturer_name(value: str) -> str:
 
 
 def manufacturer_module_name(value: str) -> str:
-    """Return the equipment module for a manufacturer value."""
+    """Return a module for a manufacturer value or exact internal module key."""
+    if value in _BY_MODULE_NAME:
+        return value
     return resolve_manufacturer(value).module_name
 
 
@@ -63,11 +59,3 @@ def canonicalize_manufacturer_options(
             manufacturer
         )
     return normalized
-
-
-def canonicalize_manufacturer_unique_id(unique_id: str) -> str:
-    """Canonicalize legacy manufacturer tokens for identity comparison only."""
-    canonical = unique_id
-    for legacy_name in resolve_manufacturer("Owen").legacy_names:
-        canonical = canonical.replace(f"_{legacy_name}_", "_Owen_")
-    return canonical
