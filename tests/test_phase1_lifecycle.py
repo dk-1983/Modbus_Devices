@@ -507,9 +507,10 @@ async def test_binary_sensor_platform_propagates_device_setup_failure():
         await async_setup_binary_sensor_entry(hass, entry, Mock())
 
 
-def test_english_and_russian_config_flow_localization_have_identical_keys():
+def test_config_flow_localization_catalogs_have_identical_keys():
     root = Path(__file__).parents[1] / "custom_components" / "modbus_devices"
-    english = json.loads((root / "strings.json").read_text(encoding="utf-8"))
+    strings = json.loads((root / "strings.json").read_text(encoding="utf-8"))
+    english = json.loads((root / "translations" / "en.json").read_text(encoding="utf-8"))
     russian = json.loads((root / "translations" / "ru.json").read_text(encoding="utf-8"))
 
     def shape(value):
@@ -517,8 +518,9 @@ def test_english_and_russian_config_flow_localization_have_identical_keys():
             return {key: shape(item) for key, item in value.items()}
         return None
 
-    assert shape(english) == shape(russian)
-    assert set(english["config"]["step"]) == {
+    assert english == strings
+    assert shape(strings) == shape(russian)
+    assert set(strings["config"]["step"]) == {
         "user", "manufacturer", "device", "io_mapping", "network", "serial",
         "gateway_context", "gateway_new", "gateway_device", "mapping_source",
         "manual_device", "manual_object", "manual_capability", "automatic_device",
