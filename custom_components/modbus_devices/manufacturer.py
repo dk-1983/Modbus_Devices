@@ -19,6 +19,7 @@ class Manufacturer:
 
 MANUFACTURERS: tuple[Manufacturer, ...] = (
     Manufacturer("Bolid", "bolid", frozenset({"bolid"})),
+    Manufacturer("Dyna Drive", "dyna_drive"),
     Manufacturer(
         "Owen",
         "owen",

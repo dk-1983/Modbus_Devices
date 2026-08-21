@@ -2,6 +2,8 @@
 
 import pytest
 
+from homeassistant.const import Platform
+
 from custom_components.modbus_devices.equipment.bolid import (
     C2000IP03,
     C2000KPB,
@@ -19,6 +21,7 @@ from custom_components.modbus_devices.equipment.owen import (
     PLC110_24_60_K_M,
     TRM138,
 )
+from custom_components.modbus_devices.equipment.dyna_drive import DN310
 from custom_components.modbus_devices.manufacturer import (
     canonical_manufacturer_name,
     canonicalize_manufacturer_options,
@@ -32,6 +35,7 @@ def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
 
     assert list(manufacturers).count("Bolid") == 1
     assert list(manufacturers).count("Owen") == 1
+    assert list(manufacturers).count("Dyna Drive") == 1
     assert "Oven" not in manufacturers
     assert "OWEN" not in manufacturers
     assert "OVEN" not in manufacturers
@@ -123,3 +127,19 @@ def test_equipment_selector_uses_real_model_labels(class_name, label):
 def test_radio_detector_names_remain_canonical():
     assert get_class("Bolid", "C2000RDIP") is C2000RDIP
     assert get_class("Bolid", "C2000RIP") is C2000RIP
+
+
+def test_dyna_drive_dn310_is_canonical_and_discoverable():
+    assert canonical_manufacturer_name("Dyna Drive") == "Dyna Drive"
+    assert get_class("Dyna Drive", "DN310") is DN310
+    assert get_classes_from_files()["Dyna Drive"] == ["DN310"]
+
+
+def test_dn310_is_the_only_canonical_equipment_loading_button_platform():
+    for manufacturer, class_names in get_classes_from_files().items():
+        for class_name in class_names:
+            instance = get_class(manufacturer, class_name)(None, 1)
+            if (manufacturer, class_name) == ("Dyna Drive", "DN310"):
+                assert Platform.BUTTON in instance.attr_platforms
+            else:
+                assert Platform.BUTTON not in instance.attr_platforms

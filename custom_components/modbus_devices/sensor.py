@@ -261,6 +261,7 @@ class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
         self._attr_state_class = description["state_class"]
         self._attr_native_unit_of_measurement = description["unit"]
         self._attr_suggested_display_precision = description["precision"]
+        self._attr_entity_category = description.get("entity_category")
         identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
         self._attr_unique_id = f"{identity}_{self._sensor_id}"
         device_identifier = (
@@ -301,7 +302,7 @@ class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
             **metadata,
             **{
                 key: current[key]
-                for key in ("raw_register", "raw_count", "parameter_kind")
+                for key in ("raw_register", "raw_count", "register_address", "parameter_kind")
                 if key in current
             },
         }
