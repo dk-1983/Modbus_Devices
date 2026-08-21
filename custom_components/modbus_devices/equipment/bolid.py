@@ -51,6 +51,8 @@ _LOGGER = getLogger(__name__)
 class M3000BB1020:
     """Bolid M3000-BB-1020 hw: 1.00 sw: 1.00."""
 
+    CLOCK_SYNC_MAX_DRIFT_SECONDS = 120
+
     def __init__(self, client, device_id) -> None:
         """Inicialization variables."""
         self.attr_device_id: int = device_id
@@ -72,6 +74,7 @@ class M3000BB1020:
             Platform.DATETIME,
             Platform.SWITCH,
         ]
+        self._clock_sync_evaluated = False
         self.attr_in1: dict[str, Any] = {
             "input_number": 1,
             "input_number_view": 1,
@@ -310,12 +313,45 @@ class M3000BB1020:
         }
 
     async def data_init(self) -> bool:
-        """Инициализирует все свойства класса."""
-        await self.get_device_info()
-        await self.set_time()
-        await self.get_inputs()
-        await self.get_outputs()
+        """Initialize local metadata without device I/O."""
+        self.attr_init_time = datetime.now()
         return True
+
+    async def async_get_snapshot(self) -> dict[str, Any]:
+        """Read one authoritative runtime snapshot for the coordinator."""
+        await self.get_device_info()
+        inputs = await self.get_inputs()
+        outputs = await self.get_outputs()
+        return {
+            "inputs": {item["input_number"]: item for item in inputs},
+            "outputs": {item["out_number"]: item for item in outputs},
+            "time": await self.get_time(),
+        }
+
+    async def async_post_first_refresh(self, snapshot: dict[str, Any]) -> bool:
+        """Synchronize a lost or substantially drifting clock at most once."""
+        if self._clock_sync_evaluated:
+            return False
+        self._clock_sync_evaluated = True
+
+        device_time = snapshot.get("time")
+        if not isinstance(device_time, datetime):
+            return False
+
+        current_time = self._local_now()
+        device_wall_time = device_time.replace(tzinfo=None)
+        current_wall_time = current_time.replace(tzinfo=None)
+        drift = abs((device_wall_time - current_wall_time).total_seconds())
+        if drift < self.CLOCK_SYNC_MAX_DRIFT_SECONDS:
+            return False
+
+        await self.set_time(current_time)
+        return True
+
+    @staticmethod
+    def _local_now() -> datetime:
+        """Return the same local wall-clock source used by manual clock writes."""
+        return datetime.now()
 
     async def get_device_info(self) -> list:
         """Получает информацию о текущем контроллере."""
@@ -564,11 +600,15 @@ class S2000PP:
             )
 
     async def data_init(self) -> bool:
-        """Read documented service information and diagnostics."""
-        await self.get_device_info()
-        await self.get_inputs()
+        """Initialize local metadata without polling the gateway."""
         self.attr_init_time = datetime.now()
         return True
+
+    async def async_get_snapshot(self) -> dict[str, Any]:
+        """Read service metadata and diagnostics in one coordinator refresh."""
+        await self.get_device_info()
+        inputs = await self.get_inputs()
+        return {"inputs": {item["input_number"]: item for item in inputs}}
 
     async def get_device_info(self) -> dict[str, int | str | None]:
         """Read documented type and firmware version via FC03."""
@@ -876,7 +916,6 @@ class C2000KPB:
         if self.attr_gateway_mapping is None:
             raise ValueError("C2000-KPB requires a validated S2000-PP mapping")
         await self.get_device_info()
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -1249,9 +1288,8 @@ class MIP24Isp20:
         }
 
     async def data_init(self) -> bool:
-        """Validate communication and initialize the first atomic snapshot."""
+        """Initialize local metadata; the coordinator owns runtime polling."""
         await self.get_device_info()
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -1377,7 +1415,6 @@ class C2000KDL:
             raise ValueError(
                 "C2000-KDL requires zone type 3, local object 0 in S2000-PP"
             )
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -1587,7 +1624,6 @@ class C2000RARR125:
     async def data_init(self) -> bool:
         if self._device_state_mapping is None:
             raise ValueError("C2000RARR125 own zone mapping is not configured")
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -1774,7 +1810,6 @@ class BolidDPLSDetectorBase:
     async def data_init(self) -> bool:
         if self._state_mapping is None:
             raise ValueError("Detector zone mapping is not configured")
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -2352,7 +2387,6 @@ class BolidDPLSOutputBase:
         }
 
     async def data_init(self) -> bool:
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -2674,7 +2708,6 @@ class C2000DZ:
         self.attr_platforms = [Platform.SENSOR]
 
     async def data_init(self) -> bool:
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -2814,7 +2847,6 @@ class BolidDPLSNumericDeviceBase:
     async def data_init(self) -> bool:
         if self.attr_gateway_mapping is None:
             raise ValueError("Equipment requires a validated S2000-PP mapping")
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 
@@ -3250,7 +3282,6 @@ class C2000SP4:
         if self.attr_gateway_mapping is None:
             raise ValueError("C2000-SP4 requires a validated S2000-PP mapping")
         await self.get_device_info()
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
 
         return True

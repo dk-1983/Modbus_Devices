@@ -37,7 +37,7 @@ async def async_setup_entry(
 
     entities = []
 
-    for input_data in await device.get_inputs():
+    for input_data in (coordinator.data or {}).get("inputs", {}).values():
 
         entities.append(
             ModBusBinarySensorEntity(

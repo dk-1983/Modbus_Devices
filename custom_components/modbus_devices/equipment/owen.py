@@ -195,7 +195,6 @@ class TRM138:
     async def data_init(self) -> bool:
         """Инициализирует все свойства класса."""
         await self.get_device_info()
-        await self.get_chanels()
         return True
 
     async def get_device_info(self) -> list:
@@ -379,7 +378,6 @@ class PLC110_24_60_K_M:
     async def data_init(self) -> bool:
         if self._io_mapping is None:
             raise ValueError("PLC110 requires its user-defined Modbus I/O mapping")
-        await self.async_get_snapshot()
         self.attr_init_time = datetime.now()
         return True
 

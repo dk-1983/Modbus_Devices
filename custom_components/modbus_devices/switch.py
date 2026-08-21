@@ -29,7 +29,7 @@ async def async_setup_entry(
     outputs = (
         description_reader()
         if callable(description_reader)
-        else await device.get_outputs()
+        else (coordinator.data or {}).get("outputs", {}).values()
     )
 
     for output in outputs:

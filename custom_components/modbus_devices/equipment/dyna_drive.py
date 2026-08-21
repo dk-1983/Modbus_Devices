@@ -111,7 +111,7 @@ class DN310:
         }
 
     async def data_init(self) -> bool:
-        await self.async_get_snapshot()
+        """Initialize local metadata without polling the drive."""
         self.attr_init_time = datetime.now()
         return True
 

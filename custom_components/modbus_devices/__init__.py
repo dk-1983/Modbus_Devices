@@ -157,6 +157,17 @@ async def async_setup_entry(
 
         await coordinator.async_config_entry_first_refresh()
 
+        post_first_refresh = getattr(device, "async_post_first_refresh", None)
+        if callable(post_first_refresh):
+            try:
+                await post_first_refresh(coordinator.data or {})
+            except (ConnectionException, ModbusException, OSError, TimeoutError):
+                _LOGGER.warning(
+                    "Optional post-refresh maintenance failed for %s",
+                    device_name,
+                    exc_info=True,
+                )
+
         # -----------------------------------
         # Store runtime objects
         # -----------------------------------

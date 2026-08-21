@@ -30,8 +30,7 @@ async def async_setup_entry(
 
     entities = []
 
-    channel_reader = getattr(device, "get_chanels", None)
-    channels = await channel_reader() if callable(channel_reader) else []
+    channels = (coordinator.data or {}).get("chanels", {}).values()
 
     for channel in channels:
         entities.append(

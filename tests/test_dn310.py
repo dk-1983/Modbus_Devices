@@ -249,8 +249,12 @@ async def test_transport_exception_propagates():
 @pytest.mark.asyncio
 async def test_setup_only_reads_and_never_changes_p0_02_or_eeprom():
     client = Client()
-    await DN310(client, 1).data_init()
+    device = DN310(client, 1)
+    await device.data_init()
     assert client.writes == []
+    assert client.reads == []
+
+    await device.async_get_snapshot()
     assert {call["address"] for call in client.reads} == {0x1001, 0x3000, 0x8000}
 
 

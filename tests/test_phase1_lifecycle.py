@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from pymodbus.exceptions import ConnectionException
+from pymodbus.exceptions import ConnectionException, ModbusException
 
 from homeassistant.config_entries import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.const import CONF_DEVICE_ID, CONF_HOST, CONF_NAME, CONF_PORT, Platform
@@ -437,6 +438,36 @@ async def test_device_unavailable_during_initialization_becomes_not_ready(monkey
 
 
 @pytest.mark.asyncio
+async def test_first_refresh_failure_never_attempts_post_refresh_maintenance(monkeypatch):
+    hass = FakeHass()
+    entry = FakeEntry(options=direct_options())
+    client = FakeClient()
+    devices = []
+
+    class Device(FakeDevice):
+        def __init__(self, client, device_id):
+            super().__init__(client, device_id)
+            self.async_post_first_refresh = AsyncMock()
+            devices.append(self)
+
+    class Coordinator:
+        def __init__(self, hass, device):
+            self.async_config_entry_first_refresh = AsyncMock(
+                side_effect=ConfigEntryNotReady("first refresh failed")
+            )
+
+    monkeypatch.setattr(integration, "connect_modbus", AsyncMock(return_value=client))
+    monkeypatch.setattr(integration, "get_class", lambda *_args: Device)
+    monkeypatch.setattr(integration, "ModbusDeviceCoordinator", Coordinator)
+
+    with pytest.raises(ConfigEntryNotReady, match="first refresh failed"):
+        await integration.async_setup_entry(hass, entry)
+
+    devices[0].async_post_first_refresh.assert_not_awaited()
+    client.close.assert_called_once_with()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "options",
     [
@@ -498,13 +529,47 @@ async def test_cleanup_failure_does_not_mask_original_setup_failure(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_binary_sensor_platform_propagates_device_setup_failure():
-    device = SimpleNamespace(get_inputs=AsyncMock(side_effect=RuntimeError("input bug")))
-    hass = SimpleNamespace(data={Config.DOMAIN: {"entry-1": {"device": device, "coordinator": Mock()}}})
-    entry = SimpleNamespace(entry_id="entry-1")
+async def test_optional_post_refresh_transport_failure_does_not_block_setup(monkeypatch):
+    hass = FakeHass()
+    entry = FakeEntry(options=direct_options())
+    client = FakeClient()
 
-    with pytest.raises(RuntimeError, match="input bug"):
-        await async_setup_binary_sensor_entry(hass, entry, Mock())
+    class Device(FakeDevice):
+        def __init__(self, client, device_id):
+            super().__init__(client, device_id)
+            self.async_post_first_refresh = AsyncMock(
+                side_effect=ModbusException("clock write failed")
+            )
+
+    class Coordinator:
+        def __init__(self, hass, device):
+            self.data = {"time": datetime(2000, 1, 1)}
+            self.async_config_entry_first_refresh = AsyncMock()
+
+    monkeypatch.setattr(integration, "connect_modbus", AsyncMock(return_value=client))
+    monkeypatch.setattr(integration, "get_class", lambda *_args: Device)
+    monkeypatch.setattr(integration, "ModbusDeviceCoordinator", Coordinator)
+
+    assert await integration.async_setup_entry(hass, entry) is True
+    runtime_device = hass.data[Config.DOMAIN][entry.entry_id]["device"]
+    runtime_device.async_post_first_refresh.assert_awaited_once_with(
+        {"time": datetime(2000, 1, 1)}
+    )
+    assert client.close.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_platform_uses_first_refresh_snapshot_without_io():
+    device = SimpleNamespace(get_inputs=AsyncMock(side_effect=RuntimeError("input bug")))
+    coordinator = Mock(data={"inputs": {}})
+    hass = SimpleNamespace(data={Config.DOMAIN: {"entry-1": {"device": device, "coordinator": coordinator}}})
+    entry = SimpleNamespace(entry_id="entry-1")
+    add_entities = Mock()
+
+    await async_setup_binary_sensor_entry(hass, entry, add_entities)
+
+    device.get_inputs.assert_not_awaited()
+    add_entities.assert_called_once_with([])
 
 
 def test_config_flow_localization_catalogs_have_identical_keys():
