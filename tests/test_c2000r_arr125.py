@@ -12,7 +12,7 @@ from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.modbus_devices.equipment.bolid import C2000RARR125
 from custom_components.modbus_devices.equipment.equipment import (
-    get_classes_from_files,
+    get_equipment_classes_by_manufacturer,
     get_gateway_device_metadata,
 )
 from custom_components.modbus_devices.gateway import (
@@ -106,7 +106,7 @@ def configured_device(client=None, **options):
 
 
 def test_registered_under_bolid_and_declares_one_dpls_address():
-    assert "C2000RARR125" in get_classes_from_files()["Bolid"]
+    assert "C2000RARR125" in get_equipment_classes_by_manufacturer()["Bolid"]
     assert C2000RARR125.dpls_address_count == 1
 
 

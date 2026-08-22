@@ -14,7 +14,7 @@ from custom_components.modbus_devices.equipment.bolid import (
 from custom_components.modbus_devices.equipment.equipment import (
     canonical_equipment_class_name,
     get_class,
-    get_classes_from_files,
+    get_equipment_classes_by_manufacturer,
     get_equipment_display_name,
 )
 from custom_components.modbus_devices.equipment.owen import (
@@ -32,7 +32,7 @@ from custom_components.modbus_devices.const import Config
 
 
 def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
-    manufacturers = get_classes_from_files()
+    manufacturers = get_equipment_classes_by_manufacturer()
 
     assert list(manufacturers) == ["Bolid", "Dyna Drive", "Owen"]
 
@@ -69,7 +69,7 @@ def test_canonical_entry_options_remain_stable(stored_name):
 
 
 def test_owen_group_contains_existing_equipment_and_plc110():
-    owen_equipment = get_classes_from_files()["Owen"]
+    owen_equipment = get_equipment_classes_by_manufacturer()["Owen"]
 
     assert "TRM138" in owen_equipment
     assert "PLC110_24_60_K_M" in owen_equipment
@@ -78,7 +78,7 @@ def test_owen_group_contains_existing_equipment_and_plc110():
 def test_bolid_resolution_is_unchanged():
     assert canonical_manufacturer_name("Bolid") == "Bolid"
     assert get_class("Bolid", "C2000KPB") is C2000KPB
-    assert "C2000KPB" in get_classes_from_files()["Bolid"]
+    assert "C2000KPB" in get_equipment_classes_by_manufacturer()["Bolid"]
 
 
 @pytest.mark.parametrize(
@@ -115,7 +115,7 @@ def test_legacy_detector_class_names_resolve_at_central_boundary(
 
 
 def test_only_canonical_wired_detector_class_names_are_discovered():
-    devices = get_classes_from_files()["Bolid"]
+    devices = get_equipment_classes_by_manufacturer()["Bolid"]
     assert "DIP34A05" in devices
     assert "C2000IP03" in devices
     assert "C2000DIP" not in devices
@@ -143,11 +143,11 @@ def test_radio_detector_names_remain_canonical():
 def test_dyna_drive_dn310_is_canonical_and_discoverable():
     assert canonical_manufacturer_name("Dyna Drive") == "Dyna Drive"
     assert get_class("Dyna Drive", "DN310") is DN310
-    assert get_classes_from_files()["Dyna Drive"] == ["DN310"]
+    assert get_equipment_classes_by_manufacturer()["Dyna Drive"] == ["DN310"]
 
 
 def test_dn310_is_the_only_canonical_equipment_loading_button_platform():
-    for manufacturer, class_names in get_classes_from_files().items():
+    for manufacturer, class_names in get_equipment_classes_by_manufacturer().items():
         for class_name in class_names:
             instance = get_class(manufacturer, class_name)(None, 1)
             if (manufacturer, class_name) == ("Dyna Drive", "DN310"):

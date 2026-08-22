@@ -2,18 +2,10 @@
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-import random
-import sys
 from typing import Any
-from serial.tools import list_ports
 
-from ..const import Config
 from ..gateway import GatewayCapabilitySpec, ResolvedDeviceMapping
 from ..manufacturer import MANUFACTURERS, canonical_manufacturer_name, manufacturer_module_name
-
-_LOGGER = logging.getLogger(__name__)
 
 LEGACY_EQUIPMENT_CLASS_ALIASES: dict[str, str] = {
     "C2000DIP": "DIP34A05",
@@ -124,7 +116,7 @@ def validate_equipment_gateway_mapping(
     apply_mapping(mapping)
 
 
-def get_classes_from_files() -> dict[str, list[str]]:
+def get_equipment_classes_by_manufacturer() -> dict[str, list[str]]:
     """Return explicitly registered equipment classes by manufacturer."""
     return {
         manufacturer.canonical_name: [
@@ -201,35 +193,3 @@ def _validate_equipment_classes(
         classes.append(entry)
 
     return tuple(classes)
-
-
-def get_serial_ports() -> list[str]:
-    """Return available serial ports."""
-    result: set[str] = set()
-
-    try:
-        for port in list_ports.comports():
-            result.add(port.device)
-    except Exception:
-        _LOGGER.debug("Unable to enumerate serial ports with pyserial", exc_info=True)
-
-    if sys.platform.startswith(("linux", "cygwin")):
-        for pattern in ("ttyUSB*", "ttyACM*", "ttyS*"):
-            for device in Path("/dev").glob(pattern):
-                result.add(str(device))
-
-    elif sys.platform.startswith("darwin"):
-        for device in Path("/dev").glob("tty.*"):
-            result.add(str(device))
-
-    elif sys.platform.startswith("win"):
-        for number in range(1, 33):
-            result.add(f"COM{number}")
-
-    ports = sorted(result)
-    return ports or ["Not Found"]
-
-
-def get_random_hex_string(_range: int = 32) -> str:
-    """Return a random hexadecimal-like identifier string."""
-    return "".join(random.choice(Config.WORD) for _ in range(_range))

@@ -14,7 +14,7 @@ from custom_components.modbus_devices.equipment.dyna_drive import (
 )
 from custom_components.modbus_devices.equipment.equipment import (
     get_class,
-    get_classes_from_files,
+    get_equipment_classes_by_manufacturer,
     get_equipment_display_name,
 )
 from custom_components.modbus_devices.button import (
@@ -79,7 +79,7 @@ class Client:
 
 
 def test_registration_and_metadata():
-    manufacturers = get_classes_from_files()
+    manufacturers = get_equipment_classes_by_manufacturer()
     assert manufacturers["Dyna Drive"] == ["DN310"]
     assert get_class("Dyna Drive", "DN310") is DN310
     assert get_equipment_display_name("Dyna Drive", "DN310") == "DN310"

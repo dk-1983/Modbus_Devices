@@ -3,6 +3,8 @@
 import asyncio
 from functools import wraps
 import logging
+from pathlib import Path
+import sys
 from typing import Any
 
 from pymodbus import ModbusException
@@ -11,6 +13,7 @@ from pymodbus.client import (
     AsyncModbusTcpClient,
     AsyncModbusUdpClient,
 )
+from serial.tools import list_ports
 
 from .const import Config
 
@@ -20,6 +23,33 @@ from homeassistant.const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def get_serial_ports() -> list[str]:
+    """Return available serial ports."""
+    result: set[str] = set()
+
+    try:
+        for port in list_ports.comports():
+            result.add(port.device)
+    except Exception:
+        _LOGGER.debug("Unable to enumerate serial ports with pyserial", exc_info=True)
+
+    if sys.platform.startswith(("linux", "cygwin")):
+        for pattern in ("ttyUSB*", "ttyACM*", "ttyS*"):
+            for device in Path("/dev").glob(pattern):
+                result.add(str(device))
+
+    elif sys.platform.startswith("darwin"):
+        for device in Path("/dev").glob("tty.*"):
+            result.add(str(device))
+
+    elif sys.platform.startswith("win"):
+        for number in range(1, 33):
+            result.add(f"COM{number}")
+
+    ports = sorted(result)
+    return ports or ["Not Found"]
 
 
 class SerializedModbusClient:

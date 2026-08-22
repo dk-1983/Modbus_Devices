@@ -3,7 +3,7 @@
 import pytest
 
 from custom_components.modbus_devices.equipment.bolid import C2000ST04
-from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
+from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
     GatewayContext, GatewayType, MappingSource, ResolvedDeviceMapping,
@@ -26,7 +26,7 @@ def mapping(*objects, base=40):
 def test_registration_exact_model_and_one_address_identity():
     device = C2000ST04(None, 1)
     device.apply_gateway_mapping(mapping(manual_zone_mapping(40, 2, 1, 0, None)))
-    assert "C2000ST04" in get_classes_from_files()["Bolid"]
+    assert "C2000ST04" in get_equipment_classes_by_manufacturer()["Bolid"]
     assert device.attr_model_name == "С2000-СТ исп.04"
     assert device.attr_gateway_mapping.identity.dpls == DPLSSubIdentity(40, 1)
     assert device.attr_device_metadata["supported_kdl_input_types"] == (5,)

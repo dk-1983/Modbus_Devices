@@ -10,7 +10,7 @@ from custom_components.modbus_devices.equipment.equipment import (
     _get_equipment_classes,
     _validate_equipment_classes,
     get_class,
-    get_classes_from_files,
+    get_equipment_classes_by_manufacturer,
     get_equipment_display_name,
     get_gateway_requirement,
 )
@@ -76,7 +76,7 @@ EXPECTED_MODELS = {
 
 
 def test_explicit_registry_preserves_canonical_set_and_order():
-    assert get_classes_from_files() == EXPECTED_CLASSES
+    assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
     assert sum(map(len, EXPECTED_CLASSES.values())) == 25
 
 
@@ -109,7 +109,7 @@ def test_discovery_and_display_labels_do_not_instantiate_equipment(monkeypatch):
 
     monkeypatch.setattr(DN310, "__init__", fail_init)
 
-    assert get_classes_from_files() == EXPECTED_CLASSES
+    assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
     assert get_equipment_display_name("Dyna Drive", "DN310") == "DN310"
     assert get_class("Dyna Drive", "DN310") is DN310
 
@@ -141,8 +141,8 @@ def test_runtime_resolution_and_gateway_metadata_use_the_same_registry():
 def test_legacy_equipment_names_resolve_but_are_not_exported():
     assert get_class("Bolid", "C2000DIP") is bolid.DIP34A05
     assert get_class("Bolid", "C2000IP") is bolid.C2000IP03
-    assert "C2000DIP" not in get_classes_from_files()["Bolid"]
-    assert "C2000IP" not in get_classes_from_files()["Bolid"]
+    assert "C2000DIP" not in get_equipment_classes_by_manufacturer()["Bolid"]
+    assert "C2000IP" not in get_equipment_classes_by_manufacturer()["Bolid"]
 
 
 def test_unknown_equipment_fails_clearly():

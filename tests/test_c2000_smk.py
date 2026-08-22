@@ -3,7 +3,7 @@
 import pytest
 
 from custom_components.modbus_devices.equipment.bolid import C2000SMK
-from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
+from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
     GatewayContext, GatewayType, MappingSource, ResolvedDeviceMapping,
@@ -26,7 +26,7 @@ def mapping(*objects, base=50):
 def test_canonical_registration_wired_identity_and_documented_metadata():
     device = C2000SMK(None, 1)
     device.apply_gateway_mapping(mapping(manual_zone_mapping(50, 1, 1, 0, None)))
-    assert "C2000SMK" in get_classes_from_files()["Bolid"]
+    assert "C2000SMK" in get_equipment_classes_by_manufacturer()["Bolid"]
     assert device.attr_model_name == "С2000-СМК"
     assert device.attr_gateway_mapping.identity.dpls == DPLSSubIdentity(50, 1)
     assert device.attr_device_metadata["supported_kdl_input_types"] == (4, 5, 6, 7, 11, 22)

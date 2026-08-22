@@ -11,7 +11,7 @@ from homeassistant.const import Platform
 from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.modbus_devices.equipment.bolid import MIP24Isp20
-from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
+from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity,
     DownstreamDeviceIdentity,
@@ -108,7 +108,7 @@ def configured(client=None, objects=None):
 
 
 def test_registration_model_and_static_metadata():
-    assert get_classes_from_files()["Bolid"].count("MIP24Isp20") == 1
+    assert get_equipment_classes_by_manufacturer()["Bolid"].count("MIP24Isp20") == 1
     device = MIP24Isp20(None, 1)
     assert device.attr_model_name == "МИП-24 исп.20"
     assert device.full_designation == "МИП-24-2/П5-Р-RS"

@@ -110,7 +110,7 @@ async def test_config_flow_transport_manufacturer_and_real_model_steps(monkeypat
     flow = ModbusDevicesConfigFlow()
     flow.hass = FakeHass()
     monkeypatch.setattr(
-        "custom_components.modbus_devices.config_flow.get_classes_from_files",
+        "custom_components.modbus_devices.config_flow.get_equipment_classes_by_manufacturer",
         lambda: {"Bolid": ["C2000KDL"], "Dyna Drive": ["DN310"], "Owen": ["TRM138"]},
     )
     monkeypatch.setattr(

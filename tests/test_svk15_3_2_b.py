@@ -4,7 +4,7 @@ import pytest
 
 from custom_components.modbus_devices.equipment import bolid
 from custom_components.modbus_devices.equipment.bolid import SVK15_3_2_B
-from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
+from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
     GatewayContext, GatewayType, MappingSource, ResolvedDeviceMapping,
@@ -32,7 +32,7 @@ def configured():
 
 def test_registration_display_and_wired_identity():
     device = configured()
-    assert get_classes_from_files()["Bolid"].count("SVK15_3_2_B") == 1
+    assert get_equipment_classes_by_manufacturer()["Bolid"].count("SVK15_3_2_B") == 1
     assert device.attr_model_name == "СВК15-3-2-Б"
     assert device.attr_gateway_mapping.identity.dpls == DPLSSubIdentity(30, 1)
     assert device.attr_serial_number is None

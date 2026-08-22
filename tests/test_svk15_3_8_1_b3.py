@@ -8,7 +8,7 @@ from homeassistant.const import UnitOfVolume
 
 from custom_components.modbus_devices.equipment import bolid
 from custom_components.modbus_devices.equipment.bolid import SVK15_3_8_1_B3
-from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
+from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
     GatewayContext, GatewayType, MappingSource, ResolvedDeviceMapping,
@@ -42,7 +42,7 @@ def configured(client=None, base=20):
 
 def test_registration_identity_and_metadata():
     device = configured()
-    assert get_classes_from_files()["Bolid"].count("SVK15_3_8_1_B3") == 1
+    assert get_equipment_classes_by_manufacturer()["Bolid"].count("SVK15_3_8_1_B3") == 1
     assert device.attr_model_name == "СВК15-3-8-1-Б3"
     assert device.attr_gateway_mapping.identity.dpls == DPLSSubIdentity(20, 1)
     assert device.attr_device_identifier.endswith(":orion:10:dpls:20")

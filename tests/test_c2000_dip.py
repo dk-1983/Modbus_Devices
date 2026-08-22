@@ -3,7 +3,7 @@
 import pytest
 
 from custom_components.modbus_devices.equipment.bolid import DIP34A05
-from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
+from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
     GatewayContext, GatewayType, MappingSource, ResolvedDeviceMapping,
@@ -23,7 +23,7 @@ def mapping(*objects, base=20, kdl=10, connection="tcp:pp-a", model="DIP34A05"):
 def test_registration_model_identity_and_metadata():
     device = DIP34A05(None, 1)
     device.apply_gateway_mapping(mapping(manual_zone_mapping(20, 1, 1, 0, None)))
-    assert "DIP34A05" in get_classes_from_files()["Bolid"]
+    assert "DIP34A05" in get_equipment_classes_by_manufacturer()["Bolid"]
     assert device.attr_model_name == "ДИП-34А-05"
     assert device.attr_gateway_mapping.identity.dpls == DPLSSubIdentity(20, 1)
     assert device.attr_serial_number is None

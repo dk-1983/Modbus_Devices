@@ -6,7 +6,7 @@ import pytest
 from pymodbus.exceptions import ModbusException
 
 from custom_components.modbus_devices.equipment.bolid import C2000RST01
-from custom_components.modbus_devices.equipment.equipment import get_classes_from_files
+from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
     GatewayContext, GatewayType, MappingSource, ResolvedDeviceMapping,
@@ -53,7 +53,7 @@ def mapping(*objects, base=30, kdl=10, connection="tcp:pp"):
 def test_registration_identity_model_and_metadata():
     device = C2000RST01(Client(), 1)
     device.apply_gateway_mapping(mapping(manual_zone_mapping(30, 1, 1, 0, None)))
-    assert "C2000RST01" in get_classes_from_files()["Bolid"]
+    assert "C2000RST01" in get_equipment_classes_by_manufacturer()["Bolid"]
     assert device.attr_model_name == "С2000Р-СТ исп.01"
     assert device.attr_gateway_mapping.identity.dpls == DPLSSubIdentity(30, 1)
     assert "arr" not in device.attr_device_identifier.lower()

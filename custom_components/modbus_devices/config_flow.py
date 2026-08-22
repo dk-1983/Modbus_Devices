@@ -14,13 +14,12 @@ from homeassistant.helpers.selector import selector
 
 from .const import Config
 from .equipment.equipment import (
-    get_classes_from_files,
+    get_equipment_classes_by_manufacturer,
     get_equipment_display_name,
     get_gateway_capabilities,
     get_gateway_device_metadata,
     get_gateway_requirement,
     get_manual_io_mapping_spec,
-    get_serial_ports,
     validate_equipment_gateway_mapping,
 )
 from .gateway import (
@@ -42,7 +41,7 @@ from .mapping import (
     ManualDeviceMappingProvider,
 )
 from .manufacturer import canonical_manufacturer_name
-from .modbus_client import connect_modbus
+from .modbus_client import connect_modbus, get_serial_ports
 from .s2000_pp import (
     S2000PPConfigurationCache,
     S2000PPConfigurationReader,
@@ -82,7 +81,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         if not self._device_classes:
             self._device_classes = await self.hass.async_add_executor_job(
-                get_classes_from_files
+                get_equipment_classes_by_manufacturer
             )
 
         if not self._serial_ports:
