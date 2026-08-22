@@ -1506,6 +1506,150 @@ class C20004:
         }
 
 
+class C2000BKI:
+    """Bolid C2000-BKI direct Orion device state behind S2000-PP."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-БКИ"
+    required_gateway = GatewayType.S2000_PP
+    documented_firmware = "2.45"
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="device_state",
+            name="Device state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            zone_type=3,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    STATE_NAMES = C2000KPB.STATE_NAMES
+
+    def __init__(self, client, device_id) -> None:
+        """Initialize the direct Orion device-state model."""
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = "С2000-БКИ"
+        self.attr_description = "Display and control unit"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time: datetime | None = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {
+            "documented_firmware": self.documented_firmware,
+            "documented_orion_state_objects": 1,
+            "gateway_transport_limitation": (
+                "S2000-PP exposes the BKI device state; its 60 indicators and keys "
+                "represent external Orion partitions or actuators and are not BKI objects"
+            ),
+        }
+        self._state_mappings: dict[str, ResolvedObjectMapping] = {}
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        """Return the exact optional S2000-PP device-state capability."""
+        return cls.capability_requirements
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Validate and apply the configured Orion device-state mapping."""
+        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match C2000-BKI")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match C2000-BKI")
+        if mapping.identity.dpls is not None:
+            raise ValueError("C2000-BKI identity must not contain DPLS identity")
+
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for item in mapping.objects:
+            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            if (
+                item.object_kind is not ObjectKind.ZONE
+                or item.local_object_number != 0
+                or zone_type != 3
+            ):
+                raise ValueError("Mapping contains an unsupported C2000-BKI object")
+            if item.data_area is not ModbusDataArea.HOLDING_REGISTER:
+                raise ValueError("C2000-BKI state mapping must use holding registers")
+            if "device_state" in resolved:
+                raise ValueError("Duplicate C2000-BKI capability mapping")
+            resolved["device_state"] = item
+        if not resolved:
+            raise ValueError("C2000-BKI mapping must configure its device state")
+
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = mapping.identity.stable_id
+        self.attr_unique_id_prefix = mapping.identity.stable_id
+        self._state_mappings = resolved
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        """Initialize local metadata; coordinator owns runtime polling."""
+        await self.get_device_info()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        """Return only service fields visible through this transport."""
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe the authoritative BKI device-state object."""
+        if not self._state_mappings:
+            return []
+        return [
+            {
+                "sensor_id": "device_state",
+                "name": "Device state",
+                "device_class": None,
+                "icon": "mdi:state-machine",
+                "entity_category": EntityCategory.DIAGNOSTIC,
+            }
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Read the BKI device state into one coordinator snapshot."""
+        if not self._state_mappings:
+            raise ValueError("C2000-BKI requires a validated S2000-PP mapping")
+        item = self._state_mappings["device_state"]
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states((item,))
+        return {
+            "state_sensors": {
+                "device_state": self._state_sensor_value(
+                    states[item.gateway_object_number]
+                )
+            }
+        }
+
+    @classmethod
+    def _state_name(cls, code: int) -> str:
+        return cls.STATE_NAMES.get(code, f"unknown_{code}")
+
+    @classmethod
+    def _state_sensor_value(cls, state: S2000PPZoneState) -> dict[str, Any]:
+        expanded_codes = state.expanded_states
+        return {
+            "state": cls._state_name(state.primary_state),
+            "primary_code": state.primary_state,
+            "expanded_codes": expanded_codes,
+            "expanded_states": tuple(
+                cls._state_name(code) for code in expanded_codes if code != 0
+            ),
+        }
+
+
 class Signal20M:
     """Bolid Signal-20M direct Orion state model behind S2000-PP."""
 
@@ -4025,6 +4169,7 @@ class C2000SP4:
 EQUIPMENT_CLASSES = (
     C20002,
     C20004,
+    C2000BKI,
     C2000DZ,
     C2000IP03,
     C2000KDL,
