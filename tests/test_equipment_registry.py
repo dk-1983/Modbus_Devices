@@ -18,6 +18,7 @@ from custom_components.modbus_devices.equipment.equipment import (
 
 EXPECTED_CLASSES = {
     "Bolid": [
+        "C20002",
         "C2000DZ",
         "C2000IP03",
         "C2000KDL",
@@ -47,6 +48,7 @@ EXPECTED_CLASSES = {
 
 EXPECTED_MODELS = {
     "Bolid": [
+        "С2000-2",
         "С2000-ДЗ",
         "С2000-ИП-03",
         "С2000-КДЛ",
@@ -77,7 +79,7 @@ EXPECTED_MODELS = {
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 25
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 26
 
 
 def test_module_exports_are_the_single_registry_source():
