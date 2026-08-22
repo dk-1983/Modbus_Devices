@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import math
 from typing import Any
 
 from pymodbus.exceptions import ModbusException
@@ -52,6 +54,14 @@ from .s2000_pp import (
     manual_zone_mapping,
 )
 
+_TRANSPORT_CHOICES = {
+    "modbus_tcp": Config.MODBUS_TCP,
+    "modbus_udp": Config.MODBUS_UDP,
+    Config.MODBUS_RTU_OVER_UDP: Config.MODBUS_RTU_OVER_UDP,
+    "serial": Config.MODBUS_SERIAL,
+}
+
+
 class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     """Handle config flow."""
 
@@ -93,7 +103,10 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             )
 
         if user_input is not None:
-            self._data.update(user_input)
+            selected = user_input[Config.CONF_MODBUS_MODE]
+            self._data[Config.CONF_MODBUS_MODE] = _TRANSPORT_CHOICES.get(
+                selected, selected
+            )
             return await self.async_step_manufacturer()
 
         schema = vol.Schema(
@@ -102,11 +115,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                     {
                         "select": {
                             "mode": "dropdown",
-                            "options": [
-                                Config.MODBUS_TCP,
-                                Config.MODBUS_UDP,
-                                Config.MODBUS_SERIAL,
-                            ],
+                            "options": list(_TRANSPORT_CHOICES),
+                            "translation_key": "modbus_transport",
                         }
                     }
                 )
@@ -223,6 +233,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         if mode in (Config.MODBUS_TCP, Config.MODBUS_UDP):
             return await self.async_step_network()
+
+        if mode == Config.MODBUS_RTU_OVER_UDP:
+            return await self.async_step_rtu_over_udp()
 
         return await self.async_step_serial()
 
@@ -348,6 +361,86 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         return self.async_show_form(
             step_id="network",
+            data_schema=schema,
+            errors=errors,
+        )
+
+    async def async_step_rtu_over_udp(self, user_input=None):
+        """Configure a raw Modbus RTU ADU transported over UDP."""
+        errors = {}
+        if user_input is not None:
+            try:
+                host = cv.string(user_input[CONF_HOST]).strip().lower()
+                if not host:
+                    raise ValueError("Remote host must not be empty")
+                remote_port = int(user_input[Config.CONF_REMOTE_PORT])
+                local_udp_port = int(
+                    user_input.get(Config.CONF_LOCAL_UDP_PORT, remote_port)
+                )
+                timeout = float(user_input[Config.CONF_TIMEOUT])
+                local_bind_address = cv.string(
+                    user_input.get(Config.CONF_LOCAL_BIND_ADDRESS, "")
+                ).strip()
+                if not 1 <= remote_port <= 65535:
+                    raise ValueError("Remote UDP port is out of range")
+                if not 1 <= local_udp_port <= 65535:
+                    raise ValueError("Local UDP port is out of range")
+                if not math.isfinite(timeout) or timeout <= 0:
+                    raise ValueError("Timeout must be positive and finite")
+                if local_bind_address:
+                    ipaddress.IPv4Address(local_bind_address)
+                device_id = int(user_input.get(CONF_DEVICE_ID, 1))
+                if not 1 <= device_id <= 247:
+                    raise ValueError("Device ID is out of range")
+            except (KeyError, TypeError, ValueError):
+                errors["base"] = "invalid_rtu_over_udp_config"
+            else:
+                self._data.update(
+                    {
+                        CONF_HOST: host,
+                        Config.CONF_REMOTE_PORT: remote_port,
+                        Config.CONF_LOCAL_UDP_PORT: local_udp_port,
+                        Config.CONF_TIMEOUT: timeout,
+                        Config.CONF_LOCAL_BIND_ADDRESS: local_bind_address,
+                        CONF_DEVICE_ID: device_id,
+                        CONF_NAME: cv.string(
+                            user_input.get(CONF_NAME, "Modbus Device")
+                        ),
+                    }
+                )
+                try:
+                    client = await connect_modbus(self._data)
+                    if not client or not client.connected:
+                        errors["base"] = "cannot_connect"
+                    else:
+                        client.close()
+                        unique_id = (
+                            f"{Config.MODBUS_RTU_OVER_UDP}:{host}:"
+                            f"{remote_port}:{device_id}"
+                        )
+                        return await self._async_connection_ready(unique_id)
+                except (ModbusException, OSError, TimeoutError):
+                    errors["base"] = "cannot_connect"
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default="10.0.2.10"): cv.string,
+                vol.Required(Config.CONF_REMOTE_PORT, default=40000): vol.All(
+                    int, vol.Range(min=1, max=65535)
+                ),
+                vol.Optional(Config.CONF_LOCAL_UDP_PORT, default=40000): vol.All(
+                    int, vol.Range(min=1, max=65535)
+                ),
+                vol.Required(Config.CONF_TIMEOUT, default=2.5): vol.Coerce(float),
+                vol.Optional(Config.CONF_LOCAL_BIND_ADDRESS, default=""): cv.string,
+                vol.Required(CONF_DEVICE_ID, default=1): vol.All(
+                    int, vol.Range(min=1, max=247)
+                ),
+                vol.Optional(CONF_NAME, default="Modbus Device"): cv.string,
+            }
+        )
+        return self.async_show_form(
+            step_id="rtu_over_udp",
             data_schema=schema,
             errors=errors,
         )
@@ -481,6 +574,11 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         mode = self._data[Config.CONF_MODBUS_MODE]
         if mode in (Config.MODBUS_TCP, Config.MODBUS_UDP):
             return f"{mode}:{self._data[CONF_HOST]}:{self._data[CONF_PORT]}"
+        if mode == Config.MODBUS_RTU_OVER_UDP:
+            return (
+                f"{mode}:{self._data[CONF_HOST]}:"
+                f"{self._data[Config.CONF_REMOTE_PORT]}"
+            )
 
         return (
             f"{mode}:{self._data[Config.CONF_COM_PORT]}:"

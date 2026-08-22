@@ -6,6 +6,7 @@
       "device": {"title": "Equipment model", "description": "Select the physical equipment model.", "data": {"device_class": "Equipment model"}},
       "io_mapping": {"title": "Direct I/O mapping", "description": "Configure the device's direct Modbus I/O layout.", "data": {"di_data_area": "Digital input data area", "di_base_address": "Digital input base address", "di_address_stride": "Digital input address stride", "do_base_address": "Digital output base address", "do_address_stride": "Digital output address stride"}},
       "network": {"title": "Network connection", "description": "Configure the Modbus network endpoint.", "data": {"host": "Host", "port": "Port", "device_id": "Device ID", "name": "Name"}},
+      "rtu_over_udp": {"title": "Modbus RTU over UDP", "description": "Configure raw Modbus RTU frames over UDP. The local UDP port is required by gateways that reply to a preconfigured static peer port.", "data": {"host": "Remote host", "remote_port": "Remote UDP port", "local_udp_port": "Local UDP port", "timeout": "Timeout", "local_bind_address": "Local bind address", "device_id": "Device ID", "name": "Name"}},
       "serial": {"title": "Serial connection", "description": "Configure the Modbus serial connection.", "data": {"device_id": "Device ID", "com_port": "Serial port", "baudrate": "Baud rate", "bytesize": "Data bits", "parity": "Parity", "stopbits": "Stop bits", "name": "Name"}},
       "gateway_context": {"title": "S2000-PP gateway", "description": "Select an existing gateway context or add a new one.", "data": {"gateway_selection": "Gateway"}},
       "gateway_new": {"title": "New S2000-PP gateway", "description": "Give this physical gateway a stable name.", "data": {"gateway_id": "Gateway name"}},
@@ -18,6 +19,7 @@
     },
     "error": {
       "cannot_connect": "Cannot connect to the Modbus device.",
+      "invalid_rtu_over_udp_config": "The Modbus RTU over UDP configuration is invalid.",
       "invalid_io_mapping": "The direct I/O mapping is invalid.",
       "invalid_gateway": "The gateway configuration is invalid.",
       "unsupported_gateway_transport": "This equipment is not supported through the selected gateway transport.",
@@ -33,6 +35,16 @@
       "no_devices": "No equipment models are available.",
       "no_manufacturers": "No manufacturers are available.",
       "no_devices_for_manufacturer": "No equipment models are available for this manufacturer."
+    }
+  },
+  "selector": {
+    "modbus_transport": {
+      "options": {
+        "modbus_tcp": "ModBus TCP/IP",
+        "modbus_udp": "ModBus UDP/IP",
+        "rtu_over_udp": "Modbus RTU over UDP",
+        "serial": "SerialPort"
+      }
     }
   }
 }
