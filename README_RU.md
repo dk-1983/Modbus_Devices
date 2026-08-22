@@ -4,12 +4,12 @@
 
 Modbus Devices — пользовательская интеграция Home Assistant для явно поддерживаемых приборов промышленной автоматизации и инженерных систем. Каждая модель оборудования определяет собственные доступные через Modbus возможности, сущности, правила проверки и, при необходимости, привязку к шлюзу.
 
-Интеграция работает как локально опрашиваемый хаб. Сейчас поддерживаются приборы Bolid и Owen с прямым Modbus-подключением, а также устройства Bolid Orion, представленные через шлюз С2000-ПП.
+Интеграция работает как локально опрашиваемый хаб для Modbus-совместимого оборудования нескольких производителей с прямым подключением либо поддержанной gateway/topology mapping. Канонический реестр сейчас содержит оборудование Bolid, Dyna Drive и Owen.
 
 ## Основные возможности
 
-- Подключения Modbus TCP, Modbus UDP и последовательный Modbus RTU.
-- Создание датчиков, бинарных датчиков, переключателей и сущностей даты/времени на основе модели оборудования.
+- Подключения Modbus TCP/IP, native Modbus UDP/IP, последовательный Modbus и Modbus RTU over UDP.
+- Создание sensor, binary sensor, switch, datetime и button entities на основе модели оборудования.
 - Типизированные исполнения приборов и возможности, зависящие от выбранной топологии.
 - Поддержка шлюза С2000-ПП, Orion, С2000-КДЛ и подчинённого оборудования ДПЛС.
 - Ручной и configuration-assisted mapping.
@@ -17,6 +17,7 @@ Modbus Devices — пользовательская интеграция Home As
 - Документированные числовые измерения, включая температуру и влажность там, где их поддерживает путь через С2000-ПП.
 - Управление реле/выходами с проверкой ответа записи, оптимистической синхронизацией и защитой от устаревшего результата опроса.
 - Явная обработка ошибок связи и некорректных ответов: ошибка не отображается как нормальное или выключенное состояние.
+- Централизованный coordinator polling, grouped reads где возможно, сериализация запросов каждого клиента и общая строгая проверка ответов.
 - Совместимая загрузка старых записей конфигурации при отображении канонических производителей и моделей.
 
 Поддержка определяется конкретной моделью. Наличие производителя в списке не означает поддержку всех его приборов или всех физических функций конкретного прибора.
@@ -61,15 +62,18 @@ Home Assistant
 
 | Способ подключения | Настройка |
 |---|---|
-| Modbus TCP | Host, port и Modbus unit ID |
-| Modbus UDP | Host, port и Modbus unit ID |
+| Modbus TCP/IP | Host, port и Modbus unit ID |
+| Modbus UDP/IP | Host, port и Modbus unit ID |
 | Последовательный Modbus RTU | Последовательный порт, baud rate, byte size, parity, stop bits и unit ID |
+| Modbus RTU over UDP | Remote host/port, фиксированный local UDP port, timeout, опциональный local bind address и downstream device ID |
+
+Native Modbus UDP/IP и Modbus RTU over UDP — разные протоколы на проводе. Native UDP передаёт Modbus application framing через UDP. RTU over UDP помещает в UDP raw Modbus RTU ADU вместе с CRC и не использует MBAP header.
 
 Возможность использования соединения также зависит от физического интерфейса выбранного прибора.
 
 ## Поддерживаемое оборудование
 
-Следующая таблица соответствует каноническому equipment registry текущего исходного кода. В ней показаны пользовательские названия производителя, а не ключи Python classes.
+Канонический registry текущего исходного кода содержит **30 моделей: Bolid 27, Dyna Drive 1 и Owen 2**. Названия ниже — пользовательские названия производителя, а не имена Python-классов.
 
 ### Bolid — прямой Modbus и шлюз С2000-ПП
 
@@ -78,6 +82,10 @@ Home Assistant
 | Bolid | [M3000-BB-1020](https://bolid.ru/production/disp/inout-modules/m3000_vv_1020.html) | Прямой Modbus | 12 дискретных входов, 6 релейных переключателей, часы прибора | Служебные данные экземпляра читаются из прибора |
 | Bolid | [С2000-ПП](https://bolid.ru/production/s2000-pp.html) | Прямой Modbus | Диагностические бинарные датчики шлюза | Режим/связь Orion master, вскрытие корпуса и неисправность питания; служебные данные при наличии в протоколе |
 | Bolid | С2000-КПБ | С2000-ПП → Orion | Настроенные переключатели выходов и датчики мультисостояний | До 6 выходов/состояний цепей, 2 технологических входа и состояние прибора; сущности соответствуют настроенному набору |
+| Bolid | С2000-2 | С2000-ПП → Orion | Только чтение состояния прибора и настроенных входов/точек доступа | Direct Orion; команды управления доступом не публикуются |
+| Bolid | С2000-4 | С2000-ПП → Orion | Только чтение состояния прибора и до четырёх настроенных входов | Управление реле намеренно не публикуется |
+| Bolid | Сигнал-20М | С2000-ПП → Orion | Только чтение состояния прибора и до 20 настроенных входов | Class не распространяется на Сигнал-20П, Сигнал-20П исп.01 и Сигнал-20 сер.04 |
+| Bolid | С2000-БКИ | С2000-ПП → Orion | Только собственное диагностическое состояние блока | Внешние разделы/индикаторы не дублируются; С2000-БКИ 2RS485 этой class не поддерживается |
 | Bolid | [МИП-24 исп.20](https://bolid.ru/production/mip-24_20.html) | С2000-ПП / Orion RS-485 | Мультисостояния прибора, выходного питания, нагрузки, батареи, зарядного устройства и сети | Полное обозначение МИП-24-2/П5-Р-RS; состояние прибора обязательно, остальные пять сущностей соответствуют настроенному subset mapping; физические числовые измерения не публикуются, поскольку их текущий Modbus-путь через С2000-ПП не подтверждён |
 
 ### Bolid — С2000-КДЛ и проводные устройства ДПЛС
@@ -92,7 +100,10 @@ Home Assistant
 | Bolid | [С2000-СМК](https://bolid.ru/production/amrs/addr-amrs-detection-hdw/) | С2000-ПП → С2000-КДЛ → ДПЛС | Мультисостояние открытия | Проводная одноадресная модель; снята производителем с производства, но документирована и поддерживается интеграцией |
 | Bolid | С2000-ВТ / С2000-ВТ исп.01 | С2000-ПП → С2000-КДЛ → ДПЛС | Датчики температуры и относительной влажности | Числовые значения используют документированный цикл запросов С2000-ПП |
 | Bolid | С2000-ВТИ / С2000-ВТИ исп.01 | С2000-ПП → С2000-КДЛ → ДПЛС | Через этот путь сущности сейчас недоступны | Модели зарегистрированы, но передача числовых значений через текущий путь С2000-ПП не подтверждена, поэтому настройка блокируется |
-| Bolid | [С2000-СП4](https://bolid.ru/production/s2000-sp4.html) | С2000-ПП → С2000-КДЛ → ДПЛС | Настроенный переключатель привода и датчики мультисостояний положения/цепей | Поддержанные исполнения перечислены ниже; сущности соответствуют настроенному набору mapping |
+| Bolid | [С2000-СП4/24(220)](https://bolid.ru/production/s2000-sp4.html) | С2000-ПП → С2000-КДЛ → ДПЛС | Настроенный переключатель привода и датчики мультисостояний положения/цепей | Поддержанные исполнения перечислены ниже; сущности соответствуют настроенному набору mapping |
+| Bolid | С2000-СП2 | С2000-ПП → С2000-КДЛ → ДПЛС | Read-only представление состояния реле | Топология с одним или двумя выходами, без controls. Class не заявляет исп.02 или исп.03 |
+| Bolid | СВК15-3-2-Б | С2000-ПП → С2000-КДЛ → ДПЛС | Состояние/показания счётчика воды из реализованного mapping | Только точная зарегистрированная модель |
+| Bolid | СВК15-3-8-1-Б3 | С2000-ПП → С2000-КДЛ → ДПЛС | Состояние/показания счётчика воды из реализованного mapping | Только точная зарегистрированная модель |
 
 Поддержанные исполнения С2000-СП4:
 
@@ -121,6 +132,12 @@ Home Assistant
 |---|---|---|---|---|
 | Owen | [TRM-138](https://owen.ru/product/trm138) | Прямой Modbus | 8 датчиков температуры | Текущая реализация читает восемь настроенных измерительных каналов |
 | Owen | [ПЛК110-24.60.К-М](https://files.owen.ru/catalog/product.php?cat=plc&prod=plk110_m02&sub=programmiruemie_logicheskie_kontrolleri) | Прямой Modbus | 36 дискретных входов и 24 переключателя выходов | Пользовательская битовая карта CODESYS Modbus: настраиваются область DI, начальный адрес/шаг DI и начальный адрес/шаг DO |
+
+### Dyna Drive — оборудование с прямым Modbus
+
+| Производитель | Модель | Подключение / шлюз | Сущности / возможности Home Assistant | Примечания |
+|---|---|---|---|---|
+| Dyna Drive | DN310 | Прямой Modbus | Read-only runtime diagnostics, авторитетное состояние работы, декодирование аварий и command buttons | Команды: Forward run, Reverse run, Coast stop, Decelerate stop и Fault reset. Writable frequency setpoint и jog не реализованы; интеграция автоматически не изменяет постоянные параметры привода |
 
 ## Примеры оборудования
 
@@ -154,7 +171,7 @@ Home Assistant
 
 1. В Home Assistant откройте **Настройки → Устройства и службы**.
 2. Нажмите **Добавить интеграцию** и найдите **Modbus Devices**.
-3. Выберите Modbus TCP, UDP или последовательный transport.
+3. Выберите Modbus TCP/IP, Modbus UDP/IP, последовательный Modbus или Modbus RTU over UDP.
 4. Выберите канонического производителя и физическую модель оборудования.
 5. Задайте сетевые либо последовательные параметры и Modbus unit ID.
 6. Заполните model-specific configuration, если она требуется.
@@ -174,13 +191,13 @@ Home Assistant
 
 ### 1. Выберите транспорт
 
-Выберите ModBus TCP/IP, ModBus UDP/IP или SerialPort в соответствии с подключением прибора.
+Выберите ModBus TCP/IP, ModBus UDP/IP, SerialPort или Modbus RTU over UDP в соответствии с подключением прибора. Screenshot создан до добавления RTU-over-UDP; ориентируйтесь на актуальные подписи UI.
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Выбор транспорта Modbus Devices" width="78%"></p>
 
 ### 2. Выберите производителя
 
-Выберите канонического производителя: сейчас доступны Bolid и Owen.
+Выберите канонического производителя: Bolid, Dyna Drive или Owen. Screenshot создан до добавления Dyna Drive; ориентируйтесь на актуальный registry в UI.
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step2.jpg" alt="Выбор производителя Modbus Devices" width="78%"></p>
 
@@ -198,11 +215,42 @@ Home Assistant
 
 Дальнейшие шаги зависят от выбранной модели и её транспорта или шлюза. Для оборудования Bolid за С2000-ПП дополнительно могут потребоваться выбор шлюза, Orion/KDL/DPLS-адреса, topology, mapping source и ручной либо configuration-assisted mapping.
 
+Config Flow локализован на английский и русский языки. YAML configuration не поддерживается.
+
 ### 5. Результат
 
 После успешной настройки Home Assistant создаёт одно Device и сущности, поддерживаемые equipment class. На этом примере показан M3000-BB-1020 с информацией о приборе, controls и sensors; другие модели создают собственные документированные наборы сущностей.
 
 <p align="center"><img src="pictures/config-flow/MD_menu_result.jpg" alt="Устройство M3000-BB-1020 и созданные сущности Home Assistant" width="92%"></p>
+
+## Modbus RTU over UDP
+
+Production transport поддерживает FC01, FC02, FC03, FC04, FC05, FC06 и FC16. Он использует один persistent UDP socket, фиксированный local UDP port, накопление split datagrams, timeout, CRC validation и проверку source/slave/function. Запросы проходят через ту же per-client serialization, что и у остальных transport types.
+
+Пример (используйте значения из конфигурации своего gateway):
+
+```text
+Transport: Modbus RTU over UDP
+Remote host: 192.0.2.10
+Remote UDP port: 40000
+Local UDP port: 40000
+Timeout: 3 seconds
+Local bind address: 0.0.0.0 (optional)
+Downstream device ID: 1
+```
+
+Для gateway со static UDP peer локальный UDP port должен совпадать с destination peer port, настроенным в gateway. С2000-Ethernet можно рассматривать как transport gateway для этого режима при настройках «Прозрачный режим», совместимости «Иные приборы» и подходящего UDP peer. Это не equipment class: Home Assistant Device представляет downstream Modbus equipment.
+
+RTU-over-UDP реализован и покрыт автоматизированными тестами. Live packet capture подтвердил правильную передачу raw RTU frame. End-to-end проверка ответа через С2000-Ethernet пока ожидает подтверждения конфигурации gateway, поэтому полная аппаратная совместимость ещё не заявляется.
+
+## Диагностика проблем
+
+- **Не удаётся подключиться:** проверьте host/port или доступность serial device, firewall/routing и соответствие выбранного transport реальному протоколу gateway.
+- **Неверный device ID:** укажите downstream Modbus slave/unit ID, а не посторонний адрес gateway.
+- **Перепутан UDP:** native Modbus UDP/IP не является raw RTU over UDP; framing должен соответствовать выбранному режиму.
+- **Static peer RTU-over-UDP:** destination port в gateway должен совпадать с local UDP port интеграции; optional bind address должен принадлежать хосту Home Assistant.
+- **Serial:** проверьте baud rate, byte size, parity, stop bits, проводку и slave ID.
+- **Entity стала unavailable после ответа:** timeout, malformed frame, неверный source/slave/function, CRC или payload намеренно отклоняются. Исправьте transport/device configuration; не отключайте validation.
 
 ## Установка
 
@@ -241,7 +289,12 @@ custom_components/modbus_devices
 - Serial number, firmware, hardware revision, protocol information, radio identifier, RSSI, voltage и другие service values публикуются только тогда, когда текущий transport действительно их предоставляет.
 - Radio numeric values реализуются только при подтверждённом актуальной документацией пути через С2000-ПП.
 - Исполнения приборов не считаются совместимыми только из-за похожего названия или корпуса.
+- Writable frequency setpoint DN310 не реализован.
+- Некоторые Bolid relay controls намеренно read-only, если нельзя подтвердить безопасное ownership/tactic поведение.
+- RTU-over-UDP RX/end-to-end validation через С2000-Ethernet ещё не завершена.
 - Новые equipment models добавляются после проверки актуальных официальных руководств, protocol descriptions, register maps и compatibility information.
+
+Modbus Devices публикует write controls только там, где семантика команды реализована явно. Наличие физического реле само по себе не делает выход writable в Home Assistant.
 
 ## Разработка
 
@@ -256,6 +309,8 @@ equipment class
 ```
 
 Одна физическая модель обычно представляется одним equipment class. Небольшие reusable bases содержат общую protocol mechanics, не объединяя разные физические приборы. Изменения по возможности должны сохранять persisted Config Entries, stable device identifiers, entity unique IDs и существующую mapping serialization.
+
+Runtime использует typed `entry.runtime_data`, coordinator-owned polling, grouped reads где они поддерживаются, `SerializedModbusClient` для каждого connection, общую строгую Modbus response validation и explicit manufacturer/equipment registries.
 
 ## Проверки качества
 
@@ -274,6 +329,7 @@ equipment class
 - [Issues](https://github.com/dk-1983/Modbus_Devices/issues)
 - [Releases](https://github.com/dk-1983/Modbus_Devices/releases)
 - [Bolid](https://bolid.ru/)
+- [Dyna Drive](https://www.dninno.com/)
 - [Owen](https://owen.ru/)
 - [Лицензия](LICENSE.md)
 
