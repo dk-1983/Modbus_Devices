@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -391,3 +392,29 @@ class ResolvedDeviceMapping:
             for item in self.objects
             if item.object_kind is object_kind and item.data_area is data_area
         )
+
+
+def compatible_gateway_contexts(
+    serialized_mappings: Iterable[Mapping[str, Any] | None],
+    *,
+    gateway_type: GatewayType,
+    connection_key: str,
+    modbus_unit_id: int,
+) -> dict[str, GatewayContext]:
+    """Return reusable gateway contexts matching one transport endpoint."""
+    contexts: dict[str, GatewayContext] = {}
+    for mapping_data in serialized_mappings:
+        if not mapping_data:
+            continue
+        try:
+            mapping = ResolvedDeviceMapping.from_dict(dict(mapping_data))
+        except (KeyError, TypeError, ValueError):
+            continue
+        gateway = mapping.identity.gateway
+        if (
+            gateway.gateway_type is gateway_type
+            and gateway.connection_key == connection_key
+            and gateway.modbus_unit_id == modbus_unit_id
+        ):
+            contexts[gateway.stable_id] = gateway
+    return contexts

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Protocol
 
 from .gateway import (
@@ -11,12 +12,16 @@ from .gateway import (
     GatewayCapabilitySpec,
     GatewayContext,
     MappingSource,
+    ObjectKind,
     ResolvedDeviceMapping,
     ResolvedObjectMapping,
+    dpls_ranges_overlap,
 )
 from .s2000_pp import (
     S2000PPConfigurationCache,
     S2000PPConfigurationReader,
+    manual_relay_mapping,
+    manual_zone_mapping,
     resolve_relay_row,
     resolve_zone_row,
 )
@@ -189,3 +194,81 @@ class AutomaticDeviceMappingProvider:
             source=self.source,
             objects=relay_objects + zone_objects,
         )
+
+
+def capability_key_for_mapping(
+    mapping: ResolvedObjectMapping,
+    capabilities: tuple[GatewayCapabilitySpec, ...],
+    dpls: DPLSSubIdentity | None,
+) -> str:
+    """Return the equipment capability represented by a resolved object."""
+    zone_type = None if mapping.zone_details is None else mapping.zone_details.zone_type
+    dpls_base = None if dpls is None else dpls.base_address
+    for spec in capabilities:
+        if (
+            spec.object_kind is mapping.object_kind
+            and spec.resolved_local_object_number(dpls_base)
+            == mapping.local_object_number
+            and spec.zone_type == zone_type
+        ):
+            return spec.key
+    raise ValueError("Manual mapping does not match an equipment capability")
+
+
+def available_gateway_capabilities(
+    capabilities: tuple[GatewayCapabilitySpec, ...],
+    mappings: Iterable[ResolvedObjectMapping],
+    dpls: DPLSSubIdentity | None,
+) -> dict[str, GatewayCapabilitySpec]:
+    """Return unmapped capabilities while enforcing alternative groups."""
+    mapped_keys = {
+        capability_key_for_mapping(mapping, capabilities, dpls)
+        for mapping in mappings
+    }
+    mapped_groups = {
+        spec.alternative_group
+        for spec in capabilities
+        if spec.key in mapped_keys and spec.alternative_group is not None
+    }
+    return {
+        spec.key: spec
+        for spec in capabilities
+        if spec.key not in mapped_keys and spec.alternative_group not in mapped_groups
+    }
+
+
+def manual_mapping_for_capability(
+    capability: GatewayCapabilitySpec,
+    table_number: int,
+    dpls: DPLSSubIdentity | None,
+) -> ResolvedObjectMapping:
+    """Build one manual S2000-PP row for an equipment capability."""
+    local_number = capability.resolved_local_object_number(
+        None if dpls is None else dpls.base_address
+    )
+    if capability.object_kind is ObjectKind.RELAY:
+        return manual_relay_mapping(local_number, table_number)
+    if capability.object_kind is ObjectKind.ZONE:
+        return manual_zone_mapping(
+            local_number,
+            table_number,
+            capability.zone_type,
+            0,
+            None,
+        )
+    raise ValueError("Unsupported gateway capability object kind")
+
+
+def has_overlapping_dpls_mapping(
+    identity: DownstreamDeviceIdentity,
+    serialized_mappings: Iterable[dict],
+) -> bool:
+    """Return whether persisted mappings overlap one downstream identity."""
+    for mapping_data in serialized_mappings:
+        try:
+            existing = ResolvedDeviceMapping.from_dict(mapping_data).identity
+        except (KeyError, TypeError, ValueError):
+            continue
+        if dpls_ranges_overlap(identity, existing):
+            return True
+    return False

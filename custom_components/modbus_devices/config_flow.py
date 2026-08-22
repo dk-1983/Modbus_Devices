@@ -32,13 +32,16 @@ from .gateway import (
     ObjectKind,
     ResolvedDeviceMapping,
     ResolvedObjectMapping,
-    dpls_ranges_overlap,
+    compatible_gateway_contexts,
 )
 from .mapping import (
     AmbiguousDeviceMappingError,
     AutomaticDeviceMappingProvider,
     DeviceMappingNotFoundError,
     ManualDeviceMappingProvider,
+    available_gateway_capabilities,
+    has_overlapping_dpls_mapping,
+    manual_mapping_for_capability,
 )
 from .manufacturer import canonical_manufacturer_name
 from .modbus_client import connect_modbus, get_serial_ports
@@ -489,29 +492,16 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
     def _existing_gateway_contexts(self) -> dict[str, GatewayContext]:
         """Return compatible gateway contexts from existing entries."""
-        contexts: dict[str, GatewayContext] = {}
-        connection_key = self._connection_key()
-
-        for entry in self.hass.config_entries.async_entries(Config.DOMAIN):
-            config = entry.options or entry.data
-            mapping_data = config.get(Config.CONF_GATEWAY_MAPPING)
-            if not mapping_data:
-                continue
-
-            try:
-                mapping = ResolvedDeviceMapping.from_dict(mapping_data)
-            except (KeyError, TypeError, ValueError):
-                continue
-
-            gateway = mapping.identity.gateway
-            if (
-                gateway.gateway_type is self._required_gateway
-                and gateway.connection_key == connection_key
-                and gateway.modbus_unit_id == self._data[CONF_DEVICE_ID]
-            ):
-                contexts[gateway.stable_id] = gateway
-
-        return contexts
+        serialized_mappings = (
+            (entry.options or entry.data).get(Config.CONF_GATEWAY_MAPPING)
+            for entry in self.hass.config_entries.async_entries(Config.DOMAIN)
+        )
+        return compatible_gateway_contexts(
+            serialized_mappings,
+            gateway_type=self._required_gateway,
+            connection_key=self._connection_key(),
+            modbus_unit_id=self._data[CONF_DEVICE_ID],
+        )
 
     async def async_step_gateway_context(self, user_input=None):
         """Select an existing gateway context or define a new one."""
@@ -817,43 +807,20 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     async def async_step_manual_capability(self, user_input=None):
         """Map an equipment-owned optional capability to one gateway table row."""
         errors = {}
-        mapped_keys = {
-            self._capability_key_for_mapping(item) for item in self._manual_objects
-        }
-        mapped_groups = {
-            spec.alternative_group
-            for spec in self._gateway_capabilities
-            if spec.key in mapped_keys and spec.alternative_group is not None
-        }
-        available = {
-            spec.key: spec
-            for spec in self._gateway_capabilities
-            if spec.key not in mapped_keys
-            and spec.alternative_group not in mapped_groups
-        }
+        available = available_gateway_capabilities(
+            self._gateway_capabilities,
+            self._manual_objects,
+            self._dpls_identity,
+        )
         if user_input is not None:
             try:
                 spec = available[user_input[Config.CONF_CAPABILITY_KEY]]
                 table_number = user_input[Config.CONF_GATEWAY_OBJECT_NUMBER]
-                if spec.object_kind is ObjectKind.RELAY:
-                    resolved_object = manual_relay_mapping(
-                        local_object_number=spec.resolved_local_object_number(
-                            None if self._dpls_identity is None else self._dpls_identity.base_address
-                        ),
-                        table_number=table_number,
-                    )
-                elif spec.object_kind is ObjectKind.ZONE:
-                    resolved_object = manual_zone_mapping(
-                        local_object_number=spec.resolved_local_object_number(
-                            None if self._dpls_identity is None else self._dpls_identity.base_address
-                        ),
-                        table_number=table_number,
-                        zone_type=spec.zone_type,
-                        partition_number=0,
-                        partition_id=None,
-                    )
-                else:
-                    raise ValueError("Unsupported gateway capability object kind")
+                resolved_object = manual_mapping_for_capability(
+                    spec,
+                    table_number,
+                    self._dpls_identity,
+                )
                 self._manual_objects.append(resolved_object)
             except (KeyError, ValueError):
                 errors["base"] = "invalid_mapping"
@@ -885,22 +852,6 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             data_schema=schema,
             errors=errors,
         )
-
-    def _capability_key_for_mapping(self, mapping: ResolvedObjectMapping) -> str:
-        """Return the equipment capability key represented by a manual mapping."""
-        zone_type = (
-            None if mapping.zone_details is None else mapping.zone_details.zone_type
-        )
-        for spec in self._gateway_capabilities:
-            if (
-                spec.object_kind is mapping.object_kind
-                and spec.resolved_local_object_number(
-                    None if self._dpls_identity is None else self._dpls_identity.base_address
-                ) == mapping.local_object_number
-                and spec.zone_type == zone_type
-            ):
-                return spec.key
-        raise ValueError("Manual mapping does not match an equipment capability")
 
     async def _async_finish_manual_mapping(self):
         """Resolve, validate and store the common mapping representation."""
@@ -1010,17 +961,15 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         identity = mapping.identity
         if identity.dpls is not None:
-            for entry in self.hass.config_entries.async_entries(Config.DOMAIN):
-                config = entry.options or entry.data
-                existing_data = config.get(Config.CONF_GATEWAY_MAPPING)
-                if not existing_data:
-                    continue
-                try:
-                    existing = ResolvedDeviceMapping.from_dict(existing_data).identity
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if dpls_ranges_overlap(identity, existing):
-                    return False
+            existing_mappings = (
+                (entry.options or entry.data).get(Config.CONF_GATEWAY_MAPPING)
+                for entry in self.hass.config_entries.async_entries(Config.DOMAIN)
+            )
+            if has_overlapping_dpls_mapping(
+                identity,
+                (item for item in existing_mappings if item),
+            ):
+                return False
 
         self._data[Config.CONF_GATEWAY_MAPPING] = mapping.to_dict()
         await self.async_set_unique_id(mapping.identity.stable_id)
