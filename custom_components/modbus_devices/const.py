@@ -58,11 +58,16 @@ class Config:
     CONF_BYTESIZE: str = "bytesize"
     CONF_PARITY: str = "parity"
     CONF_STOPBITS: str = "stopbits"
+    CONF_LOCAL_UDP_PORT: str = "local_udp_port"
+    CONF_REMOTE_PORT: str = "remote_port"
+    CONF_LOCAL_BIND_ADDRESS: str = "local_bind_address"
+    CONF_TIMEOUT: str = "timeout"
 
     CONF_CONNECT_TO: str = "connect_to"
 
     MODBUS_TCP: str = "ModBus TCP/IP"
     MODBUS_UDP: str = "ModBus UDP/IP"
+    MODBUS_RTU_OVER_UDP: str = "rtu_over_udp"
     MODBUS_SERIAL: str = "SerialPort"
 
     MODBUS_ERROR: dict[int, str] = {  # TODO Do not used!

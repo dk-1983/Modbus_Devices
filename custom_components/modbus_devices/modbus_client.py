@@ -16,6 +16,7 @@ from pymodbus.client import (
 from serial.tools import list_ports
 
 from .const import Config
+from .rtu_over_udp import ModbusRtuOverUdpClient
 
 from homeassistant.const import (
     CONF_HOST,
@@ -147,6 +148,33 @@ async def connect_modbus(data: dict[str, Any]):
                 data[CONF_PORT],
             )
 
+            return ensure_serialized_client(client)
+
+        # -------------------------
+        # RAW MODBUS RTU OVER UDP
+        # -------------------------
+        if mode == Config.MODBUS_RTU_OVER_UDP:
+            remote_port = int(
+                data[Config.CONF_REMOTE_PORT]
+                if Config.CONF_REMOTE_PORT in data
+                else data[CONF_PORT]
+            )
+            client = ModbusRtuOverUdpClient(
+                host=data[CONF_HOST],
+                remote_port=remote_port,
+                local_udp_port=int(
+                    data.get(Config.CONF_LOCAL_UDP_PORT, remote_port)
+                ),
+                timeout=float(data.get(Config.CONF_TIMEOUT, 3.0)),
+                local_bind_address=data.get(Config.CONF_LOCAL_BIND_ADDRESS),
+            )
+            await client.connect()
+            _LOGGER.info(
+                "Prepared RTU over UDP: %s:%s (local UDP port %s)",
+                data[CONF_HOST],
+                remote_port,
+                client.local_udp_port,
+            )
             return ensure_serialized_client(client)
 
         raise ValueError(f"Unknown Modbus mode: {mode}")
