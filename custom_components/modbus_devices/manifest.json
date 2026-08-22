@@ -10,5 +10,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/dk-1983/Modbus_Devices/issues",
   "requirements": ["pymodbus>=3.11.2"],
-  "version": "0.3.0"
+  "version": "0.4.0"
 }
