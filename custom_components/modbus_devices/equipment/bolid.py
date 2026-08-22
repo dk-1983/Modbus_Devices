@@ -1329,6 +1329,183 @@ class C20002:
         }
 
 
+class C20004:
+    """Bolid C2000-4 direct Orion state model behind S2000-PP."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-4"
+    required_gateway = GatewayType.S2000_PP
+    documented_firmware = "3.85"
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="device_state",
+            name="Device state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            zone_type=3,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="input_1_state",
+            name="Input 1 state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=1,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="input_2_state",
+            name="Input 2 state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=2,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="input_3_state",
+            name="Input 3 state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=3,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="input_4_state",
+            name="Input 4 state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=4,
+            zone_type=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+    )
+    STATE_NAMES = C2000KPB.STATE_NAMES
+
+    def __init__(self, client, device_id) -> None:
+        """Initialize the direct Orion state model."""
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = "С2000-4"
+        self.attr_description = "Intrusion and fire alarm control panel"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time: datetime | None = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {
+            "documented_firmware": self.documented_firmware,
+            "documented_orion_state_objects": 5,
+            "gateway_transport_limitation": (
+                "S2000-PP exposes configured Orion zone states; relay control is not "
+                "published because safe ownership depends on device and S2000M tactics"
+            ),
+        }
+        self._state_mappings: dict[str, ResolvedObjectMapping] = {}
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        """Return the exact optional S2000-PP state capabilities."""
+        return cls.capability_requirements
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Validate and apply the configured Orion state subset."""
+        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match C2000-4")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match C2000-4")
+        if mapping.identity.dpls is not None:
+            raise ValueError("C2000-4 identity must not contain DPLS identity")
+
+        specs = {
+            (spec.object_kind, spec.local_object_number, spec.zone_type): spec
+            for spec in self.capability_requirements
+        }
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for item in mapping.objects:
+            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            spec = specs.get((item.object_kind, item.local_object_number, zone_type))
+            if spec is None:
+                raise ValueError("Mapping contains an unsupported C2000-4 object")
+            if item.data_area is not ModbusDataArea.HOLDING_REGISTER:
+                raise ValueError("C2000-4 state mapping must use holding registers")
+            if spec.key in resolved:
+                raise ValueError("Duplicate C2000-4 capability mapping")
+            resolved[spec.key] = item
+        if not resolved:
+            raise ValueError("C2000-4 mapping must configure at least one state object")
+
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = mapping.identity.stable_id
+        self.attr_unique_id_prefix = mapping.identity.stable_id
+        self._state_mappings = resolved
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        """Initialize local metadata; coordinator owns runtime polling."""
+        await self.get_device_info()
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        """Return only service fields visible through this transport."""
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe the configured authoritative Orion state objects."""
+        specs = {spec.key: spec for spec in self.capability_requirements}
+        return [
+            {
+                "sensor_id": key,
+                "name": specs[key].name,
+                "device_class": None,
+                "icon": "mdi:state-machine",
+                "entity_category": (
+                    EntityCategory.DIAGNOSTIC if key == "device_state" else None
+                ),
+            }
+            for key in self._state_mappings
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Read all configured state objects into one atomic snapshot."""
+        if not self._state_mappings:
+            raise ValueError("C2000-4 requires a validated S2000-PP mapping")
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states(self._state_mappings.values())
+        return {
+            "state_sensors": {
+                key: self._state_sensor_value(states[item.gateway_object_number])
+                for key, item in self._state_mappings.items()
+            }
+        }
+
+    @classmethod
+    def _state_name(cls, code: int) -> str:
+        return cls.STATE_NAMES.get(code, f"unknown_{code}")
+
+    @classmethod
+    def _state_sensor_value(cls, state: S2000PPZoneState) -> dict[str, Any]:
+        expanded_codes = state.expanded_states
+        return {
+            "state": cls._state_name(state.primary_state),
+            "primary_code": state.primary_state,
+            "expanded_codes": expanded_codes,
+            "expanded_states": tuple(
+                cls._state_name(code) for code in expanded_codes if code != 0
+            ),
+        }
+
+
 class MIP24Isp20:
     """Bolid MIP-24 isp.20 direct Orion state model behind S2000-PP."""
 
@@ -3690,6 +3867,7 @@ class C2000SP4:
 
 EQUIPMENT_CLASSES = (
     C20002,
+    C20004,
     C2000DZ,
     C2000IP03,
     C2000KDL,
