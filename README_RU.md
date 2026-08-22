@@ -191,7 +191,7 @@ Native Modbus UDP/IP и Modbus RTU over UDP — разные протоколы 
 
 ### 1. Выберите транспорт
 
-Выберите ModBus TCP/IP, ModBus UDP/IP, SerialPort или Modbus RTU over UDP в соответствии с подключением прибора. Screenshot создан до добавления RTU-over-UDP; ориентируйтесь на актуальные подписи UI.
+Выберите ModBus TCP/IP, ModBus UDP/IP, SerialPort или Modbus RTU over UDP в соответствии с подключением прибора. Screenshot показывает актуальный UI выбора транспорта.
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Выбор транспорта Modbus Devices" width="78%"></p>
 

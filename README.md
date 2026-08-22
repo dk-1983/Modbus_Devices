@@ -191,7 +191,7 @@ These screenshots show a real Home Assistant Config Flow. Start from **Settings 
 
 ### 1. Select the transport
 
-Choose ModBus TCP/IP, ModBus UDP/IP, SerialPort, or Modbus RTU over UDP according to the device connection. The screenshot predates the RTU-over-UDP option; use the current UI labels.
+Choose ModBus TCP/IP, ModBus UDP/IP, SerialPort, or Modbus RTU over UDP according to the device connection. The screenshot shows the current transport selection UI.
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Modbus Devices transport selection" width="78%"></p>
 
