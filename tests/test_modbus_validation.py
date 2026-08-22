@@ -5,11 +5,15 @@ from __future__ import annotations
 import pytest
 from pymodbus.exceptions import ModbusException
 from pymodbus.pdu.bit_message import WriteSingleCoilResponse
-from pymodbus.pdu.register_message import WriteSingleRegisterResponse
+from pymodbus.pdu.register_message import (
+    WriteMultipleRegistersResponse,
+    WriteSingleRegisterResponse,
+)
 
 from custom_components.modbus_devices.modbus_validation import (
     validate_fc05_response,
     validate_fc06_response,
+    validate_fc16_response,
     validated_bits,
     validated_registers,
 )
@@ -66,6 +70,13 @@ def test_real_pymodbus_fc05_and_fc06_response_contracts():
         device_id=4,
         operation="real register",
     )
+    validate_fc16_response(
+        WriteMultipleRegistersResponse(dev_id=5, address=30, count=6),
+        address=30,
+        count=6,
+        device_id=5,
+        operation="real registers",
+    )
 
 
 @pytest.mark.parametrize("response", [None, object(), Response(error=True)])
@@ -111,6 +122,31 @@ def test_fc06_rejects_wrong_function_address_value_and_slave(response):
     with pytest.raises(ModbusException):
         validate_fc06_response(
             response, address=1, value=7, device_id=1, operation="register"
+        )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        object(),
+        Response(error=True),
+        Response(function_code=6, address=1),
+        Response(function_code=16, address=2),
+        Response(function_code=16, address=1),
+        Response(function_code=16, address=1, device_id=2),
+    ],
+)
+def test_fc16_rejects_missing_error_and_mismatched_echo(response):
+    if isinstance(response, Response) and response.function_code == 16:
+        response.count = 6 if response.address != 1 or hasattr(response, "device_id") else 5
+    with pytest.raises(ModbusException):
+        validate_fc16_response(
+            response,
+            address=1,
+            count=6,
+            device_id=1,
+            operation="registers",
         )
 
 

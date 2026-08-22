@@ -154,7 +154,3 @@ async def connect_modbus(data: dict[str, Any]):
     except ModbusException as exc:
         _LOGGER.error("Modbus connection error: %s", exc)
         return None
-
-    except Exception as exc:
-        _LOGGER.exception("Unexpected error: %s", exc)
-        return None

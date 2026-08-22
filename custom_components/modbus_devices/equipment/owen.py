@@ -14,7 +14,11 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
 from homeassistant.const import Platform, UnitOfTemperature
 
-from ..modbus_validation import validate_fc05_response, validated_bits
+from ..modbus_validation import (
+    validate_fc05_response,
+    validated_bits,
+    validated_registers,
+)
 
 
 class TRM138:
@@ -214,13 +218,17 @@ class TRM138:
     async def get_chanel(self, chanel: int) -> dict[str, Any]:
         """Получает аналоговые данные одного канала контроллера."""
         attr = getattr(self, f"attr_ch{chanel}")
-        attr["value"] = (
-            await self.attr_client.read_input_registers(
-                address=attr["address"],
-                count=attr["count"],
-                device_id=self.attr_device_id,
-            )
-        ).registers
+        response = await self.attr_client.read_input_registers(
+            address=attr["address"],
+            count=attr["count"],
+            device_id=self.attr_device_id,
+        )
+        attr["value"] = validated_registers(
+            response,
+            attr["count"],
+            f"read TRM-138 channel {chanel}",
+            expected_function=4,
+        )
         setattr(self, f"attr_ch{chanel}", attr)
         return getattr(self, f"attr_ch{chanel}")
 
@@ -232,13 +240,17 @@ class TRM138:
         chanels = (chanels, (list(range(1, 9))))[chanels is None]
         for chanel in chanels:
             attr = getattr(self, f"attr_ch{chanel}")
-            attr["value"] = (
-                await self.attr_client.read_input_registers(
-                    address=attr["address"],
-                    count=attr["count"],
-                    device_id=self.attr_device_id,
-                )
-            ).registers
+            response = await self.attr_client.read_input_registers(
+                address=attr["address"],
+                count=attr["count"],
+                device_id=self.attr_device_id,
+            )
+            attr["value"] = validated_registers(
+                response,
+                attr["count"],
+                f"read TRM-138 channel {chanel}",
+                expected_function=4,
+            )
             setattr(self, f"attr_ch{chanel}", attr)
             data.append(getattr(self, f"attr_ch{chanel}"))
         return data

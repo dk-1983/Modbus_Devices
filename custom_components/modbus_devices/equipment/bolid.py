@@ -31,7 +31,7 @@ from ..gateway import (
 )
 from ..modbus_validation import (
     validate_fc05_response,
-    validate_modbus_response,
+    validate_fc16_response,
     validated_bits,
     validated_registers,
 )
@@ -358,11 +358,12 @@ class M3000BB1020:
 
     async def get_device_info(self) -> list:
         """Получает информацию о текущем контроллере."""
-        init = (
-            await self.attr_client.read_holding_registers(
-                address=60001, count=6, device_id=self.attr_device_id
-            )
-        ).registers
+        response = await self.attr_client.read_holding_registers(
+            address=60001, count=6, device_id=self.attr_device_id
+        )
+        init = validated_registers(
+            response, 6, "read M3000-BB-1020 device info", expected_function=3
+        )
         self.attr_device_type = init[0]
         self.attr_software_version = init[1]
         self.attr_hardware_version = init[2]
@@ -378,27 +379,40 @@ class M3000BB1020:
         response = await self.attr_client.write_registers(
             address=60007, values=time_values, device_id=self.attr_device_id
         )
-        validate_modbus_response(response, "set M3000-BB-1020 time")
+        validate_fc16_response(
+            response,
+            address=60007,
+            count=len(time_values),
+            device_id=self.attr_device_id,
+            operation="set M3000-BB-1020 time",
+        )
         self.attr_init_time = value
         return self.attr_init_time
 
     async def get_time(self) -> datetime:
         """Получает дату и время установленные в контроллере."""
-        responce = await self.attr_client.read_holding_registers(
+        response = await self.attr_client.read_holding_registers(
             address=60007, count=6, device_id=self.attr_device_id
         )
-        return datetime(*responce.registers).replace(
-            tzinfo=timezone(timedelta(hours=Config.TIME_ZONE)), microsecond=0
+        registers = validated_registers(
+            response, 6, "read M3000-BB-1020 time", expected_function=3
         )
+        try:
+            return datetime(*registers).replace(
+                tzinfo=timezone(timedelta(hours=Config.TIME_ZONE)), microsecond=0
+            )
+        except ValueError as exc:
+            raise ModbusException("Invalid M3000-BB-1020 clock payload") from exc
 
     async def get_input(self, input: int) -> dict[str, Any]:
         """Получает состояние одного входа контроллера."""
         attr = getattr(self, f"attr_in{input}")
-        attr["state"] = (
-            await self.attr_client.read_discrete_inputs(
-                address=attr["address"], count=1, device_id=self.attr_device_id
-            )
-        ).bits[0]
+        response = await self.attr_client.read_discrete_inputs(
+            address=attr["address"], count=1, device_id=self.attr_device_id
+        )
+        attr["state"] = validated_bits(
+            response, 1, f"read M3000-BB-1020 input {input}", expected_function=2
+        )[0]
         setattr(self, f"attr_in{input}", attr)
         return getattr(self, f"attr_in{input}")
 
@@ -408,11 +422,15 @@ class M3000BB1020:
         inputs = (inputs, (list(range(1, 13))))[inputs is None]
         for in_put in inputs:
             attr = getattr(self, f"attr_in{in_put}")
-            attr["state"] = (
-                await self.attr_client.read_discrete_inputs(
-                    address=attr["address"], count=1, device_id=self.attr_device_id
-                )
-            ).bits[0]
+            response = await self.attr_client.read_discrete_inputs(
+                address=attr["address"], count=1, device_id=self.attr_device_id
+            )
+            attr["state"] = validated_bits(
+                response,
+                1,
+                f"read M3000-BB-1020 input {in_put}",
+                expected_function=2,
+            )[0]
             setattr(self, f"attr_in{in_put}", attr)
             data.append(getattr(self, f"attr_in{in_put}"))
         return data
@@ -420,11 +438,12 @@ class M3000BB1020:
     async def get_output(self, out: int) -> dict[str, Any]:
         """Получает состояние одного выхода номер 1-6."""
         attr = getattr(self, f"attr_out{out}")
-        attr["state"] = (
-            await self.attr_client.read_coils(
-                address=attr["address"], count=1, device_id=self.attr_device_id
-            )
-        ).bits[0]
+        response = await self.attr_client.read_coils(
+            address=attr["address"], count=1, device_id=self.attr_device_id
+        )
+        attr["state"] = validated_bits(
+            response, 1, f"read M3000-BB-1020 output {out}", expected_function=1
+        )[0]
         setattr(self, f"attr_out{out}", attr)
         return getattr(self, f"attr_out{out}")
 
@@ -434,11 +453,15 @@ class M3000BB1020:
         outputs = (outputs, (list(range(1, 7))))[outputs is None]
         for output in outputs:
             attr = getattr(self, f"attr_out{output}")
-            attr["state"] = (
-                await self.attr_client.read_coils(
-                    address=attr["address"], count=1, device_id=self.attr_device_id
-                )
-            ).bits[0]
+            response = await self.attr_client.read_coils(
+                address=attr["address"], count=1, device_id=self.attr_device_id
+            )
+            attr["state"] = validated_bits(
+                response,
+                1,
+                f"read M3000-BB-1020 output {output}",
+                expected_function=1,
+            )[0]
             setattr(self, f"attr_out{output}", attr)
             data.append(getattr(self, f"attr_out{output}"))
         return data

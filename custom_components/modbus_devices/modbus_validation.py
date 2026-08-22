@@ -104,6 +104,23 @@ def validate_fc06_response(
     _validate_response_device_id(response, device_id, operation)
 
 
+def validate_fc16_response(
+    response: Any,
+    *,
+    address: int,
+    count: int,
+    operation: str,
+    device_id: int | None = None,
+) -> None:
+    """Validate the complete FC16 multiple-register echo contract."""
+    validate_modbus_response(response, operation, expected_function=16)
+    if getattr(response, "address", None) != address:
+        raise ModbusException(f"Wrong FC16 address echo for {operation}")
+    if getattr(response, "count", None) != count:
+        raise ModbusException(f"Wrong FC16 register count echo for {operation}")
+    _validate_response_device_id(response, device_id, operation)
+
+
 def validated_registers(
     response: Any,
     expected: int,

@@ -9,6 +9,11 @@ from custom_components.modbus_devices.equipment.bolid import M3000BB1020
 
 
 class Response:
+    function_code = 16
+    address = 60007
+    count = 6
+    device_id = 1
+
     def __init__(self, *, error=False):
         self._error = error
 
