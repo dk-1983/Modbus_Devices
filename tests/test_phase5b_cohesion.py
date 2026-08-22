@@ -40,5 +40,5 @@ def test_registry_counts_and_order_remain_unchanged():
     equipment = get_equipment_classes_by_manufacturer()
 
     assert list(equipment) == ["Bolid", "Dyna Drive", "Owen"]
-    assert [len(equipment[name]) for name in equipment] == [24, 1, 2]
-    assert sum(map(len, equipment.values())) == 27
+    assert [len(equipment[name]) for name in equipment] == [25, 1, 2]
+    assert sum(map(len, equipment.values())) == 28

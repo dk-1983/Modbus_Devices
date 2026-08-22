@@ -39,6 +39,7 @@ EXPECTED_CLASSES = {
         "DIP34A05",
         "M3000BB1020",
         "MIP24Isp20",
+        "Signal20M",
         "S2000PP",
         "SVK15_3_2_B",
         "SVK15_3_8_1_B3",
@@ -70,6 +71,7 @@ EXPECTED_MODELS = {
         "ДИП-34А-05",
         "M3000-BB-1020",
         "МИП-24 исп.20",
+        "Сигнал-20М",
         "С2000-ПП",
         "СВК15-3-2-Б",
         "СВК15-3-8-1-Б3",
@@ -81,7 +83,7 @@ EXPECTED_MODELS = {
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 27
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 28
 
 
 def test_module_exports_are_the_single_registry_source():
