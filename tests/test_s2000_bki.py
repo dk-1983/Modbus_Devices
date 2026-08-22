@@ -104,8 +104,8 @@ def configured(client=None):
 def test_registry_metadata_and_config_flow_visibility():
     registry = get_equipment_classes_by_manufacturer()
     assert registry["Bolid"].count("C2000BKI") == 1
-    assert len(registry["Bolid"]) == 26
-    assert sum(map(len, registry.values())) == 29
+    assert len(registry["Bolid"]) == 27
+    assert sum(map(len, registry.values())) == 30
     assert C2000BKI.equipment_manufacturer == "Bolid"
     assert C2000BKI.equipment_model == "С2000-БКИ"
     assert C2000BKI.documented_firmware == "2.45"

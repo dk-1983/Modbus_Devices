@@ -33,6 +33,7 @@ EXPECTED_CLASSES = {
         "C2000RST01",
         "C2000RSirena",
         "C2000SMK",
+        "C2000SP2",
         "C2000SP4",
         "C2000ST04",
         "C2000VT",
@@ -66,6 +67,7 @@ EXPECTED_MODELS = {
         "С2000Р-СТ исп.01",
         "С2000Р-Сирена",
         "С2000-СМК",
+        "С2000-СП2",
         "С2000-СП4/24(220)",
         "С2000-СТ исп.04",
         "С2000-ВТ",
@@ -85,7 +87,7 @@ EXPECTED_MODELS = {
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 29
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 30
 
 
 def test_module_exports_are_the_single_registry_source():

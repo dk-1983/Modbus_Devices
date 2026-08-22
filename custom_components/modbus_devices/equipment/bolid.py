@@ -3797,6 +3797,176 @@ class C2000VTI(BolidDPLSNumericDeviceBase):
         self.attr_description = "Addressable display thermohygrometer"
 
 
+class C2000SP2:
+    """Bolid C2000-SP2 DPLS relay-state equipment."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-СП2"
+    required_gateway = GatewayType.S2000_PP
+    uses_dpls_identity = True
+    dpls_address_count = 2
+    variant_optional = True
+    documented_firmware = "1.21"
+    topologies = {
+        "one_output": "One relay output",
+        "two_outputs": "Two relay outputs",
+    }
+    topology_dpls_address_counts = {"one_output": 1, "two_outputs": 2}
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="relay_1",
+            name="Relay 1 state",
+            object_kind=ObjectKind.RELAY,
+            local_object_number=0,
+            local_object_offset=0,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+        GatewayCapabilitySpec(
+            key="relay_2",
+            name="Relay 2 state",
+            object_kind=ObjectKind.RELAY,
+            local_object_number=0,
+            local_object_offset=1,
+            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        ),
+    )
+
+    def __init__(self, client, device_id) -> None:
+        """Initialize the read-only DPLS relay-state model."""
+        self.attr_client = client
+        self.attr_device_id = device_id
+        self.attr_manufactures_name = "Bolid"
+        self.attr_model_name = "С2000-СП2"
+        self.attr_description = "Addressable two-relay signal/start unit"
+        self.attr_device_type = None
+        self.attr_serial_number = None
+        self.attr_hardware_version = None
+        self.attr_software_version = None
+        self.attr_init_time: datetime | None = None
+        self.attr_platforms: list[Platform] = []
+        self.attr_gateway_mapping: ResolvedDeviceMapping | None = None
+        self.attr_device_identifier: str | None = None
+        self.attr_unique_id_prefix: str | None = None
+        self.attr_device_metadata: dict[str, Any] = {}
+        self._relay_mappings: dict[str, ResolvedObjectMapping] = {}
+
+    @classmethod
+    def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
+        """Return both relay-state capabilities."""
+        return cls.capability_requirements
+
+    @classmethod
+    def get_gateway_capabilities_for_metadata(
+        cls, metadata: Any
+    ) -> tuple[GatewayCapabilitySpec, ...]:
+        """Return relay states owned by the selected address topology."""
+        if metadata.topology == "one_output":
+            return cls.capability_requirements[:1]
+        if metadata.topology == "two_outputs":
+            return cls.capability_requirements
+        raise ValueError("C2000-SP2 requires a supported topology")
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Validate and apply exact DPLS relay ownership."""
+        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+            raise ValueError("Gateway mapping model does not match C2000-SP2")
+        if mapping.identity.gateway.gateway_type is not self.required_gateway:
+            raise ValueError("Gateway mapping type does not match C2000-SP2")
+        dpls = mapping.identity.dpls
+        if dpls is None:
+            raise ValueError("C2000-SP2 requires a DPLS identity")
+        metadata = mapping.identity.metadata
+        expected_count = self.topology_dpls_address_counts.get(metadata.topology)
+        if expected_count is None or dpls.address_count != expected_count:
+            raise ValueError("C2000-SP2 DPLS range does not match its topology")
+
+        capabilities = self.get_gateway_capabilities_for_metadata(metadata)
+        accepted = {
+            spec.resolved_local_object_number(dpls.base_address): spec
+            for spec in capabilities
+        }
+        resolved: dict[str, ResolvedObjectMapping] = {}
+        for item in mapping.objects:
+            spec = accepted.get(item.local_object_number)
+            if (
+                item.object_kind is not ObjectKind.RELAY
+                or spec is None
+                or item.data_area is not ModbusDataArea.COIL
+            ):
+                raise ValueError("Mapping contains an unsupported C2000-SP2 object")
+            if spec.key in resolved:
+                raise ValueError("Duplicate C2000-SP2 capability mapping")
+            resolved[spec.key] = item
+        if not resolved:
+            raise ValueError("C2000-SP2 mapping requires at least one relay state")
+
+        self.attr_gateway_mapping = mapping
+        self.attr_device_identifier = mapping.identity.stable_id
+        self.attr_unique_id_prefix = mapping.identity.stable_id
+        self.attr_device_metadata = {
+            "documented_firmware": self.documented_firmware,
+            "kdl_orion_address": mapping.identity.orion_address,
+            "gateway_identity": mapping.identity.gateway.stable_id,
+            "dpls_base_address": dpls.base_address,
+            "dpls_address_count": dpls.address_count,
+            "topology": metadata.topology,
+            "control_limitation": (
+                "Relay control is not exposed because S2000-PP permits control only "
+                "when outputs are not owned by internal tactics or S2000M scenarios"
+            ),
+        }
+        self._relay_mappings = resolved
+        self.attr_platforms = [Platform.SENSOR]
+
+    async def data_init(self) -> bool:
+        """Initialize local metadata; coordinator owns runtime polling."""
+        self.attr_init_time = datetime.now()
+        return True
+
+    async def get_device_info(self) -> dict[str, Any]:
+        """Return service fields visible through this transport."""
+        return {
+            "device_type": self.attr_device_type,
+            "serial_number": self.attr_serial_number,
+            "hardware_version": self.attr_hardware_version,
+            "software_version": self.attr_software_version,
+        }
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe configured authoritative relay states."""
+        names = {spec.key: spec.name for spec in self.capability_requirements}
+        return [
+            {
+                "sensor_id": key,
+                "name": names[key],
+                "device_class": None,
+                "icon": "mdi:electric-switch",
+            }
+            for key in self._relay_mappings
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Read configured relay states into one coordinator snapshot."""
+        if not self._relay_mappings:
+            raise ValueError("C2000-SP2 requires a validated S2000-PP mapping")
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_coils(
+            tuple(item.modbus_address for item in self._relay_mappings.values())
+        )
+        return {
+            "state_sensors": {
+                key: {
+                    "state": "on" if states[item.modbus_address] else "off",
+                    "primary_code": 1 if states[item.modbus_address] else 0,
+                    "expanded_codes": (),
+                    "expanded_states": (),
+                }
+                for key, item in self._relay_mappings.items()
+            }
+        }
+
+
 class C2000SP4:
     """Bolid C2000-SP4 family equipment.
 
@@ -4182,6 +4352,7 @@ EQUIPMENT_CLASSES = (
     C2000RST01,
     C2000RSirena,
     C2000SMK,
+    C2000SP2,
     C2000SP4,
     C2000ST04,
     C2000VT,
