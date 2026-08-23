@@ -5,7 +5,7 @@
   "codeowners": ["@dk-1983"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/dk-1983/Modbus_Devices/blob/master/README.md",
+  "documentation": "https://github.com/dk-1983/Modbus_Devices",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/dk-1983/Modbus_Devices/issues",
