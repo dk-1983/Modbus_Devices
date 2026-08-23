@@ -191,7 +191,7 @@ def test_unknown_primary_and_expanded_states_are_preserved():
     class UnknownClient(Client):
         async def read_holding_registers(self, *, address, count, device_id):
             self.holding_calls.append((address, count, device_id))
-            return Response([999], function_code=3)
+            return Response([0xFE00], function_code=3)
 
         async def read_input_registers(self, *, address, count, device_id):
             self.input_calls.append((address, count, device_id))
@@ -200,7 +200,7 @@ def test_unknown_primary_and_expanded_states_are_preserved():
     state = asyncio.run(configured(UnknownClient()).async_get_snapshot())["state_sensors"][
         "device_state"
     ]
-    assert state["state"] == "unknown_999"
+    assert state["state"] == "unknown_254"
     assert state["expanded_states"] == ("unknown_998",)
 
 

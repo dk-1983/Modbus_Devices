@@ -1,25 +1,29 @@
 """Tests for C2000-VT model and mapping."""
 
-import pytest
-
-from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
-
 from custom_components.modbus_devices.equipment.bolid import C2000VT
 from custom_components.modbus_devices.gateway import (
-    DPLSSubIdentity,
     DownstreamDeviceIdentity,
     DownstreamDeviceMetadata,
+    DPLSSubIdentity,
     GatewayContext,
     GatewayType,
     MappingSource,
     ResolvedDeviceMapping,
 )
 from custom_components.modbus_devices.s2000_pp import (
+    S2000PPRuntimeReader,
     S2000PPZoneRow,
+    S2000PPZoneState,
+    decode_s2000_pp_q8_8,
+    decode_s2000_pp_zone_state_register,
     manual_zone_mapping,
     resolve_zone_row,
 )
+import pytest
+
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.helpers.entity import EntityCategory
 
 
 def make_mapping(*objects, base=20, kdl=10, variant="vt"):
@@ -68,6 +72,67 @@ def test_temperature_humidity_mapping_and_entity_metadata():
     assert {item["sensor_id"] for item in device.get_state_sensor_descriptions()} == {
         "temperature_state", "humidity_state"
     }
+    assert all(
+        item["entity_category"] is EntityCategory.DIAGNOSTIC
+        for item in device.get_state_sensor_descriptions()
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "states"),
+    [
+        (0x4EC8, (78, 200)),
+        (0x4E00, (78,)),
+        (0x004E, (78,)),
+        (0x0000, ()),
+    ],
+)
+def test_zone_state_register_contains_two_priority_state_bytes(raw, states):
+    assert decode_s2000_pp_zone_state_register(raw) == states
+
+
+@pytest.mark.asyncio
+async def test_real_temperature_state_register_is_decoded_as_priority_bytes():
+    class Response:
+        def __init__(self, registers, function_code):
+            self.registers = registers
+            self.function_code = function_code
+
+        def isError(self):
+            return False
+
+    class Client:
+        async def read_holding_registers(self, *, address, count, device_id):
+            assert address == 40000
+            assert count == 1
+            return Response([0x4EC8], 3)
+
+        async def read_input_registers(self, *, address, count, device_id):
+            assert address == 4096
+            assert count == 16
+            return Response([78, 200, *([0] * 14)], 4)
+
+    state = (
+        await S2000PPRuntimeReader(Client(), 1).async_read_zone_states(
+            (manual_zone_mapping(20, 1, 6, 0, None),)
+        )
+    )[1]
+    device = C2000VT(None, 1)
+
+    assert 0x4EC8 == 20168
+    assert state.primary_register == 20168
+    assert state.priority_states == (78, 200)
+    assert state.primary_state == 78
+    assert device._state_sensor_value(state)["state"] == "temperature_normal"
+
+
+def test_temperature_and_unknown_state_fallback_are_independent():
+    device = C2000VT(None, 1)
+
+    assert decode_s2000_pp_q8_8(0x1480) == 20.5
+    assert device._state_sensor_value(
+        S2000PPZoneState(1, 254, (254,))
+    )["state"] == "unknown_254"
 
 
 def test_nested_identity_distinguishes_devices():

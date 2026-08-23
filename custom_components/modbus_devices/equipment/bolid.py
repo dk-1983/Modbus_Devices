@@ -3613,6 +3613,7 @@ class BolidDPLSNumericDeviceBase:
                 "name": f"{self._capability(key).name} state",
                 "device_class": None,
                 "icon": "mdi:state-machine",
+                "entity_category": EntityCategory.DIAGNOSTIC,
             }
             for key in self._numeric_mappings
         ]

@@ -153,75 +153,97 @@ The photographs below are local, optimized copies from official manufacturer pro
   <img src="pictures/equipment/s2000_dz.png" alt="С2000-ДЗ" width="38%">
 </p>
 
-## Mapping modes for С2000-ПП equipment
+## Adding equipment
+
+Configuration is UI-only. Open **Settings → Devices & services → Modbus Devices** and select **Add hub**. There are two distinct paths:
+
+- choose a Modbus transport for a device with its own direct connection;
+- choose **Via existing S2000-PP** for Bolid equipment reached through a С2000-ПП that has already been added and is currently loaded.
+
+### Direct Modbus device
+
+1. Select **ModBus TCP/IP**, **ModBus UDP/IP**, **Modbus RTU over UDP**, or **SerialPort**.
+2. Select the manufacturer and the physical equipment model.
+3. Enter the network or serial settings, Modbus unit/device ID, and a name.
+4. Complete any model-specific fields and submit the flow.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Current Home Assistant Config Flow transport selection" width="78%"></p>
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step2.jpg" alt="Current Home Assistant Config Flow manufacturer selection" width="78%"></p>
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step3.jpg" alt="Current Home Assistant Config Flow equipment selection" width="78%"></p>
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step4.jpg" alt="Current Home Assistant Config Flow direct TCP connection" width="78%"></p>
+
+Home Assistant then creates the Device and the entity set implemented for that model.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_result.jpg" alt="Direct M3000-BB-1020 device and its entities" width="92%"></p>
+
+### First add the С2000-ПП gateway
+
+**Via existing S2000-PP is available only when at least one direct С2000-ПП Config Entry is loaded.** Add the gateway like a normal direct device:
+
+1. Select **Add hub** and choose the transport physically connected to the С2000-ПП.
+2. Select **Bolid → С2000-ПП**.
+3. Enter that gateway's Serial/TCP/UDP settings and Modbus unit ID.
+4. Finish the flow and make sure the С2000-ПП entry is loaded rather than unavailable.
+
+This entry owns the physical Modbus client and represents the gateway itself, including its diagnostic entities.
+
+### Add a device via the existing С2000-ПП
+
+1. Select **Add hub** again and choose **Via existing S2000-PP**.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step1_gateway.jpg" alt="Current Config Flow with Via existing S2000-PP connection" width="78%"></p>
+
+Confirm the selected connection type to open the gateway picker.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step2_gateway_selected.jpg" alt="Confirming the Via existing S2000-PP connection type" width="78%"></p>
+
+2. Select the required gateway. The list contains loaded direct С2000-ПП entries, so each downstream device can be attached to the correct physical gateway when several are installed.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step3_gateway_select.jpg" alt="Selecting a specific loaded S2000-PP gateway" width="78%"></p>
+
+3. Select the physical downstream Bolid model. Only models supported through С2000-ПП are offered.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step4_gateway_equipment.jpg" alt="Selecting downstream Bolid equipment" width="78%"></p>
+
+4. For DPLS equipment, select its variant/topology where offered and enter its identity:
+
+   - **KDL Orion address** is the Orion network address (1–127) of the С2000-КДЛ controller to which the device belongs. It is not the Modbus unit ID of the С2000-ПП.
+   - **DPLS base address** is the first DPLS address (1–127) occupied by the device on that KDL loop. A one-address device uses only this address; a multi-address topology reserves the required consecutive addresses beginning here.
+
+For example, a sensor at DPLS address 5 on a С2000-КДЛ whose Orion address is 12 uses **KDL Orion address = 12** and **DPLS base address = 5**.
+
+<p align="center"><img src="pictures/config-flow/MD_menu_step5_gateway_identity.jpg" alt="Entering KDL Orion and DPLS base addresses" width="78%"></p>
+
+For an Orion device that is not behind a KDL/DPLS loop, **Orion address** means that device's own address on the Orion RS-485 network; no DPLS address is requested.
+
+5. Select the mapping source and finish either configuration-assisted or manual mapping as described below.
+
+### Configuration-assisted and discovered mapping
+
+Automatic/configuration-assisted mapping reads the zone and relay configuration tables from the selected С2000-ПП and offers suitable discovered mappings. The user explicitly selects the required discovered object; nothing is silently imported. Objects already added through this gateway are excluded from the choices, while the remaining objects can be added later by repeating the flow.
+
+After the address is selected, the integration filters the table rows using the selected model, identity, variant/topology, and exact capability rules. Setup succeeds only when one valid mapping is found. If nothing matches or several mappings are possible, correct the С2000-ПП configuration or use manual mapping.
+
+This is configuration discovery, **not physical hardware discovery**: С2000-ПП tables do not reliably identify every physical model. The user must always select the actual downstream equipment model. Read tables are cached and are not fetched on every normal poll.
 
 ### Manual mapping
 
-The user selects the equipment model and supplies the relevant configured С2000-ПП table rows. The equipment class validates exact object kind, local object number, zone type, and required capability combinations.
+Manual mapping is useful when discovery cannot produce one exact result or when you already know the С2000-ПП table numbers. Enter the Orion address when requested, then map each required equipment capability to its configured С2000-ПП zone/relay table row. Some models use the detailed form with object kind, local object number, table number, zone type, and partition values; capability-based models ask for a capability and its table number. The integration still validates the completed mapping against the selected model.
 
-### Configuration-assisted mapping
+<p align="center"><img src="pictures/config-flow/MD_menu_step6_gateway_manual_mapping.jpg" alt="Current manual capability mapping form" width="78%"></p>
 
-The integration reads the configured С2000-ПП zone and relay tables, filters them through the selected equipment's exact capability definitions, and validates the result. The user still selects the physical model.
+### One connection, multiple downstream devices
 
-This is **not hardware discovery**: the configuration tables do not provide a reliable physical model identifier for every downstream object.
+A downstream Config Entry does **not** need or accept separate Serial/TCP/UDP settings. It stores a reference to the selected С2000-ПП entry and shares that gateway's already-open, serialized Modbus client. Add each downstream device with **Add hub → Via existing S2000-PP**, select the same gateway, and give it its own Orion/DPLS identity and mapping.
 
-Configuration tables are cached and are not read during every normal polling cycle.
+This creates separate Home Assistant Devices and entities while all requests travel through one С2000-ПП connection. Unloading a child does not close the gateway connection; unloading or removing the gateway makes its children unavailable until the gateway is loaded again.
 
-## Configuration
+<p align="center"><img src="pictures/config-flow/MD_device_s2000_vt.jpg" alt="Downstream S2000-VT device created through an existing S2000-PP" width="92%"></p>
 
-1. In Home Assistant, open **Settings → Devices & services**.
-2. Select **Add integration** and search for **Modbus Devices**.
-3. Choose Modbus TCP/IP, Modbus UDP/IP, serial Modbus, or Modbus RTU over UDP.
-4. Select the canonical manufacturer and physical equipment model.
-5. Enter the network or serial connection settings and Modbus unit ID.
-6. Complete model-specific configuration when requested.
-
-For Bolid downstream equipment, select or create the С2000-ПП gateway context, then provide:
-
-- the С2000-КДЛ Orion address;
-- the device DPLS address or base address, when applicable;
-- a supported hardware/model variant or topology, when applicable;
-- manual or configuration-assisted mapping.
-
-The UI presents physical model names and capability choices; internal class names, object kinds, register addresses, and derived local numbers are not normal user inputs.
-
-## Adding a device
-
-These screenshots show a real Home Assistant Config Flow. Start from **Settings → Devices & services → Modbus Devices**, then select **Add hub**.
-
-### 1. Select the transport
-
-Choose ModBus TCP/IP, ModBus UDP/IP, SerialPort, or Modbus RTU over UDP according to the device connection. The screenshot shows the current transport selection UI.
-
-<p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Modbus Devices transport selection" width="78%"></p>
-
-### 2. Select the manufacturer
-
-Choose the canonical manufacturer: Bolid, Dyna Drive, or Owen. The screenshot predates Dyna Drive; use the current registry shown in the UI.
-
-<p align="center"><img src="pictures/config-flow/MD_menu_step2.jpg" alt="Modbus Devices manufacturer selection" width="78%"></p>
-
-### 3. Select the equipment model
-
-Choose the physical model by its manufacturer-facing display name. This list is built from the supported equipment registry.
-
-<p align="center"><img src="pictures/config-flow/MD_menu_step3.jpg" alt="Modbus Devices equipment model selection" width="78%"></p>
-
-### 4. Configure the connection
-
-Enter the transport and device settings. The TCP/IP example below uses host, port, device ID, and name.
-
-<p align="center"><img src="pictures/config-flow/MD_menu_step4.jpg" alt="Modbus Devices TCP/IP connection settings" width="78%"></p>
-
-Further steps depend on the selected model and its transport or gateway. Bolid equipment behind С2000-ПП may additionally request gateway selection, Orion/KDL/DPLS addresses, topology, mapping source, and manual or configuration-assisted mapping.
-
-Config Flow is localized in English and Russian. YAML configuration is not supported.
-
-### 5. Result
-
-After successful setup, Home Assistant creates one Device and the entities supported by its equipment class. This example shows an M3000-BB-1020 with its device information, controls, and sensors; other models create their own documented entity sets.
-
-<p align="center"><img src="pictures/config-flow/MD_menu_result.jpg" alt="M3000-BB-1020 Home Assistant Device and generated entities" width="92%"></p>
+Config Flow is localized in English and Russian. Internal class names and register addresses are not normal inputs, and YAML configuration is not supported.
 
 ## Modbus RTU over UDP
 

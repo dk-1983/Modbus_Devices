@@ -470,11 +470,22 @@ class S2000PPZoneState:
     table_number: int
     primary_state: int
     expanded_states: tuple[int, ...]
+    primary_register: int | None = None
+    priority_states: tuple[int, ...] = ()
 
     @property
     def raw_states(self) -> tuple[int, ...]:
         """Return every reported code, preserving zero and unknown values."""
         return self.expanded_states or (self.primary_state,)
+
+
+def decode_s2000_pp_zone_state_register(raw: int) -> tuple[int, ...]:
+    """Decode the two priority-ordered Orion state bytes from one register."""
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 0 <= raw <= 0xFFFF:
+        raise ValueError("S2000-PP zone state register must be an unsigned 16-bit value")
+    high = (raw >> 8) & 0xFF
+    low = raw & 0xFF
+    return tuple(code for code in (high, low) if code != 0)
 
 
 def parse_zone_table(registers: list[int]) -> tuple[S2000PPZoneRow, ...]:
@@ -733,14 +744,18 @@ class S2000PPRuntimeReader:
             item.modbus_address for item in zone_mappings
         )
         expanded = await self._read_expanded_blocks(zone_mappings)
-        return {
-            item.gateway_object_number: S2000PPZoneState(
+        result = {}
+        for item in zone_mappings:
+            primary_register = primary[item.modbus_address]
+            priority_states = decode_s2000_pp_zone_state_register(primary_register)
+            result[item.gateway_object_number] = S2000PPZoneState(
                 table_number=item.gateway_object_number,
-                primary_state=primary[item.modbus_address],
+                primary_state=priority_states[0] if priority_states else 0,
                 expanded_states=expanded[item.gateway_object_number],
+                primary_register=primary_register,
+                priority_states=priority_states,
             )
-            for item in zone_mappings
-        }
+        return result
 
     async def _read_holding_addresses(
         self,

@@ -168,11 +168,11 @@ def test_primary_expanded_raw_and_unknown_states_are_lossless():
 
 def test_unknown_primary_state_is_preserved():
     state = asyncio.run(
-        configured_device(Client(primary=777, expanded=[777])).async_get_snapshot()
+        configured_device(Client(primary=0xFE00, expanded=[254])).async_get_snapshot()
     )["state_sensors"]["device_state"]
 
-    assert state["state"] == "unknown_777"
-    assert state["primary_code"] == 777
+    assert state["state"] == "unknown_254"
+    assert state["primary_code"] == 254
 
 
 @pytest.mark.parametrize("failure", ["empty", "error", "truncated"])
