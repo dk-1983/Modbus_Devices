@@ -20,6 +20,8 @@ class ModbusDevicesRuntimeData:
     device: Any
     coordinator: ModbusDeviceCoordinator
     gateway_mapping: ResolvedDeviceMapping | None
+    owns_client: bool = True
+    gateway_entry_id: str | None = None
 
 
 type ModbusDevicesConfigEntry = ConfigEntry[ModbusDevicesRuntimeData]

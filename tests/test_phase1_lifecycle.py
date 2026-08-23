@@ -607,12 +607,14 @@ def test_config_flow_localization_catalogs_have_identical_keys():
     assert set(strings["config"]["step"]) == {
         "user", "manufacturer", "device", "io_mapping", "network",
         "rtu_over_udp", "serial",
+        "existing_gateway", "gateway_child_model", "discovered_device",
         "gateway_context", "gateway_new", "gateway_device", "mapping_source",
         "manual_device", "manual_object", "manual_capability", "automatic_device",
     }
     assert set(strings["selector"]["modbus_transport"]["options"]) == {
         "modbus_tcp",
         "modbus_udp",
-        Config.MODBUS_RTU_OVER_UDP,
-        "serial",
-    }
+            Config.MODBUS_RTU_OVER_UDP,
+            "serial",
+            "existing_gateway",
+        }

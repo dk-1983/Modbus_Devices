@@ -55,12 +55,28 @@ async def async_setup_entry(
 
     manufacturer = options.get(Config.CONF_MANUFACTURER)
     client = None
+    owns_client = True
+    gateway_entry_id = options.get(Config.CONF_GATEWAY_ENTRY_ID)
 
     try:
         # -----------------------------------
         # Create Modbus client
         # -----------------------------------
-        client = await connect_modbus(options)
+        if gateway_entry_id:
+            gateway_entry = next(
+                (
+                    candidate
+                    for candidate in hass.config_entries.async_entries(Config.DOMAIN)
+                    if candidate.entry_id == gateway_entry_id
+                ),
+                None,
+            )
+            if gateway_entry is None or not hasattr(gateway_entry, "runtime_data"):
+                raise ConfigEntryNotReady("S2000-PP gateway is not loaded")
+            client = gateway_entry.runtime_data.client
+            owns_client = False
+        else:
+            client = await connect_modbus(options)
 
         if not client or not getattr(client, "connected", False):
             raise ConfigEntryNotReady("Unable to establish Modbus connection")
@@ -180,6 +196,8 @@ async def async_setup_entry(
             device=device,
             coordinator=coordinator,
             gateway_mapping=gateway_mapping,
+            owns_client=owns_client,
+            gateway_entry_id=gateway_entry_id,
         )
 
         _LOGGER.info(
@@ -205,18 +223,21 @@ async def async_setup_entry(
 
     except (ConnectionException, ModbusException, OSError, TimeoutError) as exc:
         _clear_runtime_data(entry)
-        _close_client(client)
+        if owns_client:
+            _close_client(client)
         raise ConfigEntryNotReady(f"Modbus connection failed: {exc}") from exc
 
     except (ConfigEntryError, ConfigEntryNotReady):
         _clear_runtime_data(entry)
-        _close_client(client)
+        if owns_client:
+            _close_client(client)
         raise
 
     except Exception:
         # Programming and platform errors must remain visible to Home Assistant.
         _clear_runtime_data(entry)
-        _close_client(client)
+        if owns_client:
+            _close_client(client)
         raise
 
 
@@ -240,7 +261,8 @@ async def async_unload_entry(
     )
 
     if unload_ok:
-        _close_client(client)
+        if getattr(runtime, "owns_client", True):
+            _close_client(client)
 
         _LOGGER.info("Modbus device unloaded: %s", entry.title)
 

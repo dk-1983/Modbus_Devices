@@ -60,6 +60,7 @@ _TRANSPORT_CHOICES = {
     Config.MODBUS_RTU_OVER_UDP: Config.MODBUS_RTU_OVER_UDP,
     "serial": Config.MODBUS_SERIAL,
 }
+_VIA_EXISTING_GATEWAY = "existing_gateway"
 
 
 class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
@@ -85,6 +86,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         self._device_metadata = DownstreamDeviceMetadata()
         self._gateway_device_metadata: dict[str, Any] = {}
         self._manual_io_mapping_spec: dict[str, Any] | None = None
+        self._gateway_entry_id: str | None = None
+        self._discovered_addresses: tuple[int, ...] = ()
 
     # ---------------------------------------------------------
     # STEP 1 - MODE
@@ -104,6 +107,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         if user_input is not None:
             selected = user_input[Config.CONF_MODBUS_MODE]
+            if selected == _VIA_EXISTING_GATEWAY:
+                return await self.async_step_existing_gateway()
             self._data[Config.CONF_MODBUS_MODE] = _TRANSPORT_CHOICES.get(
                 selected, selected
             )
@@ -115,7 +120,12 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                     {
                         "select": {
                             "mode": "dropdown",
-                            "options": list(_TRANSPORT_CHOICES),
+                            "options": list(_TRANSPORT_CHOICES)
+                            + (
+                                [_VIA_EXISTING_GATEWAY]
+                                if self._existing_s2000_pp_entries()
+                                else []
+                            ),
                             "translation_key": "modbus_transport",
                         }
                     }
@@ -176,22 +186,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         if user_input is not None:
             device_name = user_input[Config.CONF_DEVICE_CLASS]
-
-            # FIX: сохраняем ВСЁ что нужно дальше
-            self._data[Config.CONF_MANUFACTURER] = self._selected_manufacturer
-            self._data[Config.CONF_DEVICE_CLASS] = device_name
-
-            self._required_gateway = await self.hass.async_add_executor_job(
-                get_gateway_requirement,
-                self._selected_manufacturer,
-                device_name,
-            )
-
-            self._manual_io_mapping_spec = await self.hass.async_add_executor_job(
-                get_manual_io_mapping_spec,
-                self._selected_manufacturer,
-                device_name,
-            )
+            await self._async_prepare_selected_device(device_name)
 
             if self._manual_io_mapping_spec is not None:
                 return await self.async_step_io_mapping()
@@ -224,6 +219,126 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         )
 
         return self.async_show_form(step_id="device", data_schema=schema)
+
+    async def _async_prepare_selected_device(self, device_name: str) -> None:
+        """Load model-owned routing metadata without changing direct entry shape."""
+        self._data[Config.CONF_MANUFACTURER] = self._selected_manufacturer
+        self._data[Config.CONF_DEVICE_CLASS] = device_name
+        self._required_gateway = await self.hass.async_add_executor_job(
+            get_gateway_requirement,
+            self._selected_manufacturer,
+            device_name,
+        )
+        self._manual_io_mapping_spec = await self.hass.async_add_executor_job(
+            get_manual_io_mapping_spec,
+            self._selected_manufacturer,
+            device_name,
+        )
+
+    def _existing_s2000_pp_entries(self) -> dict[str, Any]:
+        """Return loaded direct С2000-ПП entries eligible for client sharing."""
+        gateways = {}
+        for entry in self.hass.config_entries.async_entries(Config.DOMAIN):
+            options = entry.options or entry.data
+            if (
+                options.get(Config.CONF_MANUFACTURER) == "Bolid"
+                and options.get(Config.CONF_DEVICE_CLASS) == "S2000PP"
+                and not options.get(Config.CONF_GATEWAY_ENTRY_ID)
+                and hasattr(entry, "runtime_data")
+                and getattr(entry.runtime_data.client, "connected", False)
+            ):
+                gateways[entry.entry_id] = entry
+        return gateways
+
+    async def async_step_existing_gateway(self, user_input=None):
+        """Select one already loaded direct С2000-ПП Config Entry."""
+        gateways = self._existing_s2000_pp_entries()
+        errors = {}
+        if user_input is not None:
+            entry_id = user_input[Config.CONF_GATEWAY_ENTRY_ID]
+            gateway_entry = gateways.get(entry_id)
+            if gateway_entry is None:
+                errors["base"] = "gateway_unavailable"
+            else:
+                options = gateway_entry.options or gateway_entry.data
+                unit_id = int(options.get(CONF_DEVICE_ID, 1))
+                self._gateway_entry_id = entry_id
+                self._required_gateway = GatewayType.S2000_PP
+                self._gateway_context = GatewayContext(
+                    gateway_type=GatewayType.S2000_PP,
+                    gateway_id=gateway_entry.unique_id or gateway_entry.entry_id,
+                    connection_key=f"config_entry:{gateway_entry.entry_id}",
+                    modbus_unit_id=unit_id,
+                )
+                self._data = {
+                    Config.CONF_GATEWAY_ENTRY_ID: entry_id,
+                    Config.CONF_MANUFACTURER: "Bolid",
+                    CONF_DEVICE_ID: unit_id,
+                }
+                self._selected_manufacturer = "Bolid"
+                return await self.async_step_gateway_child_model()
+
+        options = [
+            {"value": entry_id, "label": entry.title}
+            for entry_id, entry in sorted(gateways.items())
+        ]
+        if not options:
+            return self.async_abort(reason="no_loaded_gateways")
+        return self.async_show_form(
+            step_id="existing_gateway",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(Config.CONF_GATEWAY_ENTRY_ID): selector(
+                        {"select": {"mode": "dropdown", "options": options}}
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_gateway_child_model(self, user_input=None):
+        """Select a model explicitly supported behind С2000-ПП."""
+        devices = []
+        for name in self._device_classes.get("Bolid", []):
+            requirement = await self.hass.async_add_executor_job(
+                get_gateway_requirement, "Bolid", name
+            )
+            metadata = await self.hass.async_add_executor_job(
+                get_gateway_device_metadata, "Bolid", name
+            )
+            if (
+                requirement is GatewayType.S2000_PP
+                and metadata["gateway_transport_supported"]
+            ):
+                devices.append(name)
+        if user_input is not None:
+            device_name = user_input[Config.CONF_DEVICE_CLASS]
+            if device_name not in devices:
+                return self.async_show_form(
+                    step_id="gateway_child_model",
+                    data_schema=vol.Schema({}),
+                    errors={"base": "unsupported_gateway_device"},
+                )
+            await self._async_prepare_selected_device(device_name)
+            return await self.async_step_gateway_device()
+        return self.async_show_form(
+            step_id="gateway_child_model",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(Config.CONF_DEVICE_CLASS): selector(
+                        {"select": {"mode": "dropdown", "options": [
+                            {
+                                "value": name,
+                                "label": await self.hass.async_add_executor_job(
+                                    get_equipment_display_name, "Bolid", name
+                                ),
+                            }
+                            for name in sorted(devices)
+                        ]}}
+                    )
+                }
+            ),
+        )
 
     # ---------------------------------------------------------
     # ROUTER
@@ -760,6 +875,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         if user_input is not None:
             source = MappingSource(user_input[Config.CONF_MAPPING_SOURCE])
             if source is MappingSource.AUTOMATIC:
+                if self._gateway_entry_id is not None:
+                    return await self.async_step_discovered_device()
                 return await self.async_step_automatic_device()
             return await self.async_step_manual_device()
 
@@ -778,6 +895,90 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         return self.async_show_form(
             step_id="mapping_source",
             data_schema=schema,
+        )
+
+    def _selected_gateway_runtime(self):
+        """Return the still-loaded selected gateway runtime or None."""
+        if self._gateway_entry_id is None:
+            return None
+        gateway = self._existing_s2000_pp_entries().get(self._gateway_entry_id)
+        return None if gateway is None else gateway.runtime_data
+
+    def _already_added_orion_addresses(self) -> set[int]:
+        """Return physical Orion identities already added through this gateway."""
+        addresses = set()
+        for entry in self.hass.config_entries.async_entries(Config.DOMAIN):
+            mapping_data = (entry.options or entry.data).get(
+                Config.CONF_GATEWAY_MAPPING
+            )
+            if not mapping_data:
+                continue
+            try:
+                identity = ResolvedDeviceMapping.from_dict(mapping_data).identity
+            except (KeyError, TypeError, ValueError):
+                continue
+            if identity.gateway.stable_id == self._gateway_context.stable_id:
+                addresses.add(identity.orion_address)
+        return addresses
+
+    async def async_step_discovered_device(self, user_input=None):
+        """List configured Orion addresses without auto-importing any device."""
+        errors = {}
+        runtime = self._selected_gateway_runtime()
+        if runtime is None:
+            errors["base"] = "gateway_unavailable"
+        else:
+            try:
+                domain_data = self.hass.data.setdefault(Config.DOMAIN, {})
+                cache = domain_data.setdefault(
+                    "s2000_pp_configuration_cache", S2000PPConfigurationCache()
+                )
+                configuration = await cache.async_get_or_load(
+                    self._gateway_context.stable_id,
+                    S2000PPConfigurationReader(
+                        runtime.client, self._gateway_context.modbus_unit_id
+                    ).async_read,
+                )
+                configured = {
+                    row.device_address
+                    for row in configuration.zones + configuration.relays
+                    if 1 <= row.device_address <= 127
+                }
+                self._discovered_addresses = tuple(
+                    sorted(configured - self._already_added_orion_addresses())
+                )
+            except (ModbusException, OSError, TimeoutError):
+                errors["base"] = "cannot_read_gateway_configuration"
+
+        if user_input is not None and not errors:
+            try:
+                address = int(user_input[Config.CONF_DISCOVERED_ADDRESS])
+                if address not in self._discovered_addresses:
+                    raise ValueError
+            except (KeyError, TypeError, ValueError):
+                errors["base"] = "invalid_dynamic_address"
+            else:
+                self._orion_address = address
+                return await self.async_step_automatic_device(
+                    {Config.CONF_ORION_ADDRESS: address}
+                )
+
+        options = [
+            {"value": str(address), "label": f"Orion {address}"}
+            for address in self._discovered_addresses
+        ]
+        if not options and not errors:
+            errors["base"] = "no_discovered_devices"
+        return self.async_show_form(
+            step_id="discovered_device",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(Config.CONF_DISCOVERED_ADDRESS): selector(
+                        {"select": {"mode": "dropdown", "options": options}}
+                    )
+                }
+            ),
+            errors=errors,
         )
 
     async def async_step_manual_device(self, user_input=None):
@@ -984,8 +1185,20 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         if user_input is not None:
             self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
             client = None
+            owns_client = self._gateway_entry_id is None
             try:
-                client = await connect_modbus(self._data)
+                if owns_client:
+                    client = await connect_modbus(self._data)
+                else:
+                    runtime = self._selected_gateway_runtime()
+                    if runtime is None:
+                        errors["base"] = "gateway_unavailable"
+                        return self.async_show_form(
+                            step_id="automatic_device",
+                            data_schema=vol.Schema({}),
+                            errors=errors,
+                        )
+                    client = runtime.client
                 if not client or not client.connected:
                     errors["base"] = "cannot_connect"
                 else:
@@ -1025,7 +1238,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             except (OSError, TimeoutError):
                 errors["base"] = "cannot_read_gateway_configuration"
             finally:
-                if client is not None:
+                if owns_client and client is not None:
                     client.close()
 
         schema = vol.Schema(

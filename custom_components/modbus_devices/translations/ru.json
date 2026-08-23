@@ -1,7 +1,10 @@
 {
   "config": {
     "step": {
-      "user": {"title": "Тип подключения", "description": "Выберите транспорт Modbus.", "data": {"modbus_mode": "Транспорт"}},
+      "user": {"title": "Тип подключения", "description": "Выберите прямой транспорт Modbus или существующий шлюз.", "data": {"modbus_mode": "Подключение"}},
+      "existing_gateway": {"title": "Существующий шлюз С2000-ПП", "description": "Выберите загруженный С2000-ПП. Будет использовано его существующее Modbus-подключение.", "data": {"gateway_entry_id": "Шлюз"}},
+      "gateway_child_model": {"title": "Подключённый прибор", "description": "Выберите поддерживаемую модель за этим С2000-ПП.", "data": {"device_class": "Модель прибора"}},
+      "discovered_device": {"title": "Настроенные приборы Orion", "description": "Выберите один настроенный адрес Orion. Приборы не импортируются автоматически.", "data": {"discovered_address": "Адрес Orion"}},
       "manufacturer": {"title": "Производитель", "description": "Выберите производителя оборудования.", "data": {"manufacturer": "Производитель"}},
       "device": {"title": "Модель прибора", "description": "Выберите физическую модель оборудования.", "data": {"device_class": "Модель прибора"}},
       "io_mapping": {"title": "Прямая привязка входов и выходов", "description": "Настройте расположение входов и выходов прибора в Modbus.", "data": {"di_data_area": "Область данных дискретных входов", "di_base_address": "Начальный адрес дискретных входов", "di_address_stride": "Шаг адресов дискретных входов", "do_base_address": "Начальный адрес дискретных выходов", "do_address_stride": "Шаг адресов дискретных выходов"}},
@@ -28,13 +31,18 @@
       "invalid_equipment_mapping": "Привязка не соответствует функциям выбранного прибора.",
       "ambiguous_device_mapping": "Прибору соответствуют несколько настроенных строк. Уточните конфигурацию или используйте ручную привязку.",
       "downstream_device_not_found": "Точное соответствие для прибора в настроенной конфигурации не найдено.",
-      "cannot_read_gateway_configuration": "Не удалось прочитать настроенные таблицы С2000-ПП."
+      "cannot_read_gateway_configuration": "Не удалось прочитать настроенные таблицы С2000-ПП.",
+      "gateway_unavailable": "Выбранный С2000-ПП недоступен или не загружен.",
+      "unsupported_gateway_device": "Выбранный прибор не поддерживается за С2000-ПП.",
+      "invalid_dynamic_address": "Выбранный настроенный адрес Orion некорректен.",
+      "no_discovered_devices": "Нет доступных ненастроенных адресов Orion. Можно использовать ручную привязку."
     },
     "abort": {
       "already_configured": "Этот прибор уже настроен.",
       "no_devices": "Нет доступных моделей оборудования.",
       "no_manufacturers": "Нет доступных производителей.",
-      "no_devices_for_manufacturer": "Для этого производителя нет доступных моделей оборудования."
+      "no_devices_for_manufacturer": "Для этого производителя нет доступных моделей оборудования.",
+      "no_loaded_gateways": "Сначала добавьте и загрузите С2000-ПП как напрямую подключённый прибор."
     }
   },
   "selector": {
@@ -43,7 +51,8 @@
         "modbus_tcp": "ModBus TCP/IP",
         "modbus_udp": "ModBus UDP/IP",
         "rtu_over_udp": "Modbus RTU через UDP",
-        "serial": "SerialPort"
+        "serial": "SerialPort",
+        "existing_gateway": "Через существующий С2000-ПП"
       }
     }
   }
