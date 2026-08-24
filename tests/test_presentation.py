@@ -50,6 +50,9 @@ class Entity:
     disabled_by: object | None = None
     entity_category: EntityCategory | None = None
     state: str | None = None
+    name: str | None = None
+    original_name: str | None = None
+    original_name_unprefixed: str | None = None
 
 
 class DeviceRegistry:
@@ -122,7 +125,10 @@ def entity(
     category: EntityCategory | None = None,
     disabled: bool = False,
     state: str | None = None,
+    name: str | None = None,
+    original_name: str | None = None,
 ) -> Entity:
+    display_name = original_name or role.replace("_", " ").title()
     return Entity(
         entity_id or f"{domain}.{device.id}_{role}",
         f"{device.identifier}_{role}",
@@ -131,7 +137,14 @@ def entity(
         disabled_by="user" if disabled else None,
         entity_category=category,
         state=state,
+        name=name,
+        original_name=display_name,
+        original_name_unprefixed=display_name,
     )
+
+
+def entity_ids(result) -> list[str]:
+    return [row["entity"] for row in result.card["entities"]]
 
 
 async def build(factory, device: Device, entities: list[Entity], equipment: str):
@@ -159,7 +172,7 @@ async def test_unknown_manufacturer_and_model_use_generic_fallback(registry_hass
     )
 
     assert result.profile_id == "generic"
-    assert result.card["entities"] == ["sensor.future_alarm", "sensor.future_value"]
+    assert entity_ids(result) == ["sensor.future_alarm", "sensor.future_value"]
 
 
 @pytest.mark.asyncio
@@ -191,7 +204,7 @@ async def test_future_manufacturer_can_register_without_changing_builder(registr
 
     result = await async_build_device_card(hass, device.id, profiles=profiles)
     assert result.profile_id == "example_future"
-    assert result.card["entities"] == [
+    assert entity_ids(result) == [
         "sensor.future_first",
         "sensor.future_second",
     ]
@@ -239,18 +252,25 @@ async def test_c2000_vt_card_expands_and_shrinks_with_registry(registry_hass):
     )
 
     first = await async_build_device_card(hass, device.id)
-    assert first.card["entities"] == ["sensor.vt_temperature"]
+    assert entity_ids(first) == ["sensor.vt_temperature"]
 
     hass.entity_registry.entities.append(temperature_state)
     second = await async_build_device_card(hass, device.id)
-    assert second.card["entities"] == [
+    assert entity_ids(second) == [
         "sensor.vt_temperature",
         "sensor.vt_temperature_state",
+    ]
+    assert second.card["entities"] == [
+        {"entity": "sensor.vt_temperature", "name": "Temperature"},
+        {
+            "entity": "sensor.vt_temperature_state",
+            "name": "Temperature State",
+        },
     ]
 
     hass.entity_registry.entities.extend((humidity, humidity_state))
     expanded = await async_build_device_card(hass, device.id)
-    assert expanded.card["entities"] == [
+    assert entity_ids(expanded) == [
         "sensor.vt_temperature",
         "sensor.vt_humidity",
         "sensor.vt_temperature_state",
@@ -259,7 +279,7 @@ async def test_c2000_vt_card_expands_and_shrinks_with_registry(registry_hass):
 
     hass.entity_registry.entities.remove(humidity)
     shrunk = await async_build_device_card(hass, device.id)
-    assert shrunk.card["entities"] == [
+    assert entity_ids(shrunk) == [
         "sensor.vt_temperature",
         "sensor.vt_temperature_state",
         "sensor.vt_humidity_state",
@@ -284,7 +304,7 @@ async def test_disabled_is_excluded_but_unavailable_is_included(registry_hass):
         ],
         "C2000VT",
     )
-    assert result.card["entities"] == ["sensor.vt_temperature"]
+    assert entity_ids(result) == ["sensor.vt_temperature"]
 
 
 @pytest.mark.asyncio
@@ -306,8 +326,30 @@ async def test_entity_and_device_user_renames_are_respected(registry_hass):
         "type": "entities",
         "title": "C2000-VT Balcony",
         "show_header_toggle": False,
-        "entities": ["sensor.balcony_temperature"],
+        "entities": [
+            {"entity": "sensor.balcony_temperature", "name": "Temperature"}
+        ],
     }
+
+
+@pytest.mark.asyncio
+async def test_user_entity_friendly_name_is_used_only_inside_generated_card(
+    registry_hass,
+):
+    device = Device("vt", "vt-stable", name="C2000-VT")
+    renamed = entity(
+        device,
+        "temperature",
+        entity_id="sensor.balcony_air",
+        name="Balcony air temperature",
+    )
+    result = await build(registry_hass, device, [renamed], "C2000VT")
+
+    assert result.card["entities"] == [
+        {"entity": "sensor.balcony_air", "name": "Balcony air temperature"}
+    ]
+    assert renamed.entity_id == "sensor.balcony_air"
+    assert renamed.name == "Balcony air temperature"
 
 
 @pytest.mark.asyncio
@@ -329,7 +371,7 @@ async def test_primary_precedes_diagnostic_and_unknown_config_is_excluded(
         ],
         "NewEquipment",
     )
-    assert result.card["entities"] == [
+    assert entity_ids(result) == [
         "sensor.future_primary",
         "sensor.future_diagnostic",
     ]
@@ -351,13 +393,21 @@ async def test_kpb_outputs_follow_physical_order(registry_hass):
         ],
         "C2000KPB",
     )
-    assert result.card["entities"] == [
+    assert entity_ids(result) == [
         "switch.kpb_output_1",
         "switch.kpb_output_2",
         "switch.kpb_output_3",
         "switch.kpb_output_4",
         "switch.kpb_output_5",
         "switch.kpb_output_6",
+    ]
+    assert [row["name"] for row in result.card["entities"]] == [
+        "Output 1",
+        "Output 2",
+        "Output 3",
+        "Output 4",
+        "Output 5",
+        "Output 6",
     ]
 
 
@@ -380,8 +430,8 @@ async def test_two_kpb_devices_build_separate_cards(registry_hass):
     first_card = await async_build_device_card(hass, first.id)
     second_card = await async_build_device_card(hass, second.id)
 
-    assert first_card.card["entities"] == ["switch.kpb-9_output_1"]
-    assert second_card.card["entities"] == ["switch.kpb-10_output_1"]
+    assert entity_ids(first_card) == ["switch.kpb-9_output_1"]
+    assert entity_ids(second_card) == ["switch.kpb-10_output_1"]
 
 
 @pytest.mark.asyncio
@@ -412,7 +462,7 @@ async def test_gateway_topology_does_not_change_child_card(registry_hass):
 
     direct_card = await async_build_device_card(direct_hass, direct.id)
     child_card = await async_build_device_card(child_hass, child.id)
-    assert direct_card.card["entities"] == child_card.card["entities"]
+    assert entity_ids(direct_card) == entity_ids(child_card)
 
 
 @pytest.mark.asyncio
@@ -438,8 +488,8 @@ async def test_same_bolid_model_behind_different_gateways_stays_separate(
 
     assert first_card.device_id == "vt-a"
     assert second_card.device_id == "vt-b"
-    assert first_card.card["entities"] == ["sensor.vt-a_temperature"]
-    assert second_card.card["entities"] == ["sensor.vt-b_temperature"]
+    assert entity_ids(first_card) == ["sensor.vt-a_temperature"]
+    assert entity_ids(second_card) == ["sensor.vt-b_temperature"]
 
 
 @pytest.mark.asyncio
@@ -455,7 +505,7 @@ async def test_sp4_partial_capabilities_keep_operational_order(registry_hass):
         ],
         "C2000SP4",
     )
-    assert result.card["entities"] == [
+    assert entity_ids(result) == [
         "switch.sp4_output_1",
         "sensor.sp4_actuator_state",
         "sensor.sp4_working_limit_switch",
@@ -475,8 +525,18 @@ async def test_direct_owen_trm138_uses_generic_card_without_gateway(registry_has
         registry_hass,
         device,
         [
-            entity(device, "2", entity_id="sensor.trm138_temperature_2"),
-            entity(device, "1", entity_id="sensor.trm138_temperature_1"),
+            entity(
+                device,
+                "2",
+                entity_id="sensor.trm138_temperature_2",
+                original_name="Temperature 2",
+            ),
+            entity(
+                device,
+                "1",
+                entity_id="sensor.trm138_temperature_1",
+                original_name="Temperature 1",
+            ),
         ],
         "TRM138",
     )
@@ -487,8 +547,8 @@ async def test_direct_owen_trm138_uses_generic_card_without_gateway(registry_has
         "title": "TRM-138 Greenhouse",
         "show_header_toggle": False,
         "entities": [
-            "sensor.trm138_temperature_1",
-            "sensor.trm138_temperature_2",
+            {"entity": "sensor.trm138_temperature_1", "name": "Temperature 1"},
+            {"entity": "sensor.trm138_temperature_2", "name": "Temperature 2"},
         ],
     }
 

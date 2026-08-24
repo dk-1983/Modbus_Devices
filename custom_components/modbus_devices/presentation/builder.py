@@ -104,6 +104,14 @@ def _sort_key(candidate: _Candidate) -> tuple:
     )
 
 
+def _entity_row(hass, entry) -> dict[str, str]:
+    """Build a native row using Home Assistant's registry-relative name."""
+    row = {"entity": entry.entity_id}
+    if relative_name := er.async_get_unprefixed_name(hass, entry):
+        row["name"] = relative_name
+    return row
+
+
 def _config_entry_identity(hass, device) -> PresentationIdentity:
     entry_ids = sorted(device.config_entries)
     if device.primary_config_entry in device.config_entries:
@@ -157,6 +165,8 @@ async def async_build_device_card(
             "type": profile.card_type,
             "title": title,
             "show_header_toggle": False,
-            "entities": [candidate.entry.entity_id for candidate in candidates],
+            "entities": [
+                _entity_row(hass, candidate.entry) for candidate in candidates
+            ],
         },
     )

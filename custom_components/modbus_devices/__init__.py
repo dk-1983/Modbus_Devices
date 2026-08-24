@@ -6,9 +6,11 @@ from pymodbus.exceptions import ConnectionException, ModbusException
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 
 from .const import Config
 from .coordinator import ModbusDeviceCoordinator
+from .dashboard import async_register_dashboard_frontend
 from .equipment.equipment import get_class
 from .gateway import ResolvedDeviceMapping
 from .manufacturer import canonicalize_manufacturer_options
@@ -16,6 +18,13 @@ from .modbus_client import connect_modbus
 from .runtime import ModbusDevicesConfigEntry, ModbusDevicesRuntimeData
 
 _LOGGER = getLogger(__name__)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(Config.DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up integration-wide dashboard presentation support once."""
+    await async_register_dashboard_frontend(hass)
+    return True
 
 
 def _close_client(client) -> None:
