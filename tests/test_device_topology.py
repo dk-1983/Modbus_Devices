@@ -1,0 +1,309 @@
+"""Regression tests for Home Assistant downstream device topology."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from homeassistant.helpers.entity import EntityCategory
+
+from custom_components.modbus_devices.binary_sensor import ModBusBinarySensorEntity
+from custom_components.modbus_devices.button import ModBusCommandButtonEntity
+from custom_components.modbus_devices.const import Config
+from custom_components.modbus_devices.datetime import ModBusDevicesDateTime
+from custom_components.modbus_devices.device_info import via_device_for_entry
+from custom_components.modbus_devices.equipment.bolid import (
+    C2000KPB,
+    C2000SP4,
+    C2000VT,
+    S2000PP,
+)
+from custom_components.modbus_devices.gateway import (
+    DPLSSubIdentity,
+    DownstreamDeviceIdentity,
+    DownstreamDeviceMetadata,
+    GatewayContext,
+    GatewayType,
+    MappingSource,
+    ResolvedDeviceMapping,
+)
+from custom_components.modbus_devices.s2000_pp import (
+    manual_relay_mapping,
+    manual_zone_mapping,
+)
+from custom_components.modbus_devices.sensor import (
+    ModBusNumericSensorEntity,
+    ModBusSensorEntity,
+    ModBusStateSensorEntity,
+)
+from custom_components.modbus_devices.switch import ModBusSwitchEntity
+
+
+class Entry:
+    """Minimal ConfigEntry surface used by entity constructors."""
+
+    def __init__(self, entry_id: str, *, options=None, data=None) -> None:
+        self.entry_id = entry_id
+        self.options = {} if options is None else options
+        self.data = {} if data is None else data
+
+
+def coordinator(device, data=None):
+    return SimpleNamespace(
+        data={} if data is None else data,
+        device=device,
+        last_update_success=True,
+    )
+
+
+def gateway_context(gateway_entry_id: str) -> GatewayContext:
+    return GatewayContext(
+        GatewayType.S2000_PP,
+        gateway_entry_id,
+        f"config_entry:{gateway_entry_id}",
+        1,
+    )
+
+
+def child_entry(entry_id: str, gateway_entry_id: str) -> Entry:
+    return Entry(
+        entry_id,
+        options={Config.CONF_GATEWAY_ENTRY_ID: gateway_entry_id},
+    )
+
+
+def vt_mapping(gateway_entry_id: str = "gateway-1") -> ResolvedDeviceMapping:
+    return ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(
+            gateway_context(gateway_entry_id),
+            "C2000VT",
+            7,
+            DPLSSubIdentity(20, 2),
+            DownstreamDeviceMetadata("vt"),
+        ),
+        MappingSource.MANUAL,
+        (
+            manual_zone_mapping(20, 1, 6, 0, None),
+            manual_zone_mapping(21, 2, 6, 0, None),
+        ),
+    )
+
+
+def kpb_mapping(gateway_entry_id: str, orion_address: int) -> ResolvedDeviceMapping:
+    return ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(
+            gateway_context(gateway_entry_id),
+            "C2000KPB",
+            orion_address,
+        ),
+        MappingSource.MANUAL,
+        (manual_relay_mapping(1, orion_address),),
+    )
+
+
+def sp4_mapping(gateway_entry_id: str = "gateway-1") -> ResolvedDeviceMapping:
+    return ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(
+            gateway_context(gateway_entry_id),
+            "C2000SP4",
+            7,
+            DPLSSubIdentity(30, 5),
+            DownstreamDeviceMetadata("sp4_24"),
+        ),
+        MappingSource.MANUAL,
+        (manual_relay_mapping(30, 1),),
+    )
+
+
+def test_direct_device_and_direct_s2000_pp_have_no_parent() -> None:
+    direct = Entry("direct-device", options={Config.CONF_MODBUS_MODE: "serial"})
+    gateway = Entry(
+        "gateway-1",
+        options={
+            Config.CONF_MODBUS_MODE: "serial",
+            Config.CONF_DEVICE_CLASS: "S2000PP",
+        },
+    )
+
+    assert via_device_for_entry(direct) is None
+    assert via_device_for_entry(gateway) is None
+
+    device = S2000PP(None, 1)
+    entity = ModBusBinarySensorEntity(
+        coordinator(device), device, gateway, device.attr_in1
+    )
+    assert entity.device_info["identifiers"] == {(Config.DOMAIN, "gateway-1")}
+    assert entity.device_info["via_device"] is None
+
+
+def test_c2000_vt_entities_share_one_device_and_gateway_parent() -> None:
+    device = C2000VT(None, 1)
+    device.apply_gateway_mapping(vt_mapping())
+    entry = child_entry("vt-entry", "gateway-1")
+    state = next(
+        item
+        for item in device.get_state_sensor_descriptions()
+        if item["sensor_id"] == "temperature_state"
+    )
+    numeric = next(
+        item
+        for item in device.get_numeric_sensor_descriptions()
+        if item["sensor_id"] == "temperature"
+    )
+    state_entity = ModBusStateSensorEntity(coordinator(device), device, entry, state)
+    numeric_entity = ModBusNumericSensorEntity(
+        coordinator(device), device, entry, numeric
+    )
+
+    expected_identifier = {(Config.DOMAIN, device.attr_device_identifier)}
+    expected_parent = (Config.DOMAIN, "gateway-1")
+    assert state_entity.device_info["identifiers"] == expected_identifier
+    assert numeric_entity.device_info["identifiers"] == expected_identifier
+    assert state_entity.device_info["via_device"] == expected_parent
+    assert numeric_entity.device_info["via_device"] == expected_parent
+    assert state_entity.entity_category is EntityCategory.DIAGNOSTIC
+    assert state_entity.unique_id == f"{device.attr_unique_id_prefix}_temperature_state"
+    assert numeric_entity.unique_id == f"{device.attr_unique_id_prefix}_temperature"
+
+
+def test_two_kpb_children_keep_distinct_devices_and_one_parent() -> None:
+    first = C2000KPB(None, 1)
+    second = C2000KPB(None, 1)
+    first.apply_gateway_mapping(kpb_mapping("gateway-1", 9))
+    second.apply_gateway_mapping(kpb_mapping("gateway-1", 10))
+    first_entity = ModBusSwitchEntity(
+        coordinator(first), first, child_entry("kpb-9", "gateway-1"), first.attr_out1
+    )
+    second_entity = ModBusSwitchEntity(
+        coordinator(second),
+        second,
+        child_entry("kpb-10", "gateway-1"),
+        second.attr_out1,
+    )
+
+    assert first_entity.device_info["identifiers"] != second_entity.device_info["identifiers"]
+    assert first_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
+    assert second_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
+    assert first_entity.unique_id == f"{first.attr_unique_id_prefix}_output_1"
+    assert second_entity.unique_id == f"{second.attr_unique_id_prefix}_output_1"
+
+
+def test_same_child_identity_behind_two_gateways_has_distinct_topology() -> None:
+    first = C2000KPB(None, 1)
+    second = C2000KPB(None, 1)
+    first.apply_gateway_mapping(kpb_mapping("gateway-1", 9))
+    second.apply_gateway_mapping(kpb_mapping("gateway-2", 9))
+    first_entity = ModBusSwitchEntity(
+        coordinator(first), first, child_entry("child-a", "gateway-1"), first.attr_out1
+    )
+    second_entity = ModBusSwitchEntity(
+        coordinator(second), second, child_entry("child-b", "gateway-2"), second.attr_out1
+    )
+
+    assert first_entity.device_info["identifiers"] != second_entity.device_info["identifiers"]
+    assert first_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
+    assert second_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-2")
+
+
+def test_future_sp4_uses_the_common_downstream_topology_path() -> None:
+    device = C2000SP4(None, 1)
+    device.apply_gateway_mapping(sp4_mapping())
+    entity = ModBusSwitchEntity(
+        coordinator(device),
+        device,
+        child_entry("sp4-entry", "gateway-1"),
+        device.attr_out1,
+    )
+
+    assert entity.device_info["identifiers"] == {
+        (Config.DOMAIN, device.attr_device_identifier)
+    }
+    assert entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
+
+
+def test_existing_child_data_format_resolves_parent_without_runtime() -> None:
+    entry = Entry(
+        "legacy-child",
+        data={Config.CONF_GATEWAY_ENTRY_ID: "gateway-legacy"},
+    )
+    assert via_device_for_entry(entry) == (Config.DOMAIN, "gateway-legacy")
+
+
+def test_all_entity_platform_device_info_uses_the_same_parent() -> None:
+    device = SimpleNamespace(
+        attr_device_identifier="child-identity",
+        attr_unique_id_prefix="child-identity",
+        attr_manufactures_name="Test",
+        attr_model_name="Test child",
+        attr_description="Test child",
+        attr_hardware_version=None,
+        attr_software_version=None,
+        attr_serial_number=None,
+    )
+    entry = child_entry("child-entry", "gateway-1")
+    coord = coordinator(device)
+    entities = (
+        ModBusSensorEntity(
+            coord,
+            device,
+            entry,
+            {
+                "chanel_number": 1,
+                "chanel_number_view": 1,
+                "chanel_type": "Value",
+                "device_class": None,
+                "state_class": None,
+                "unit_of_temperature_c": None,
+            },
+        ),
+        ModBusStateSensorEntity(
+            coord, device, entry, {"sensor_id": "state", "name": "State"}
+        ),
+        ModBusNumericSensorEntity(
+            coord,
+            device,
+            entry,
+            {
+                "sensor_id": "numeric",
+                "name": "Numeric",
+                "device_class": None,
+                "state_class": None,
+                "unit": None,
+                "precision": 0,
+            },
+        ),
+        ModBusBinarySensorEntity(
+            coord,
+            device,
+            entry,
+            {
+                "input_number": 1,
+                "input_number_view": 1,
+                "input_type": "Input",
+                "device_class": None,
+                "icon_on": None,
+                "icon_off": None,
+            },
+        ),
+        ModBusSwitchEntity(
+            coord,
+            device,
+            entry,
+            {
+                "out_number": 1,
+                "out_number_view": 1,
+                "out_type": "Output",
+                "device_class": None,
+            },
+        ),
+        ModBusCommandButtonEntity(
+            coord,
+            device,
+            entry,
+            {"button_id": "command", "name": "Command", "command": "run"},
+        ),
+        ModBusDevicesDateTime(coord, device, entry, 1),
+    )
+
+    assert {entity.device_info["via_device"] for entity in entities} == {
+        (Config.DOMAIN, "gateway-1")
+    }

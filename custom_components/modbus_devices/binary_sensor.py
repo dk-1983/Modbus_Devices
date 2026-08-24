@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import (
 
 from .const import Config
 from .coordinator import ModbusDeviceCoordinator
+from .device_info import via_device_for_entry
 from .runtime import ModbusDevicesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ class ModBusBinarySensorEntity(
                 else str(device.attr_software_version)
             ),
             serial_number=device.attr_serial_number,
+            via_device=via_device_for_entry(entry),
         )
 
     @property

@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import Config
+from .device_info import via_device_for_entry
 from .runtime import ModbusDevicesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -131,6 +132,7 @@ class ModBusSensorEntity(
                 else str(device.attr_software_version)
             ),
             serial_number=device.attr_serial_number,
+            via_device=via_device_for_entry(entry),
         )
 
     @property
@@ -216,6 +218,7 @@ class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
                 else str(device.attr_software_version)
             ),
             serial_number=device.attr_serial_number,
+            via_device=via_device_for_entry(entry),
         )
 
     @property
@@ -274,6 +277,7 @@ class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
             hw_version=(None if device.attr_hardware_version is None else str(device.attr_hardware_version)),
             sw_version=(None if device.attr_software_version is None else str(device.attr_software_version)),
             serial_number=device.attr_serial_number,
+            via_device=via_device_for_entry(entry),
         )
 
     @property

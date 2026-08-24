@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import Config
+from .device_info import via_device_for_entry
 from .runtime import ModbusDevicesConfigEntry
 
 async def async_setup_entry(
@@ -107,6 +108,7 @@ class ModBusSwitchEntity(
                 else str(device.attr_software_version)
             ),
             serial_number=device.attr_serial_number,
+            via_device=via_device_for_entry(entry),
         )
 
     @property
