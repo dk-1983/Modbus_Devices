@@ -22,6 +22,15 @@ Modbus Devices — пользовательская интеграция Home As
 
 Поддержка определяется конкретной моделью. Наличие производителя в списке не означает поддержку всех его приборов или всех физических функций конкретного прибора.
 
+## Что нового в 0.5.0
+
+- Подчинённое оборудование С2000-ПП представляется отдельными физическими Devices Home Assistant, а gateway указывается как их родитель.
+- Модель представления физического устройства обеспечивает единый поиск сущностей, семантический порядок и понятные имена строк для поддерживаемых производителей.
+- Дополнительный generator **Modbus Device** формирует стандартную карточку Home Assistant Entities для одного выбранного физического устройства.
+- Генерация использует единый, независимый от производителя механизм для direct-оборудования Bolid, устройств Bolid за С2000-ПП, оборудования Owen и будущих зарегистрированных производителей.
+
+Версия 0.5.0 — существенный архитектурный и пользовательский milestone проекта до 1.0. Все сущности остаются обычными сущностями Home Assistant и не требуют использования generator.
+
 ## Архитектура
 
 ```text
@@ -57,6 +66,8 @@ Home Assistant
 ```
 
 Радиорасширитель не добавляется в стабильный идентификатор радиоустройства. В пределах одного шлюза идентичность подчинённого прибора определяется Orion-адресом КДЛ и DPLS-адресом прибора.
+
+Home Assistant Device Registry также хранит физическую topology. Каждый downstream-прибор остаётся отдельным Device, его сущности принадлежат именно этому Device, а страница устройства показывает связь через соответствующий С2000-ПП. Одинаковые downstream-адреса за разными gateways не смешиваются. Приборы с прямым подключением не получают искусственного родителя.
 
 ## Поддерживаемые способы подключения
 
@@ -126,18 +137,20 @@ Native Modbus UDP/IP и Modbus RTU over UDP — разные протоколы 
 | Bolid | [С2000Р-СТ исп.01](https://bolid.ru/production/s2000r-st_01.html) | С2000-ПП → С2000-КДЛ → ДПЛС через С2000Р-АРР125 | Рабочее мультисостояние разбития стекла | Батарея, вскрытие и радиосвязь остаются семантикой мультисостояний Orion; RSSI entity не создаётся |
 | Bolid | [С2000Р-СМК](https://bolid.ru/production/s2000r_smk.html) | С2000-ПП → С2000-КДЛ → ДПЛС через С2000Р-АРР125 | Мультисостояние открытия; опциональное мультисостояние внешнего входа | Занимает один или два DPLS-адреса в зависимости от настроенной topology; производный бинарный датчик открытия не создаётся |
 
+### Dyna Drive — оборудование с прямым Modbus
+
+| Производитель | Модель | Подключение / шлюз | Сущности / возможности Home Assistant | Примечания |
+|---|---|---|---|---|
+| Dyna Drive | DN310 | Прямой Modbus | Read-only runtime diagnostics, состояние работы, декодирование аварий и command buttons | Реализованные команды: Forward run, Reverse run, Coast stop, Decelerate stop и Fault reset. Writable frequency setpoint и jog не реализованы; интеграция автоматически не изменяет постоянные параметры привода |
+
+Реализация DN310 зарегистрирована и покрыта repository tests, однако полная аппаратная проверка и сверка карты регистров ещё продолжаются. До подтверждения по официальной документации производителя и физическому оборудованию поддержку следует считать экспериментальной.
+
 ### Owen — оборудование с прямым Modbus
 
 | Производитель | Модель | Подключение / шлюз | Сущности / возможности Home Assistant | Примечания |
 |---|---|---|---|---|
 | Owen | [TRM-138](https://owen.ru/product/trm138) | Прямой Modbus | 8 датчиков температуры | Текущая реализация читает восемь настроенных измерительных каналов |
 | Owen | [ПЛК110-24.60.К-М](https://files.owen.ru/catalog/product.php?cat=plc&prod=plk110_m02&sub=programmiruemie_logicheskie_kontrolleri) | Прямой Modbus | 36 дискретных входов и 24 переключателя выходов | Пользовательская битовая карта CODESYS Modbus: настраиваются область DI, начальный адрес/шаг DI и начальный адрес/шаг DO |
-
-### Dyna Drive — оборудование с прямым Modbus
-
-| Производитель | Модель | Подключение / шлюз | Сущности / возможности Home Assistant | Примечания |
-|---|---|---|---|---|
-| Dyna Drive | DN310 | Прямой Modbus | Read-only runtime diagnostics, авторитетное состояние работы, декодирование аварий и command buttons | Команды: Forward run, Reverse run, Coast stop, Decelerate stop и Fault reset. Writable frequency setpoint и jog не реализованы; интеграция автоматически не изменяет постоянные параметры привода |
 
 ## Примеры оборудования
 
@@ -245,6 +258,36 @@ Automatic/configuration-assisted mapping читает таблицы конфи�
 
 Config Flow локализован на английский и русский языки. Internal class names и register addresses обычно не вводятся пользователем; YAML configuration не поддерживается.
 
+## Дополнительно: создание карточки устройства
+
+При желании Modbus Devices может автоматически сформировать стандартную карточку Home Assistant Entities для выбранного физического устройства. Это дополнительная функция для удобной настройки dashboard, а не часть Config Flow и не обязательное условие использования интеграции. Сущности Modbus Devices можно размещать на dashboard и использовать в automations/scripts любыми штатными средствами Home Assistant.
+
+У одного физического устройства может быть несколько связанных сущностей: температура, влажность, состояния, выходы, каналы или диагностика. При ручном добавлении они могут оказаться визуально разбросаны по dashboard, особенно на экранах разной ширины. Generator быстро собирает сущности одного physical Device в одну стандартную карточку, используя существующую логику семантического порядка и понятных имён.
+
+1. Откройте нужный dashboard в режиме редактирования и нажмите **Add card**.
+
+<p align="center"><img src="pictures/custom_card/add_card.jpg" alt="Режим редактирования dashboard Home Assistant с кнопкой Add card" width="88%"></p>
+<p align="center"><em>Откройте режим редактирования dashboard и начните добавление карточки.</em></p>
+
+2. Выберите **Modbus Device** в стандартном picker Home Assistant, затем выберите один physical Device интеграции Modbus Devices.
+
+<p align="center"><img src="pictures/custom_card/select_modbus_device.png" alt="Modbus Device в стандартном picker карточек Home Assistant" width="88%"></p>
+<p align="center"><em>Пункт Modbus Device открывает дополнительный generator физического устройства.</em></p>
+
+3. Интеграция находит актуальные сущности этого Device и передаёт полную native-конфигурацию в штатный editor карточки Home Assistant Entities. Проверьте заголовок, строки, порядок и preview; перед сохранением их можно изменить обычными средствами Home Assistant.
+
+<p align="center"><img src="pictures/custom_card/entities_preview.jpg" alt="Сформированный штатный editor и preview карточки Home Assistant Entities" width="88%"></p>
+<p align="center"><em>Результат генерации уже открыт в штатном editor карточки Entities.</em></p>
+
+4. Сохраните карточку обычным способом.
+
+<p align="center"><img src="pictures/custom_card/dashboard_result.jpg" alt="Готовая карточка Entities физического устройства на обычном dashboard Home Assistant" width="88%"></p>
+<p align="center"><em>Готовая карточка является обычной карточкой Home Assistant на стандартном dashboard.</em></p>
+
+После сохранения Lovelace хранит native-карточку `type: entities` с текущим списком сущностей. Постоянного custom renderer, отдельного dashboard Modbus Devices и автоматической Area/Sections-компоновки нет. Один и тот же generator работает для поддерживаемых direct-устройств Bolid, приборов Bolid через С2000-ПП, оборудования Owen и будущих производителей, зарегистрированных в presentation framework.
+
+Сохранённый список намеренно статичен. Если у физического устройства позднее появилась новая capability или была включена ранее disabled entity, существующая карточка не обязана автоматически добавлять новую строку. Отредактируйте native-карточку вручную либо снова выберите **Add card → Modbus Device**, чтобы сформировать новую.
+
 ## Modbus RTU over UDP
 
 Production transport поддерживает FC01, FC02, FC03, FC04, FC05, FC06 и FC16. Он использует один persistent UDP socket, фиксированный local UDP port, накопление split datagrams, timeout, CRC validation и проверку source/slave/function. Запросы проходят через ту же per-client serialization, что и у остальных transport types.
@@ -311,8 +354,8 @@ custom_components/modbus_devices
 - Serial number, firmware, hardware revision, protocol information, radio identifier, RSSI, voltage и другие service values публикуются только тогда, когда текущий transport действительно их предоставляет.
 - Radio numeric values реализуются только при подтверждённом актуальной документацией пути через С2000-ПП.
 - Исполнения приборов не считаются совместимыми только из-за похожего названия или корпуса.
-- Writable frequency setpoint DN310 не реализован.
 - Некоторые Bolid relay controls намеренно read-only, если нельзя подтвердить безопасное ownership/tactic поведение.
+- Поддержка DN310 остаётся экспериментальной до завершения полной аппаратной проверки и сверки карты регистров по официальной документации; writable frequency setpoint и jog не реализованы.
 - RTU-over-UDP RX/end-to-end validation через С2000-Ethernet ещё не завершена.
 - Новые equipment models добавляются после проверки актуальных официальных руководств, protocol descriptions, register maps и compatibility information.
 

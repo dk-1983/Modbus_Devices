@@ -22,6 +22,15 @@ The integration is a local-polling hub for Modbus-compatible equipment from mult
 
 Support is model-specific. Selecting a manufacturer does not imply support for every device or every physical function from that manufacturer.
 
+## What's new in 0.5.0
+
+- С2000-ПП downstream equipment is represented as separate physical Home Assistant Devices with the gateway recorded as their parent.
+- The physical-device presentation model provides consistent entity discovery, ordering, and clean row names across supported manufacturers.
+- The optional **Modbus Device** card generator prepares a standard Home Assistant Entities card for one selected physical device.
+- Card generation works through the same manufacturer-neutral presentation path for direct Bolid equipment, Bolid equipment behind С2000-ПП, Owen equipment, and future registered manufacturers.
+
+Version 0.5.0 is a substantial pre-1.0 architecture and workflow milestone. Existing entities remain normal Home Assistant entities and do not require the optional card generator.
+
 ## Architecture
 
 ```text
@@ -57,6 +66,8 @@ radio device ↔ С2000Р-АРР125
 ```
 
 The radio expander is not added to a radio device's stable identity. Within one gateway, a downstream identity is based on the KDL Orion address and the device's DPLS address.
+
+Home Assistant Device Registry also records the physical topology. Each downstream instrument remains its own Device, and its entities belong to that Device; the Device page shows that it is connected through the corresponding С2000-ПП. Identical downstream addresses behind different gateways remain separate. Directly connected devices do not receive an artificial parent.
 
 ## Supported transports
 
@@ -126,18 +137,20 @@ Supported С2000-СП4 variants:
 | Bolid | [С2000Р-СТ исп.01](https://bolid.ru/production/s2000r-st_01.html) | С2000-ПП → С2000-КДЛ → DPLS via С2000Р-АРР125 | Operational glass-break multistate state | Battery, tamper, and radio communication remain Orion multistate semantics; no RSSI entity |
 | Bolid | [С2000Р-СМК](https://bolid.ru/production/s2000r_smk.html) | С2000-ПП → С2000-КДЛ → DPLS via С2000Р-АРР125 | Opening multistate state; optional External input multistate state | Uses one or two DPLS addresses according to the configured topology; no derived opening binary sensor |
 
+### Dyna Drive — direct Modbus equipment
+
+| Manufacturer | Model | Connection / gateway | Home Assistant entities / capabilities | Notes |
+|---|---|---|---|---|
+| Dyna Drive | DN310 | Direct Modbus | Read-only runtime diagnostics, running state, fault decoding, and command buttons | Implemented commands: Forward run, Reverse run, Coast stop, Decelerate stop, and Fault reset. Writable frequency setpoint and jog are not implemented; the integration does not automatically modify persistent drive parameters |
+
+The DN310 implementation is registered and covered by repository tests, but complete hardware and register-map validation is still in progress. Treat current support as experimental until it has been verified against authoritative manufacturer documentation and physical hardware.
+
 ### Owen — direct Modbus equipment
 
 | Manufacturer | Model | Connection / gateway | Home Assistant entities / capabilities | Notes |
 |---|---|---|---|---|
 | Owen | [TRM-138](https://owen.ru/product/trm138) | Direct Modbus | 8 temperature sensors | Current implementation reads the eight configured measurement channels |
 | Owen | [ПЛК110-24.60.К-М](https://files.owen.ru/catalog/product.php?cat=plc&prod=plk110_m02&sub=programmiruemie_logicheskie_kontrolleri) | Direct Modbus | 36 binary inputs and 24 output switches | User-defined CODESYS Modbus bit layout; configurable DI area, base/stride, and DO base/stride |
-
-### Dyna Drive — direct Modbus equipment
-
-| Manufacturer | Model | Connection / gateway | Home Assistant entities / capabilities | Notes |
-|---|---|---|---|---|
-| Dyna Drive | DN310 | Direct Modbus | Read-only runtime diagnostics, authoritative running state, fault decoding, and command buttons | Commands: Forward run, Reverse run, Coast stop, Decelerate stop, and Fault reset. Writable frequency setpoint and jog are not implemented; the integration does not automatically modify persistent drive parameters |
 
 ## Equipment examples
 
@@ -245,6 +258,36 @@ This creates separate Home Assistant Devices and entities while all requests tra
 
 Config Flow is localized in English and Russian. Internal class names and register addresses are not normal inputs, and YAML configuration is not supported.
 
+## Optional: Generate a device card
+
+If you want, Modbus Devices can automatically prepare a standard Home Assistant Entities card for a selected physical device. This is an optional dashboard convenience feature, not part of Config Flow and not required to use the integration. You can place Modbus Devices entities on dashboards or use them in automations and scripts through any standard Home Assistant workflow.
+
+A physical device can expose several related entities—temperature, humidity, states, outputs, channels, or diagnostics. When they are added manually, they can become visually scattered across a dashboard, especially at different screen widths. The generator quickly collects the entities of one physical Device into one standard card, using the existing semantic ordering and clean naming logic.
+
+1. Open the desired dashboard in edit mode and select **Add card**.
+
+<p align="center"><img src="pictures/custom_card/add_card.jpg" alt="Home Assistant dashboard edit mode with the Add card action" width="88%"></p>
+<p align="center"><em>Open dashboard edit mode and start adding a card.</em></p>
+
+2. Choose **Modbus Device** in the Home Assistant card picker, then select one physical Device belonging to the Modbus Devices integration.
+
+<p align="center"><img src="pictures/custom_card/select_modbus_device.png" alt="Modbus Device entry in the Home Assistant card picker" width="88%"></p>
+<p align="center"><em>The Modbus Device entry opens the optional physical-device generator.</em></p>
+
+3. The integration discovers the current entities of that Device and hands a complete native configuration to the standard Home Assistant Entities card editor. Review the title, rows, ordering, and preview; you can edit them with the normal Home Assistant controls before saving.
+
+<p align="center"><img src="pictures/custom_card/entities_preview.jpg" alt="Generated native Home Assistant Entities card editor and preview" width="88%"></p>
+<p align="center"><em>The generated result is already open in the native Entities card editor.</em></p>
+
+4. Save the card normally.
+
+<p align="center"><img src="pictures/custom_card/dashboard_result.jpg" alt="Finished physical-device Entities card on a regular Home Assistant dashboard" width="88%"></p>
+<p align="center"><em>The finished card is an ordinary Home Assistant card on the regular dashboard.</em></p>
+
+After saving, Lovelace stores a native `type: entities` card with its current entity list. There is no permanent custom renderer, separate Modbus Devices dashboard, or automatic Area/Sections layout. The same generator works for supported direct Bolid devices, Bolid devices reached through С2000-ПП, Owen devices, and future manufacturers registered with the presentation framework.
+
+The saved list is intentionally static. If the physical device later gains a capability or a previously disabled entity is enabled, an existing card does not have to add a new row automatically. Edit the native card manually or run **Add card → Modbus Device** again to generate a fresh card.
+
 ## Modbus RTU over UDP
 
 This production transport supports FC01, FC02, FC03, FC04, FC05, FC06, and FC16. It uses one persistent UDP socket, a fixed local UDP port, split-datagram accumulation, timeout handling, CRC validation, and source/slave/function validation. Requests pass through the same per-client serialization layer as the other transports.
@@ -311,8 +354,8 @@ Restart Home Assistant, then add **Modbus Devices** from **Settings → Devices 
 - Serial number, firmware, hardware revision, protocol information, radio identifier, RSSI, voltage, and other service values are exposed only when the current transport actually provides them.
 - Radio numeric values are implemented only when current С2000-ПП documentation confirms their transport path.
 - Device variants are not assumed compatible merely because their names or enclosures are similar.
-- DN310 writable frequency setpoint is not implemented.
 - Some Bolid relay controls are intentionally read-only where ownership or tactic safety cannot be established.
+- DN310 support is experimental while full hardware and authoritative register-map validation remains in progress; writable frequency setpoint and jog are not implemented.
 - С2000-Ethernet RTU-over-UDP receive/end-to-end validation is still pending.
 - New equipment models are added after checking current official manuals, protocol descriptions, register maps, and compatibility information.
 
