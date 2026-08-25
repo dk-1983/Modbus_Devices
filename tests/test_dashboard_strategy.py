@@ -1,18 +1,23 @@
 """Tests for the dynamic Modbus Devices dashboard strategy."""
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
-import pytest
-
+from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.dashboard import builder
 from custom_components.modbus_devices.dashboard.frontend import (
+    DEVICE_CARD_TAG,
     STRATEGY_MODULE_URL,
+    WS_BUILD_DEVICE_CARD,
+    async_build_device_card_config,
     strategy_module_url,
 )
-from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.presentation.profile import DevicePresentation
+import pytest
 
 
 @dataclass
@@ -253,6 +258,92 @@ def test_frontend_module_registers_exact_ha_dashboard_strategy_contract():
     assert "globalThis.customElements.define(" in source
     assert "registerModbusDevicesDashboardStrategy();" in source
     assert 'type: "modbus_devices/dashboard/build"' in source
+
+
+def test_frontend_module_registers_dynamic_device_card_contract():
+    """Keep the picker entry generator-only and emit native HA configs."""
+    module_path = (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "modbus_devices"
+        / "dashboard"
+        / "frontend"
+        / "dashboard-strategy.js"
+    )
+    source = module_path.read_text(encoding="utf-8")
+
+    assert f'DEVICE_CARD_TAG = "{DEVICE_CARD_TAG}"' in source
+    assert f'type: "{WS_BUILD_DEVICE_CARD}"' in source
+    assert "static getConfigElement()" in source
+    assert 'document.createElement(DEVICE_CARD_EDITOR_TAG)' in source
+    assert 'device: { filter: { integration: "modbus_devices" } }' in source
+    assert 'new CustomEvent("config-changed"' in source
+    assert 'generatedConfig.type !== "entities"' in source
+    assert 'new CustomEvent("ll-rebuild"' not in source
+    assert "globalThis.loadCardHelpers()" not in source
+    assert "createCardElement" not in source
+    assert "subscribeEvents" not in source
+    assert "registerModbusDeviceCard();" in source
+
+
+def test_clean_integration_package_exports_device_card_builder():
+    """Guard the public API required by a clean production installation."""
+    repository = Path(__file__).parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(
+        (str(repository), str(repository.parents[2]))
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import custom_components.modbus_devices; "
+                "import custom_components.modbus_devices.presentation; "
+                "from custom_components.modbus_devices.presentation import "
+                "async_build_device_card; "
+                "assert callable(async_build_device_card); "
+                "import custom_components.modbus_devices.dashboard.frontend"
+            ),
+        ],
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_device_card_endpoint_returns_only_builder_native_card(monkeypatch):
+    expected = card("C2000-VT Balcony", {"entity": "sensor.temperature"})
+
+    async def build_device_card(hass, device_id):
+        assert hass == "hass"
+        assert device_id == "device-vt"
+        return DevicePresentation(device_id, "balcony", "C2000VT", expected)
+
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.dashboard.frontend.async_build_device_card",
+        build_device_card,
+    )
+
+    assert await async_build_device_card_config("hass", "device-vt") == expected
+
+
+@pytest.mark.asyncio
+async def test_device_card_endpoint_rejects_non_modbus_or_empty_device(monkeypatch):
+    async def build_device_card(_hass, _device_id):
+        return None
+
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.dashboard.frontend.async_build_device_card",
+        build_device_card,
+    )
+
+    assert await async_build_device_card_config("hass", "foreign") is None
 
 
 def test_frontend_module_url_changes_with_content(tmp_path):
