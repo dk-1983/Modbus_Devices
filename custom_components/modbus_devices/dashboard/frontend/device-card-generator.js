@@ -1,25 +1,5 @@
-export const STRATEGY_TAG = "ll-strategy-dashboard-modbus-devices";
 export const DEVICE_CARD_TAG = "modbus-device-card";
 export const DEVICE_CARD_EDITOR_TAG = "modbus-device-card-editor";
-
-export class ModbusDevicesDashboardStrategy extends HTMLElement {
-  static noEditor = true;
-
-  static async generate(_strategyConfig, hass) {
-    return hass.callWS({ type: "modbus_devices/dashboard/build" });
-  }
-}
-
-export function registerModbusDevicesDashboardStrategy() {
-  if (!globalThis.customElements.get(STRATEGY_TAG)) {
-    globalThis.customElements.define(
-      STRATEGY_TAG,
-      ModbusDevicesDashboardStrategy,
-    );
-  }
-}
-
-registerModbusDevicesDashboardStrategy();
 
 export class ModbusDeviceCard extends HTMLElement {
   static getConfigElement() {

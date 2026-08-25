@@ -76,7 +76,7 @@ const {
   ModbusDeviceCard,
   ModbusDeviceCardEditor,
 } = await import(
-  "../../custom_components/modbus_devices/dashboard/frontend/dashboard-strategy.js"
+  "../../custom_components/modbus_devices/dashboard/frontend/device-card-generator.js"
 );
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
