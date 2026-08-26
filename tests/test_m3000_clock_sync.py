@@ -36,6 +36,7 @@ class Response:
 class Client:
     def __init__(self):
         self.writes = []
+        self.reads = []
         self.write_response = Response()
         self.read_response = Response(
             registers=[2026, 8, 26, 20, 45, 12],
@@ -46,7 +47,13 @@ class Client:
         self.writes.append(kwargs)
         return self.write_response
 
-    async def read_holding_registers(self, **_kwargs):
+    async def read_holding_registers(self, **kwargs):
+        self.reads.append(kwargs)
+        if kwargs["count"] == M3000BB1020.RUNTIME_HEADER_REGISTER_COUNT:
+            return Response(
+                registers=[74, 100, 100, 1, 2, 3, *self.read_response.registers],
+                function_code=3,
+            )
         return self.read_response
 
 
@@ -62,6 +69,23 @@ async def test_rtc_decode_preserves_timezone_less_device_wall_clock():
 
     assert device_time == datetime(2026, 8, 26, 20, 45, 12)
     assert device_time.tzinfo is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_header_reads_documented_info_and_rtc_block_once():
+    client = Client()
+    device = M3000BB1020(client, 1)
+
+    device_time = await device._get_runtime_header()
+
+    assert device_time == datetime(2026, 8, 26, 20, 45, 12)
+    assert device.attr_device_type == 74
+    assert device.attr_software_version == 100
+    assert device.attr_hardware_version == 100
+    assert device.attr_serial_number == "123"
+    assert client.reads == [
+        {"address": 60001, "count": 12, "device_id": 1}
+    ]
 
 
 @pytest.mark.asyncio
@@ -171,17 +195,18 @@ async def test_sync_protocol_failure_is_not_retried_or_faked():
 @pytest.mark.asyncio
 async def test_snapshot_reads_rtc_naturally_and_exposes_actual_value():
     device = M3000BB1020(Client(), 1)
-    device.get_device_info = AsyncMock(return_value=[])
     device.get_inputs = AsyncMock(return_value=[])
     device.get_outputs = AsyncMock(return_value=[])
-    device.get_time = AsyncMock(return_value=datetime(2026, 8, 26, 20, 45, 12))
+    device._get_runtime_header = AsyncMock(
+        return_value=datetime(2026, 8, 26, 20, 45, 12)
+    )
     device._async_correct_clock = AsyncMock(return_value=False)
     device._local_now = lambda: datetime(2026, 8, 26, 20, 45, 13)
 
     snapshot = await device.async_get_snapshot()
 
     assert snapshot["time"] == datetime(2026, 8, 26, 20, 45, 12)
-    device.get_time.assert_awaited_once_with()
+    device._get_runtime_header.assert_awaited_once_with()
     device._async_correct_clock.assert_awaited_once_with(
         datetime(2026, 8, 26, 20, 45, 12),
         datetime(2026, 8, 26, 20, 45, 13),
@@ -192,10 +217,11 @@ async def test_snapshot_reads_rtc_naturally_and_exposes_actual_value():
 async def test_first_and_ordinary_snapshots_share_one_correction_policy():
     now = datetime(2026, 8, 26, 20, 45, 12)
     device = device_at(now)
-    device.get_device_info = AsyncMock(return_value=[])
     device.get_inputs = AsyncMock(return_value=[])
     device.get_outputs = AsyncMock(return_value=[])
-    device.get_time = AsyncMock(side_effect=[datetime(2000, 1, 1), now])
+    device._get_runtime_header = AsyncMock(
+        side_effect=[datetime(2000, 1, 1), now]
+    )
     device.set_time = AsyncMock()
 
     first = await device.async_get_snapshot()
@@ -209,10 +235,11 @@ async def test_first_and_ordinary_snapshots_share_one_correction_policy():
 @pytest.mark.asyncio
 async def test_failed_rtc_modbus_read_does_not_write_or_discard_other_data():
     device = M3000BB1020(Client(), 1)
-    device.get_device_info = AsyncMock(return_value=[])
     device.get_inputs = AsyncMock(return_value=[{"input_number": 1, "state": True}])
     device.get_outputs = AsyncMock(return_value=[{"out_number": 1, "state": False}])
-    device.get_time = AsyncMock(side_effect=ModbusException("invalid RTC"))
+    device._get_runtime_header = AsyncMock(
+        side_effect=ModbusException("invalid RTC")
+    )
     device.set_time = AsyncMock()
 
     snapshot = await device.async_get_snapshot()
@@ -234,7 +261,6 @@ async def test_successful_read_with_invalid_calendar_fields_corrects_once():
         function_code=3,
     )
     device = device_at(now, client)
-    device.get_device_info = AsyncMock(return_value=[])
     device.get_inputs = AsyncMock(return_value=[])
     device.get_outputs = AsyncMock(return_value=[])
 
@@ -258,14 +284,13 @@ async def test_successful_read_with_invalid_calendar_fields_corrects_once():
 async def test_failed_write_cooldown_suppresses_poll_rate_retry_storm():
     now = datetime(2026, 8, 26, 20, 45, 12)
     device = device_at(now)
-    device.get_device_info = AsyncMock(return_value=[])
     device.get_inputs = AsyncMock(
         return_value=[{"input_number": 1, "state": True}]
     )
     device.get_outputs = AsyncMock(
         return_value=[{"out_number": 1, "state": False}]
     )
-    device.get_time = AsyncMock(return_value=datetime(2000, 1, 1))
+    device._get_runtime_header = AsyncMock(return_value=datetime(2000, 1, 1))
     device.set_time = AsyncMock(side_effect=ModbusException("write failed"))
     device._monotonic_now = Mock(side_effect=[100, 100, 105, 110, 160, 160])
 
@@ -281,10 +306,9 @@ async def test_failed_write_cooldown_suppresses_poll_rate_retry_storm():
 async def test_clock_write_failure_does_not_discard_other_snapshot_data():
     now = datetime(2026, 8, 26, 20, 45, 12)
     device = device_at(now)
-    device.get_device_info = AsyncMock(return_value=[])
     device.get_inputs = AsyncMock(return_value=[{"input_number": 1, "state": True}])
     device.get_outputs = AsyncMock(return_value=[{"out_number": 1, "state": False}])
-    device.get_time = AsyncMock(return_value=datetime(2000, 1, 1))
+    device._get_runtime_header = AsyncMock(return_value=datetime(2000, 1, 1))
     device.set_time = AsyncMock(side_effect=ModbusException("write failed"))
 
     snapshot = await device.async_get_snapshot()

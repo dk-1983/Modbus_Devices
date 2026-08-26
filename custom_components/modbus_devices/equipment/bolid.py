@@ -61,6 +61,11 @@ class M3000BB1020:
 
     CLOCK_SYNC_MAX_DRIFT_SECONDS = 10
     CLOCK_SYNC_RETRY_COOLDOWN_SECONDS = 60
+    RUNTIME_HEADER_ADDRESS = 60001
+    RUNTIME_HEADER_REGISTER_COUNT = 12
+    DEVICE_INFO_REGISTER_COUNT = 6
+    CLOCK_ADDRESS = 60007
+    CLOCK_REGISTER_COUNT = 6
 
     def __init__(self, client, device_id) -> None:
         """Inicialization variables."""
@@ -329,13 +334,12 @@ class M3000BB1020:
 
     async def async_get_snapshot(self) -> dict[str, Any]:
         """Read one authoritative runtime snapshot for the coordinator."""
-        await self.get_device_info()
         inputs = await self.get_inputs()
         outputs = await self.get_outputs()
         comparison_time = self._local_now()
         device_time = None
         try:
-            device_time = await self.get_time()
+            device_time = await self._get_runtime_header()
         except InvalidM3000ClockPayload:
             _LOGGER.warning(
                 "M3000-BB-1020 returned invalid device clock fields; "
@@ -405,17 +409,49 @@ class M3000BB1020:
 
     async def get_device_info(self) -> list:
         """Получает информацию о текущем контроллере."""
+        registers = await self._read_holding_registers(
+            self.RUNTIME_HEADER_ADDRESS,
+            self.DEVICE_INFO_REGISTER_COUNT,
+            "read M3000-BB-1020 device info",
+        )
+        self._apply_device_info(registers)
+        return registers
+
+    async def _get_runtime_header(self) -> datetime:
+        """Read documented contiguous device-info and RTC registers once."""
+        registers = await self._read_holding_registers(
+            self.RUNTIME_HEADER_ADDRESS,
+            self.RUNTIME_HEADER_REGISTER_COUNT,
+            "read M3000-BB-1020 runtime header",
+        )
+        self._apply_device_info(registers[: self.DEVICE_INFO_REGISTER_COUNT])
+        return self._decode_time(registers[self.DEVICE_INFO_REGISTER_COUNT :])
+
+    async def _read_holding_registers(
+        self,
+        address: int,
+        count: int,
+        operation: str,
+    ) -> list[int]:
+        """Read and validate one M3000 holding-register block."""
         response = await self.attr_client.read_holding_registers(
-            address=60001, count=6, device_id=self.attr_device_id
+            address=address,
+            count=count,
+            device_id=self.attr_device_id,
         )
-        init = validated_registers(
-            response, 6, "read M3000-BB-1020 device info", expected_function=3
+        return validated_registers(
+            response,
+            count,
+            operation,
+            expected_function=3,
         )
-        self.attr_device_type = init[0]
-        self.attr_software_version = init[1]
-        self.attr_hardware_version = init[2]
-        self.attr_serial_number = hex(init[3])[2:] + hex(init[4])[2:] + hex(init[5])[2:]
-        return init
+
+    def _apply_device_info(self, registers: list[int]) -> None:
+        """Apply the documented six-register M3000 identity block."""
+        self.attr_device_type = registers[0]
+        self.attr_software_version = registers[1]
+        self.attr_hardware_version = registers[2]
+        self.attr_serial_number = "".join(hex(value)[2:] for value in registers[3:6])
 
     async def set_time(self, value: datetime | None = None) -> datetime:
         """Устанавливает дату и время в контроллер."""
@@ -423,11 +459,13 @@ class M3000BB1020:
             value = value or self._local_now()
             time_values = list(value.timetuple()[:6])
             response = await self.attr_client.write_registers(
-                address=60007, values=time_values, device_id=self.attr_device_id
+                address=self.CLOCK_ADDRESS,
+                values=time_values,
+                device_id=self.attr_device_id,
             )
             validate_fc16_response(
                 response,
-                address=60007,
+                address=self.CLOCK_ADDRESS,
                 count=len(time_values),
                 device_id=self.attr_device_id,
                 operation="set M3000-BB-1020 time",
@@ -437,12 +475,16 @@ class M3000BB1020:
 
     async def get_time(self) -> datetime:
         """Получает дату и время установленные в контроллере."""
-        response = await self.attr_client.read_holding_registers(
-            address=60007, count=6, device_id=self.attr_device_id
+        registers = await self._read_holding_registers(
+            self.CLOCK_ADDRESS,
+            self.CLOCK_REGISTER_COUNT,
+            "read M3000-BB-1020 time",
         )
-        registers = validated_registers(
-            response, 6, "read M3000-BB-1020 time", expected_function=3
-        )
+        return self._decode_time(registers)
+
+    @staticmethod
+    def _decode_time(registers: list[int]) -> datetime:
+        """Decode six timezone-less M3000 wall-clock fields."""
         try:
             return datetime(*registers, microsecond=0)
         except ValueError as exc:
@@ -464,22 +506,8 @@ class M3000BB1020:
 
     async def get_inputs(self, inputs: list[int] | None = None) -> list[dict[str, Any]]:
         """Получает состояние всех или нескольких входов контроллера."""
-        data: list[dict[str, Any]] = []
-        inputs = (inputs, (list(range(1, 13))))[inputs is None]
-        for in_put in inputs:
-            attr = getattr(self, f"attr_in{in_put}")
-            response = await self.attr_client.read_discrete_inputs(
-                address=attr["address"], count=1, device_id=self.attr_device_id
-            )
-            attr["state"] = validated_bits(
-                response,
-                1,
-                f"read M3000-BB-1020 input {in_put}",
-                expected_function=2,
-            )[0]
-            setattr(self, f"attr_in{in_put}", attr)
-            data.append(getattr(self, f"attr_in{in_put}"))
-        return data
+        selected = range(1, 13) if inputs is None else inputs
+        return [await self.get_input(input_number) for input_number in selected]
 
     async def get_output(self, out: int) -> dict[str, Any]:
         """Получает состояние одного выхода номер 1-6."""
@@ -495,22 +523,8 @@ class M3000BB1020:
 
     async def get_outputs(self, outputs: list | None = None):
         """Получение нескольких или всех состояний выходов контроллера."""
-        data: list[dict[str, Any]] = []
-        outputs = (outputs, (list(range(1, 7))))[outputs is None]
-        for output in outputs:
-            attr = getattr(self, f"attr_out{output}")
-            response = await self.attr_client.read_coils(
-                address=attr["address"], count=1, device_id=self.attr_device_id
-            )
-            attr["state"] = validated_bits(
-                response,
-                1,
-                f"read M3000-BB-1020 output {output}",
-                expected_function=1,
-            )[0]
-            setattr(self, f"attr_out{output}", attr)
-            data.append(getattr(self, f"attr_out{output}"))
-        return data
+        selected = range(1, 7) if outputs is None else outputs
+        return [await self.get_output(output_number) for output_number in selected]
 
     async def set_output(self, output: int, value: bool) -> dict[str, Any]:
         """Устанавливает состояние одного выхода номер 1-6."""
@@ -536,29 +550,11 @@ class M3000BB1020:
         if values is None:
             return False
         data: list[dict[str, Any]] = []
-        outputs = (outputs, (list(range(1, 7))))[outputs is None]
-        for output, index in zip(outputs, range(len(outputs))):
-            try:
-                if not isinstance(values[index], (bool, int)):
-                    raise TypeError
-                attr = getattr(self, f"attr_out{output}")
-                response = await self.attr_client.write_coil(
-                    address=attr["address"],
-                    value=values[index],
-                    device_id=self.attr_device_id,
-                )
-                validate_fc05_response(
-                    response,
-                    address=attr["address"],
-                    value=bool(values[index]),
-                    device_id=self.attr_device_id,
-                    operation=f"set M3000-BB-1020 output {output}",
-                )
-                attr["state"] = bool(values[index])
-                setattr(self, f"attr_out{output}", attr)
-                data.append(getattr(self, f"attr_out{output}"))
-            except IndexError:
-                break
+        selected = range(1, 7) if outputs is None else outputs
+        for output, value in zip(selected, values, strict=False):
+            if not isinstance(value, (bool, int)):
+                raise TypeError
+            data.append(await self.set_output(output, value))
         return data
 
     def __repr__(self) -> str:

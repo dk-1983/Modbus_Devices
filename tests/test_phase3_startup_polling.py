@@ -35,7 +35,8 @@ class CountingClient:
         self.calls.append(("holding", kwargs["address"], kwargs["count"]))
         address = kwargs["address"]
         if address == 60001:
-            return Response(registers=[1, 2, 3, 4, 5, 6], function_code=3)
+            registers = [1, 2, 3, 4, 5, 6, 2026, 1, 2, 3, 4, 5]
+            return Response(registers=registers[: kwargs["count"]], function_code=3)
         if address == 60007:
             return Response(registers=[2026, 1, 2, 3, 4, 5], function_code=3)
         if address == 46152:
@@ -101,9 +102,9 @@ async def test_m3000_first_snapshot_owns_all_startup_io_without_clock_write():
 
     snapshot = await device.async_get_snapshot()
     assert set(snapshot) == {"inputs", "outputs", "time"}
-    assert len(client.calls) == 20
-    assert client.calls[0] == ("holding", 60001, 6)
-    assert client.calls[-1] == ("holding", 60007, 6)
+    assert len(client.calls) == 19
+    assert client.calls[-1] == ("holding", 60001, 12)
+    assert ("holding", 60007, 6) not in client.calls
 
 
 @pytest.mark.asyncio
