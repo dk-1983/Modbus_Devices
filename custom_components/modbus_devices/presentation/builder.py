@@ -54,9 +54,13 @@ def _matching_role(
     profile: PresentationProfile,
     semantic_key: str,
     entity_domain: str,
+    unique_id: str,
 ) -> tuple[int, PresentationRole] | None:
     for index, role in enumerate(profile.roles):
-        if role.key == semantic_key and (
+        key_matches = role.key == semantic_key or (
+            role.match_unique_id_suffix and unique_id.endswith(f"_{role.key}")
+        )
+        if key_matches and (
             role.entity_domain is None or role.entity_domain == entity_domain
         ):
             return index, role
@@ -71,7 +75,7 @@ def _candidate(
     if getattr(entry, "disabled_by", None) is not None:
         return None
     semantic_key = _semantic_key(entry.unique_id, device_identifier)
-    matched = _matching_role(profile, semantic_key, entry.domain)
+    matched = _matching_role(profile, semantic_key, entry.domain, entry.unique_id)
     if matched is not None:
         role_index, role = matched
         return _Candidate(entry, semantic_key, role.section, role_index)

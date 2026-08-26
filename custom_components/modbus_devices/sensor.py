@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 
 from homeassistant.components.sensor import SensorEntity
@@ -67,7 +68,61 @@ async def async_setup_entry(
                 )
             )
 
+    if getattr(device, "attr_has_device_time_sensor", False):
+        entities.append(
+            ModBusDeviceTimeSensorEntity(
+                coordinator=coordinator,
+                device=device,
+                entry=entry,
+            )
+        )
+
     async_add_entities(entities)
+
+
+class ModBusDeviceTimeSensorEntity(CoordinatorEntity, SensorEntity):
+    """Read-only representation of a device's timezone-less wall clock."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_translation_key = "device_time"
+    _attr_icon = "mdi:clock-digital"
+
+    def __init__(self, coordinator, device, entry: ConfigEntry) -> None:
+        """Initialize the read-only device wall-clock sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_device_time"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(Config.DOMAIN, entry.entry_id)},
+            manufacturer=device.attr_manufactures_name,
+            model=device.attr_model_name,
+            name=device.attr_description,
+            hw_version=(
+                None
+                if device.attr_hardware_version is None
+                else str(device.attr_hardware_version)
+            ),
+            sw_version=(
+                None
+                if device.attr_software_version is None
+                else str(device.attr_software_version)
+            ),
+            serial_number=device.attr_serial_number,
+            via_device=via_device_for_entry(entry),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return entity availability."""
+        return self.coordinator.last_update_success
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the literal wall-clock fields stored by the device."""
+        device_time = (self.coordinator.data or {}).get("time")
+        if not isinstance(device_time, datetime):
+            return None
+        return device_time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 class ModBusSensorEntity(

@@ -4,9 +4,10 @@ from logging import getLogger
 
 from pymodbus.exceptions import ConnectionException, ModbusException
 
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 
 from .const import Config
 from .coordinator import ModbusDeviceCoordinator
@@ -41,6 +42,25 @@ def _clear_runtime_data(entry: ModbusDevicesConfigEntry) -> None:
     """Discard runtime references after failed setup or successful unload."""
     if hasattr(entry, "runtime_data"):
         del entry.runtime_data
+
+
+def _remove_legacy_clock_control(
+    hass: HomeAssistant,
+    entry: ModbusDevicesConfigEntry,
+    device,
+) -> None:
+    """Remove the former writable M3000 clock entity from the registry."""
+    if not getattr(device, "attr_has_device_time_sensor", False):
+        return
+    entity_registry = er.async_get(hass)
+    unique_id = f"{entry.entry_id}_clock_1"
+    if entity_id := entity_registry.async_get_entity_id(
+        Platform.DATETIME,
+        Config.DOMAIN,
+        unique_id,
+    ):
+        entity_registry.async_remove(entity_id)
+        _LOGGER.info("Removed legacy writable M3000 clock entity: %s", entity_id)
 
 
 async def async_setup_entry(
@@ -222,6 +242,8 @@ async def async_setup_entry(
             entry,
             device.attr_platforms,
         )
+
+        _remove_legacy_clock_control(hass, entry, device)
 
         _LOGGER.info(
             "Platforms loaded: %s",

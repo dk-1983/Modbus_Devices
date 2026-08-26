@@ -1,5 +1,6 @@
 """Characterization tests for coordinator-owned startup polling."""
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -93,6 +94,7 @@ async def test_owen_local_init_is_io_free_and_first_snapshot_reads_eight_channel
 async def test_m3000_first_snapshot_owns_all_startup_io_without_clock_write():
     client = CountingClient()
     device = M3000BB1020(client, 1)
+    device._local_now = lambda: datetime(2026, 1, 2, 3, 4, 5)
 
     await device.data_init()
     assert client.calls == []

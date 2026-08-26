@@ -1,12 +1,12 @@
 """Классы описывают содержание каждого прибора."""
 
+import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from enum import Enum
 from logging import getLogger
 from typing import Any
 
-from custom_components.modbus_devices.const import Config
 from pymodbus.client import (
     AsyncModbusSerialClient,
     AsyncModbusTcpClient,
@@ -19,6 +19,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
 from homeassistant.const import PERCENTAGE, Platform, UnitOfTemperature, UnitOfVolume
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.util import dt as dt_util
 
 from ..gateway import (
     CapabilityRequirement,
@@ -48,13 +49,18 @@ from .equipment import canonical_equipment_class_name
 _LOGGER = getLogger(__name__)
 
 
+class InvalidM3000ClockPayload(ModbusException):
+    """A successful M3000 RTC register read containing invalid calendar fields."""
+
+
 class M3000BB1020:
     """Bolid M3000-BB-1020 hw: 1.00 sw: 1.00."""
 
     equipment_manufacturer = "Bolid"
     equipment_model = "M3000-BB-1020"
 
-    CLOCK_SYNC_MAX_DRIFT_SECONDS = 120
+    CLOCK_SYNC_MAX_DRIFT_SECONDS = 10
+    CLOCK_SYNC_RETRY_COOLDOWN_SECONDS = 60
 
     def __init__(self, client, device_id) -> None:
         """Inicialization variables."""
@@ -71,13 +77,14 @@ class M3000BB1020:
         self.attr_init_time: datetime | None = None
         self.attr_description: str = "Programmable relay"
         self.attr_secret: str | None = None
-        self.attr_clock_iter: list[int] = list(range(1, 2))
+        self.attr_has_device_time_sensor = True
         self.attr_platforms: list[Platform] = [
             Platform.BINARY_SENSOR,
-            Platform.DATETIME,
+            Platform.SENSOR,
             Platform.SWITCH,
         ]
-        self._clock_sync_evaluated = False
+        self._clock_write_lock = asyncio.Lock()
+        self._last_failed_clock_sync_attempt: float | None = None
         self.attr_in1: dict[str, Any] = {
             "input_number": 1,
             "input_number_view": 1,
@@ -325,36 +332,76 @@ class M3000BB1020:
         await self.get_device_info()
         inputs = await self.get_inputs()
         outputs = await self.get_outputs()
+        comparison_time = self._local_now()
+        device_time = None
+        try:
+            device_time = await self.get_time()
+        except InvalidM3000ClockPayload:
+            _LOGGER.warning(
+                "M3000-BB-1020 returned invalid device clock fields; "
+                "attempting backend-time correction",
+                exc_info=True,
+            )
+            await self._async_attempt_clock_sync()
+        except ModbusException:
+            _LOGGER.warning(
+                "Unable to read M3000-BB-1020 device clock; correction skipped",
+                exc_info=True,
+            )
+        else:
+            await self._async_correct_clock(device_time, comparison_time)
         return {
             "inputs": {item["input_number"]: item for item in inputs},
             "outputs": {item["out_number"]: item for item in outputs},
-            "time": await self.get_time(),
+            "time": device_time,
         }
 
-    async def async_post_first_refresh(self, snapshot: dict[str, Any]) -> bool:
-        """Synchronize a lost or substantially drifting clock at most once."""
-        if self._clock_sync_evaluated:
+    async def _async_correct_clock(
+        self,
+        device_time: datetime,
+        comparison_time: datetime,
+    ) -> bool:
+        """Correct a valid device wall clock only when drift exceeds tolerance."""
+        device_wall_time = device_time.replace(tzinfo=None, microsecond=0)
+        backend_wall_time = comparison_time.replace(tzinfo=None, microsecond=0)
+        drift = abs((device_wall_time - backend_wall_time).total_seconds())
+        if drift <= self.CLOCK_SYNC_MAX_DRIFT_SECONDS:
             return False
-        self._clock_sync_evaluated = True
+        return await self._async_attempt_clock_sync(drift=drift)
 
-        device_time = snapshot.get("time")
-        if not isinstance(device_time, datetime):
+    async def _async_attempt_clock_sync(self, *, drift: float | None = None) -> bool:
+        """Write backend time unless a previous failed write is cooling down."""
+        monotonic_now = self._monotonic_now()
+        if (
+            self._last_failed_clock_sync_attempt is not None
+            and monotonic_now - self._last_failed_clock_sync_attempt
+            < self.CLOCK_SYNC_RETRY_COOLDOWN_SECONDS
+        ):
             return False
-
-        current_time = self._local_now()
-        device_wall_time = device_time.replace(tzinfo=None)
-        current_wall_time = current_time.replace(tzinfo=None)
-        drift = abs((device_wall_time - current_wall_time).total_seconds())
-        if drift < self.CLOCK_SYNC_MAX_DRIFT_SECONDS:
+        try:
+            await self.set_time()
+        except (ModbusException, OSError, TimeoutError):
+            self._last_failed_clock_sync_attempt = self._monotonic_now()
+            _LOGGER.warning(
+                "Unable to synchronize M3000-BB-1020 device clock%s; "
+                "retry suppressed for %s seconds",
+                "" if drift is None else f" (drift {drift:.0f} seconds)",
+                self.CLOCK_SYNC_RETRY_COOLDOWN_SECONDS,
+                exc_info=True,
+            )
             return False
-
-        await self.set_time(current_time)
+        self._last_failed_clock_sync_attempt = None
         return True
 
     @staticmethod
+    def _monotonic_now() -> float:
+        """Return event-loop monotonic time for failed-write cooldowns."""
+        return asyncio.get_running_loop().time()
+
+    @staticmethod
     def _local_now() -> datetime:
-        """Return the same local wall-clock source used by manual clock writes."""
-        return datetime.now()
+        """Return Home Assistant's configured local wall-clock time."""
+        return dt_util.now()
 
     async def get_device_info(self) -> list:
         """Получает информацию о текущем контроллере."""
@@ -372,22 +419,21 @@ class M3000BB1020:
 
     async def set_time(self, value: datetime | None = None) -> datetime:
         """Устанавливает дату и время в контроллер."""
-        time_values: list = []
-        value = value or datetime.now()
-        for num in range(6):
-            time_values.append(value.timetuple()[num])
-        response = await self.attr_client.write_registers(
-            address=60007, values=time_values, device_id=self.attr_device_id
-        )
-        validate_fc16_response(
-            response,
-            address=60007,
-            count=len(time_values),
-            device_id=self.attr_device_id,
-            operation="set M3000-BB-1020 time",
-        )
-        self.attr_init_time = value
-        return self.attr_init_time
+        async with self._clock_write_lock:
+            value = value or self._local_now()
+            time_values = list(value.timetuple()[:6])
+            response = await self.attr_client.write_registers(
+                address=60007, values=time_values, device_id=self.attr_device_id
+            )
+            validate_fc16_response(
+                response,
+                address=60007,
+                count=len(time_values),
+                device_id=self.attr_device_id,
+                operation="set M3000-BB-1020 time",
+            )
+            self.attr_init_time = value
+            return self.attr_init_time
 
     async def get_time(self) -> datetime:
         """Получает дату и время установленные в контроллере."""
@@ -398,11 +444,11 @@ class M3000BB1020:
             response, 6, "read M3000-BB-1020 time", expected_function=3
         )
         try:
-            return datetime(*registers).replace(
-                tzinfo=timezone(timedelta(hours=Config.TIME_ZONE)), microsecond=0
-            )
+            return datetime(*registers, microsecond=0)
         except ValueError as exc:
-            raise ModbusException("Invalid M3000-BB-1020 clock payload") from exc
+            raise InvalidM3000ClockPayload(
+                "Invalid M3000-BB-1020 clock payload"
+            ) from exc
 
     async def get_input(self, input: int) -> dict[str, Any]:
         """Получает состояние одного входа контроллера."""

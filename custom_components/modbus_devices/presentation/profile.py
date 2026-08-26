@@ -18,6 +18,7 @@ class PresentationRole:
     key: str
     section: PresentationSection = PresentationSection.PRIMARY
     entity_domain: str | None = None
+    match_unique_id_suffix: bool = False
 
 
 @dataclass(frozen=True, slots=True)

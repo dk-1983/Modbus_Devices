@@ -127,11 +127,12 @@ def entity(
     state: str | None = None,
     name: str | None = None,
     original_name: str | None = None,
+    unique_id: str | None = None,
 ) -> Entity:
     display_name = original_name or role.replace("_", " ").title()
     return Entity(
         entity_id or f"{domain}.{device.id}_{role}",
-        f"{device.identifier}_{role}",
+        unique_id or f"{device.identifier}_{role}",
         device.id,
         domain,
         disabled_by="user" if disabled else None,
@@ -408,6 +409,114 @@ async def test_kpb_outputs_follow_physical_order(registry_hass):
         "Output 4",
         "Output 5",
         "Output 6",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_m3000_entities_follow_device_time_controls_inputs_order(registry_hass):
+    device = Device("m3000", "m3000-entry", model="M3000-BB-1020")
+    entities = [
+        entity(
+            device,
+            f"input_{number}",
+            entity_id=(
+                f"binary_sensor.m3000_24_volts_{number}"
+                if number <= 6
+                else f"binary_sensor.m3000_220_volts_{number - 6}"
+            ),
+            domain="binary_sensor",
+            original_name=(
+                f"24 volts {number}"
+                if number <= 6
+                else f"220 volts {number - 6}"
+            ),
+            unique_id=f"m3000-serial_input_{number}",
+        )
+        for number in range(12, 0, -1)
+    ]
+    entities.extend(
+        entity(
+            device,
+            str(number),
+            entity_id=f"switch.m3000_relay_{number}",
+            domain="switch",
+            original_name=f"Relay {number}",
+        )
+        for number in range(6, 0, -1)
+    )
+    entities.append(
+        entity(
+            device,
+            "device_time",
+            entity_id="sensor.m3000_device_time",
+            original_name="Device time",
+        )
+    )
+
+    result = await build(registry_hass, device, entities, "M3000BB1020")
+
+    assert result.profile_id == "bolid_m3000_bb_1020"
+    assert [row["name"] for row in result.card["entities"]] == [
+        "Device time",
+        *(f"Relay {number}" for number in range(1, 7)),
+        *(f"24 volts {number}" for number in range(1, 7)),
+        *(f"220 volts {number}" for number in range(1, 7)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_m3000_partial_entities_keep_semantic_relative_order(registry_hass):
+    device = Device("m3000", "m3000-entry", model="M3000-BB-1020")
+    result = await build(
+        registry_hass,
+        device,
+        [
+            entity(
+                device,
+                "input_12",
+                entity_id="binary_sensor.m3000_220_volts_6",
+                domain="binary_sensor",
+                original_name="220 volts 6",
+                unique_id="m3000-serial_input_12",
+            ),
+            entity(
+                device,
+                "input_3",
+                entity_id="binary_sensor.m3000_24_volts_3",
+                domain="binary_sensor",
+                original_name="24 volts 3",
+                unique_id="m3000-serial_input_3",
+            ),
+            entity(
+                device,
+                "2",
+                entity_id="switch.m3000_relay_2",
+                domain="switch",
+                original_name="Relay 2",
+            ),
+            entity(
+                device,
+                "device_time",
+                entity_id="sensor.m3000_device_time",
+                original_name="Device time",
+            ),
+            entity(
+                device,
+                "1",
+                entity_id="switch.m3000_relay_1",
+                domain="switch",
+                original_name="Relay 1",
+                disabled=True,
+            ),
+        ],
+        "M3000BB1020",
+    )
+
+    assert [row["name"] for row in result.card["entities"]] == [
+        "Device time",
+        "Relay 2",
+        "24 volts 3",
+        "220 volts 6",
     ]
 
 

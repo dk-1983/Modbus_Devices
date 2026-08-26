@@ -55,5 +55,12 @@
         "existing_gateway": "Via existing S2000-PP"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "device_time": {
+        "name": "Device time"
+      }
+    }
   }
 }

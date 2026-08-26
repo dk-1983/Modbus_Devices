@@ -55,5 +55,12 @@
         "existing_gateway": "Через существующий С2000-ПП"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "device_time": {
+        "name": "Время прибора"
+      }
+    }
   }
 }
