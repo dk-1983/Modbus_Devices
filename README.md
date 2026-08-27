@@ -31,7 +31,7 @@ Support is model-specific. Selecting a manufacturer does not imply support for e
 
 Version 0.5.0 is a substantial pre-1.0 architecture and workflow milestone. Existing entities remain normal Home Assistant entities and do not require the optional card generator.
 
-## Changes prepared after 0.5.0
+## What's new in 0.5.1
 
 - M3000-BB-1020 polling now reads its documented device-information and clock block in one request, validates protocol responses more strictly, and keeps a drifting or invalid device clock synchronized to Home Assistant time.
 - The former writable M3000 **Clock** datetime entity is removed during setup and replaced by a read-only **Device time** sensor. Automations or dashboards that used the old datetime entity must be updated.
