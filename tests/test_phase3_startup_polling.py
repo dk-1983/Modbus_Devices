@@ -79,16 +79,16 @@ async def test_dn310_local_init_is_io_free_and_first_snapshot_is_three_reads():
 
 
 @pytest.mark.asyncio
-async def test_owen_local_init_is_io_free_and_first_snapshot_reads_eight_channels():
+async def test_owen_local_init_is_io_free_and_first_snapshot_is_one_bulk_read():
     client = CountingClient()
     device = TRM138(client, 1)
 
     await device.data_init()
     assert client.calls == []
 
-    channels = await device.get_chanels()
-    assert len(channels) == 8
-    assert len(client.calls) == 8
+    snapshot = await device.async_get_snapshot()
+    assert set(snapshot["chanels"]) == set(range(1, 9))
+    assert client.calls == [("input", 0, 40)]
 
 
 @pytest.mark.asyncio

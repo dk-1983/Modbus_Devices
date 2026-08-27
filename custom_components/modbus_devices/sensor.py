@@ -213,6 +213,12 @@ class ModBusSensorEntity(
         if channel is None:
             return None
 
+        # A valid Modbus response can still report a device-level channel fault.
+        # Keep the entity available (transport succeeded), but do not publish the
+        # accompanying measurement as a valid state.
+        if channel.get("valid") is False:
+            return None
+
         value = channel.get("value")
 
         if not value or len(value) < 2:

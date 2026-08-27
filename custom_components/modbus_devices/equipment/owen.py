@@ -1,6 +1,7 @@
 """Equipment models manufactured by Owen."""
 
 from datetime import datetime, timedelta, timezone
+import struct
 from typing import Any
 
 from custom_components.modbus_devices.const import Config
@@ -9,6 +10,7 @@ from pymodbus.client import (
     AsyncModbusTcpClient,
     AsyncModbusUdpClient,
 )
+from pymodbus.exceptions import ModbusException
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
@@ -26,8 +28,33 @@ class TRM138:
 
     equipment_manufacturer = "Owen"
     equipment_model = "TRM-138"
+    CHANNEL_COUNT = 8
+    REGISTERS_PER_CHANNEL = 5
+    REGISTER_COUNT = CHANNEL_COUNT * REGISTERS_PER_CHANNEL
+    VALID_DECIMAL_POINTS = frozenset(range(4))
+    STATUS_DESCRIPTIONS = {
+        0: "ok",
+        1: "input_below_range",
+        2: "lba_alarm",
+        3: "internal_error",
+        4: "cold_junction_compensation_error",
+        5: "input_above_range",
+        6: "rtd_below_range",
+        7: "cold_junction_compensation_error",
+        8: "thermocouple_below_range",
+        9: "thermocouple_above_range",
+        10: "processing_sequence_error",
+        11: "sensor_line_break",
+        12: "invalid_configuration",
+        13: "corrected_value_below_range",
+        14: "corrected_value_above_range",
+        15: "critical_device_error",
+        16: "rtd_above_range",
+        57: "invalid_configuration",
+    }
+
     def __init__(self, client, device_id) -> None:
-        """Inicialization variables."""
+        """Initialize the device and its documented FC04 channel map."""
         self.attr_device_id: int = device_id
         self.attr_client: (
             AsyncModbusSerialClient | AsyncModbusTcpClient | AsyncModbusUdpClient | None
@@ -45,33 +72,24 @@ class TRM138:
         self.attr_platforms: list[Platform] = [
             Platform.SENSOR,
         ]
-        self.attr_ch1: dict[str, Any] = {
-            "chanel_number": 1,
-            "chanel_number_view": 1,
-            "chanel_type": "Temperature",
-            "data_type": "input_registers",
-            "address": 0,
-            "address_hex": hex(0x0000),
-            "count": 5,
-            "value": None,
-            "func_mode": [4],
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "icon_c": "mdi:temperature-celsius",
-            "icon_f": "mdi:temperature-fahrenheit",
-            "icon_k": "mdi:temperature-kelvin",
-            "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
-            "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
-            "unut_of_temperature_k": UnitOfTemperature.KELVIN,
+        self._channels = {
+            number: self._channel_description(number)
+            for number in range(1, self.CHANNEL_COUNT + 1)
         }
-        self.attr_ch2: dict[str, Any] = {
-            "chanel_number": 2,
-            "chanel_number_view": 2,
+        for number, channel in self._channels.items():
+            setattr(self, f"attr_ch{number}", channel)
+
+    @classmethod
+    def _channel_description(cls, number: int) -> dict[str, Any]:
+        address = (number - 1) * cls.REGISTERS_PER_CHANNEL
+        return {
+            "chanel_number": number,
+            "chanel_number_view": number,
             "chanel_type": "Temperature",
             "data_type": "input_registers",
-            "address": 5,
-            "address_hex": hex(0x0005),
-            "count": 5,
+            "address": address,
+            "address_hex": hex(address),
+            "count": cls.REGISTERS_PER_CHANNEL,
             "value": None,
             "func_mode": [4],
             "device_class": SensorDeviceClass.TEMPERATURE,
@@ -80,120 +98,7 @@ class TRM138:
             "icon_f": "mdi:temperature-fahrenheit",
             "icon_k": "mdi:temperature-kelvin",
             "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
-            "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
-            "unut_of_temperature_k": UnitOfTemperature.KELVIN,
-        }
-        self.attr_ch3: dict[str, Any] = {
-            "chanel_number": 3,
-            "chanel_number_view": 3,
-            "chanel_type": "Temperature",
-            "data_type": "input_registers",
-            "address": 10,
-            "address_hex": hex(0x000A),
-            "count": 5,
-            "value": None,
-            "func_mode": [4],
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "icon_c": "mdi:temperature-celsius",
-            "icon_f": "mdi:temperature-fahrenheit",
-            "icon_k": "mdi:temperature-kelvin",
-            "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
-            "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
-            "unut_of_temperature_k": UnitOfTemperature.KELVIN,
-        }
-        self.attr_ch4: dict[str, Any] = {
-            "chanel_number": 4,
-            "chanel_number_view": 4,
-            "chanel_type": "Temperature",
-            "data_type": "input_registers",
-            "address": 15,
-            "address_hex": hex(0x000F),
-            "count": 5,
-            "value": None,
-            "func_mode": [4],
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "icon_c": "mdi:temperature-celsius",
-            "icon_f": "mdi:temperature-fahrenheit",
-            "icon_k": "mdi:temperature-kelvin",
-            "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
-            "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
-            "unut_of_temperature_k": UnitOfTemperature.KELVIN,
-        }
-        self.attr_ch5: dict[str, Any] = {
-            "chanel_number": 5,
-            "chanel_number_view": 5,
-            "chanel_type": "Temperature",
-            "data_type": "input_registers",
-            "address": 20,
-            "address_hex": hex(0x0014),
-            "count": 5,
-            "value": None,
-            "func_mode": [4],
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "icon_c": "mdi:temperature-celsius",
-            "icon_f": "mdi:temperature-fahrenheit",
-            "icon_k": "mdi:temperature-kelvin",
-            "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
-            "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
-            "unut_of_temperature_k": UnitOfTemperature.KELVIN,
-        }
-        self.attr_ch6: dict[str, Any] = {
-            "chanel_number": 6,
-            "chanel_number_view": 6,
-            "chanel_type": "Temperature",
-            "data_type": "input_registers",
-            "address": 25,
-            "address_hex": hex(0x0019),
-            "count": 5,
-            "value": None,
-            "func_mode": [4],
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "icon_c": "mdi:temperature-celsius",
-            "icon_f": "mdi:temperature-fahrenheit",
-            "icon_k": "mdi:temperature-kelvin",
-            "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
-            "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
-            "unut_of_temperature_k": UnitOfTemperature.KELVIN,
-        }
-        self.attr_ch7: dict[str, Any] = {
-            "chanel_number": 7,
-            "chanel_number_view": 7,
-            "chanel_type": "Temperature",
-            "data_type": "input_registers",
-            "address": 30,
-            "address_hex": hex(0x001E),
-            "count": 5,
-            "value": None,
-            "func_mode": [4],
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "icon_c": "mdi:temperature-celsius",
-            "icon_f": "mdi:temperature-fahrenheit",
-            "icon_k": "mdi:temperature-kelvin",
-            "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
-            "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
-            "unut_of_temperature_k": UnitOfTemperature.KELVIN,
-        }
-        self.attr_ch8: dict[str, Any] = {
-            "chanel_number": 8,
-            "chanel_number_view": 8,
-            "chanel_type": "Temperature",
-            "data_type": "input_registers",
-            "address": 35,
-            "address_hex": hex(0x0023),
-            "count": 5,
-            "value": None,
-            "func_mode": [4],
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "icon_c": "mdi:temperature-celsius",
-            "icon_f": "mdi:temperature-fahrenheit",
-            "icon_k": "mdi:temperature-kelvin",
-            "unit_of_temperature_c": UnitOfTemperature.CELSIUS,
+            # Keep misspelled legacy keys because entities/configurations may use them.
             "unut_of_temperature_f": UnitOfTemperature.FAHRENHEIT,
             "unut_of_temperature_k": UnitOfTemperature.KELVIN,
         }
@@ -203,7 +108,7 @@ class TRM138:
         await self.get_device_info()
         return True
 
-    async def get_device_info(self) -> list:
+    async def get_device_info(self) -> bool:
         """Получает информацию о текущем контроллере."""
         self.attr_init_time = (datetime.now()).replace(
             tzinfo=timezone(timedelta(hours=Config.TIME_ZONE)),
@@ -217,43 +122,102 @@ class TRM138:
 
     async def get_chanel(self, chanel: int) -> dict[str, Any]:
         """Получает аналоговые данные одного канала контроллера."""
-        attr = getattr(self, f"attr_ch{chanel}")
+        attr = self._get_channel(chanel)
         response = await self.attr_client.read_input_registers(
             address=attr["address"],
             count=attr["count"],
             device_id=self.attr_device_id,
         )
-        attr["value"] = validated_registers(
+        registers = validated_registers(
             response,
             attr["count"],
             f"read TRM-138 channel {chanel}",
             expected_function=4,
         )
-        setattr(self, f"attr_ch{chanel}", attr)
-        return getattr(self, f"attr_ch{chanel}")
+        return self._update_channel(chanel, registers)
 
     async def get_chanels(
         self, chanels: list[int] | None = None
     ) -> list[dict[str, Any]]:
         """Получает аналоговые данные всех или нескольких каналов контроллера."""
-        data: list[dict[str, Any]] = []
-        chanels = (chanels, (list(range(1, 9))))[chanels is None]
-        for chanel in chanels:
-            attr = getattr(self, f"attr_ch{chanel}")
+        selected = list(self._channels) if chanels is None else list(chanels)
+        self._validate_channels(selected)
+        if not selected:
+            return []
+
+        if selected == list(self._channels):
             response = await self.attr_client.read_input_registers(
-                address=attr["address"],
-                count=attr["count"],
+                address=0,
+                count=self.REGISTER_COUNT,
                 device_id=self.attr_device_id,
             )
-            attr["value"] = validated_registers(
+            registers = validated_registers(
                 response,
-                attr["count"],
-                f"read TRM-138 channel {chanel}",
+                self.REGISTER_COUNT,
+                "read TRM-138 channels",
                 expected_function=4,
             )
-            setattr(self, f"attr_ch{chanel}", attr)
-            data.append(getattr(self, f"attr_ch{chanel}"))
-        return data
+            return [
+                self._update_channel(
+                    number,
+                    registers[start : start + self.REGISTERS_PER_CHANNEL],
+                )
+                for number in selected
+                for start in [(number - 1) * self.REGISTERS_PER_CHANNEL]
+            ]
+
+        return [await self.get_chanel(number) for number in selected]
+
+    async def async_get_snapshot(self) -> dict[str, dict[int, dict[str, Any]]]:
+        """Read one coherent FC04 snapshot of all measurement channels."""
+        channels = await self.get_chanels()
+        return {"chanels": {item["chanel_number"]: item for item in channels}}
+
+    def _get_channel(self, number: int) -> dict[str, Any]:
+        self._validate_channels([number])
+        return self._channels[number]
+
+    def _validate_channels(self, channels: list[int]) -> None:
+        unknown = [number for number in channels if number not in self._channels]
+        if unknown:
+            raise ValueError(f"Unknown TRM-138 channels: {unknown}")
+
+    def _update_channel(
+        self, number: int, registers: list[int]
+    ) -> dict[str, Any]:
+        if len(registers) != self.REGISTERS_PER_CHANNEL:
+            raise ModbusException(
+                f"Invalid TRM-138 channel {number} block length: "
+                f"expected {self.REGISTERS_PER_CHANNEL}, got {len(registers)}"
+            )
+        decoded = list(registers)
+        decimal_point = decoded[0]
+        if decimal_point not in self.VALID_DECIMAL_POINTS:
+            raise ModbusException(
+                f"Invalid TRM-138 channel {number} decimal point: {decimal_point}"
+            )
+        integer_value = AsyncModbusSerialClient.convert_from_registers(
+            [decoded[1]], data_type=AsyncModbusSerialClient.DATATYPE.INT16
+        )
+        decoded[1] = integer_value
+        status_code = decoded[2]
+        float_value = struct.unpack(">f", struct.pack(">HH", decoded[3], decoded[4]))[0]
+        channel = {
+            **self._channels[number],
+            # ``value`` is the established entity contract: decimal point, signed
+            # integer, status, then the documented IEEE-754 high/low words.
+            "value": decoded,
+            "raw_registers": list(registers),
+            "decimal_point": decimal_point,
+            "measurement": integer_value / (10**decimal_point),
+            "float_value": float_value,
+            "status_code": status_code,
+            "status": self.STATUS_DESCRIPTIONS.get(status_code, "unknown"),
+            "valid": status_code == 0,
+        }
+        self._channels[number] = channel
+        setattr(self, f"attr_ch{number}", channel)
+        return channel
 
     def __repr__(self) -> str:
         """Output representation information from Owen class."""
