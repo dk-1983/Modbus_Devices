@@ -6,6 +6,10 @@ This audit covers the integration's existing `TRM138` class (the user-facing
 TRM-138/TRM138T target) and the documented measurement snapshot only. It does
 not add regulator, output, configuration, or service operations.
 
+In product-family naming, `T` identifies the transistor-output execution. It
+does not establish a separate Modbus measurement register map, and the current
+integration does not expose those physical outputs.
+
 Authoritative sources:
 
 - [OWEN TRM138 operating manual](https://docs.owen.ru/product/trm138/doc/rukovodstvo-po-ekspluatacii-trm138), especially “Параметры протоколов Овен/Modbus”, “Коды ошибок”, and the decimal-point configuration table.

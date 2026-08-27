@@ -9,7 +9,7 @@ The integration is a local-polling hub for Modbus-compatible equipment from mult
 ## Key features
 
 - Modbus TCP/IP, native Modbus UDP/IP, serial Modbus, and Modbus RTU over UDP connections.
-- Equipment-driven creation of sensor, binary sensor, switch, datetime, and button entities.
+- Equipment-driven creation of sensor, binary sensor, switch, and button entities.
 - Typed equipment variants and topology-dependent capabilities.
 - С2000-ПП gateway support for Orion, С2000-КДЛ, and downstream DPLS equipment.
 - Manual and configuration-assisted gateway mapping.
@@ -31,43 +31,13 @@ Support is model-specific. Selecting a manufacturer does not imply support for e
 
 Version 0.5.0 is a substantial pre-1.0 architecture and workflow milestone. Existing entities remain normal Home Assistant entities and do not require the optional card generator.
 
-## Architecture
+## Changes prepared after 0.5.0
 
-```text
-Manufacturer
-  → Equipment model
-    → Transport or gateway
-      → Resolved mapping
-        → Coordinator snapshot
-          → Home Assistant Device and entities
-```
+- M3000-BB-1020 polling now reads its documented device-information and clock block in one request, validates protocol responses more strictly, and keeps a drifting or invalid device clock synchronized to Home Assistant time.
+- The former writable M3000 **Clock** datetime entity is removed during setup and replaced by a read-only **Device time** sensor. Automations or dashboards that used the old datetime entity must be updated.
+- TRM-138 polling now reads all eight documented FC04 measurement blocks in one coherent request and validates signed values, decimal scaling, IEEE-754 words, and per-channel device status.
 
-Direct equipment is polled over its configured Modbus connection. Gateway-backed Bolid equipment uses an additional mapping layer that separates a physical device identity from the С2000-ПП table rows used to read or control it.
-
-### Bolid Orion and DPLS path
-
-```text
-Home Assistant
-  ← Modbus
-    ← С2000-ПП
-      ← Orion
-        ← С2000-КДЛ
-          ← DPLS device
-```
-
-Radio devices remain individual KDL-visible DPLS objects:
-
-```text
-radio device ↔ С2000Р-АРР125
-             → KDL-visible DPLS object
-             → С2000-КДЛ
-             → С2000-ПП
-             → Home Assistant
-```
-
-The radio expander is not added to a radio device's stable identity. Within one gateway, a downstream identity is based on the KDL Orion address and the device's DPLS address.
-
-Home Assistant Device Registry also records the physical topology. Each downstream instrument remains its own Device, and its entities belong to that Device; the Device page shows that it is connected through the corresponding С2000-ПП. Identical downstream addresses behind different gateways remain separate. Directly connected devices do not receive an artificial parent.
+These changes do not add M3000 pulse-counter, PWM, relay-logic, safe-state, network-configuration, service-command, or packed-register capabilities. TRM-138 remains read-only: output control, regulator settings, and configuration/service writes are not exposed.
 
 ## Supported transports
 
@@ -90,7 +60,7 @@ The canonical registry in the current source tree contains **30 models: Bolid 27
 
 | Manufacturer | Model | Connection / gateway | Home Assistant entities / capabilities | Notes |
 |---|---|---|---|---|
-| Bolid | [M3000-BB-1020](https://bolid.ru/production/disp/inout-modules/m3000_vv_1020.html) | Direct Modbus | 12 binary inputs, 6 relay switches, device clock | Runtime service information is read from the device |
+| Bolid | [M3000-BB-1020](https://bolid.ru/production/disp/inout-modules/m3000_vv_1020.html) | Direct Modbus | 12 binary inputs, 6 relay switches, read-only device-time sensor | Device information and clock are read together; Home Assistant time corrects invalid or drifting device time. Pulse counters, PWM, relay logic, safe states, network configuration, and service commands are not exposed |
 | Bolid | [С2000-ПП](https://bolid.ru/production/s2000-pp.html) | Direct Modbus | Gateway diagnostic binary sensors | Orion master mode/communication, enclosure tamper, and power fault; device service information where exposed |
 | Bolid | С2000-КПБ | С2000-ПП → Orion | Configured output switches and multistate sensors | Up to 6 outputs/circuit states, 2 technological inputs, and device state; entities follow the configured subset |
 | Bolid | С2000-2 | С2000-ПП → Orion | Read-only device and configured input/access states | Direct Orion model; no door-control commands are published |
@@ -149,7 +119,7 @@ The DN310 implementation is registered and covered by repository tests, but comp
 
 | Manufacturer | Model | Connection / gateway | Home Assistant entities / capabilities | Notes |
 |---|---|---|---|---|
-| Owen | [TRM-138](https://owen.ru/product/trm138) | Direct Modbus | 8 temperature sensors | Current implementation reads the eight configured measurement channels |
+| Owen | [TRM-138](https://owen.ru/product/trm138) | Direct Modbus | 8 read-only measurement channels | One coherent FC04 snapshot covers all channels; signed and scaled values and channel status are validated. The `T` suffix denotes a transistor-output family variant, not a different measurement register map; output, regulator, and configuration writes are not exposed |
 | Owen | [ПЛК110-24.60.К-М](https://files.owen.ru/catalog/product.php?cat=plc&prod=plk110_m02&sub=programmiruemie_logicheskie_kontrolleri) | Direct Modbus | 36 binary inputs and 24 output switches | User-defined CODESYS Modbus bit layout; configurable DI area, base/stride, and DO base/stride |
 
 ## Equipment examples
@@ -166,6 +136,37 @@ The photographs below are local, optimized copies from official manufacturer pro
   <img src="pictures/equipment/s2000_dz.png" alt="С2000-ДЗ" width="38%">
 </p>
 
+## Installation
+
+Modbus Devices is listed in the default HACS integration catalog. Manual installation remains available when HACS is not used.
+
+### HACS
+
+1. Open HACS and search for **Modbus Devices**.
+2. Download the integration.
+3. Restart Home Assistant.
+4. Add **Modbus Devices** through **Settings → Devices & services**.
+
+If the integration does not appear in search, refresh HACS data first. Adding `https://github.com/dk-1983/Modbus_Devices` as a custom repository in the **Integration** category is a fallback, not normally required.
+
+Published packages and version history are available on the [Releases page](https://github.com/dk-1983/Modbus_Devices/releases).
+
+### Manual installation
+
+Copy:
+
+```text
+custom_components/modbus_devices
+```
+
+to:
+
+```text
+/config/custom_components/modbus_devices
+```
+
+Restart Home Assistant and add **Modbus Devices** through **Settings → Devices & services**.
+
 ## Adding equipment
 
 Configuration is UI-only. Open **Settings → Devices & services → Modbus Devices** and select **Add hub**. There are two distinct paths:
@@ -173,7 +174,9 @@ Configuration is UI-only. Open **Settings → Devices & services → Modbus Devi
 - choose a Modbus transport for a device with its own direct connection;
 - choose **Via existing S2000-PP** for Bolid equipment reached through a С2000-ПП that has already been added and is currently loaded.
 
-### Direct Modbus device
+### Option 1 — Direct Modbus device
+
+Use this path when the equipment has its own Modbus connection.
 
 1. Select **ModBus TCP/IP**, **ModBus UDP/IP**, **Modbus RTU over UDP**, or **SerialPort**.
 2. Select the manufacturer and the physical equipment model.
@@ -190,9 +193,15 @@ Configuration is UI-only. Open **Settings → Devices & services → Modbus Devi
 
 Home Assistant then creates the Device and the entity set implemented for that model.
 
-<p align="center"><img src="pictures/config-flow/MD_menu_result.jpg" alt="Direct M3000-BB-1020 device and its entities" width="92%"></p>
+<p align="center"><img src="pictures/config-flow/MD_menu_result.jpg" alt="Created M3000-BB-1020 Home Assistant Device with its controls and sensors" width="92%"></p>
 
-### First add the С2000-ПП gateway
+For directly connected equipment, setup is now complete. If Bolid equipment is reached through an Orion/DPLS network and С2000-ПП, use the second path instead.
+
+### Option 2 — Equipment via existing С2000-ПП
+
+This path creates a separate Home Assistant Device for each supported Bolid instrument behind an existing С2000-ПП.
+
+#### Step 1 — Add the С2000-ПП gateway once
 
 **Via existing S2000-PP is available only when at least one direct С2000-ПП Config Entry is loaded.** Add the gateway like a normal direct device:
 
@@ -203,7 +212,7 @@ Home Assistant then creates the Device and the entity set implemented for that m
 
 This entry owns the physical Modbus client and represents the gateway itself, including its diagnostic entities.
 
-### Add a device via the existing С2000-ПП
+#### Steps 2–5 — Add and identify a downstream device
 
 1. Select **Add hub** again and choose **Via existing S2000-PP**.
 
@@ -234,7 +243,7 @@ For an Orion device that is not behind a KDL/DPLS loop, **Orion address** means 
 
 5. Select the mapping source and finish either configuration-assisted or manual mapping as described below.
 
-### Configuration-assisted and discovered mapping
+#### Step 6A — Configuration-assisted mapping
 
 Automatic/configuration-assisted mapping reads the zone and relay configuration tables from the selected С2000-ПП and offers suitable discovered mappings. The user explicitly selects the required discovered object; nothing is silently imported. Objects already added through this gateway are excluded from the choices, while the remaining objects can be added later by repeating the flow.
 
@@ -242,13 +251,13 @@ After the address is selected, the integration filters the table rows using the 
 
 This is configuration discovery, **not physical hardware discovery**: С2000-ПП tables do not reliably identify every physical model. The user must always select the actual downstream equipment model. Read tables are cached and are not fetched on every normal poll.
 
-### Manual mapping
+#### Step 6B — Manual mapping
 
 Manual mapping is useful when discovery cannot produce one exact result or when you already know the С2000-ПП table numbers. Enter the Orion address when requested, then map each required equipment capability to its configured С2000-ПП zone/relay table row. Some models use the detailed form with object kind, local object number, table number, zone type, and partition values; capability-based models ask for a capability and its table number. The integration still validates the completed mapping against the selected model.
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step6_gateway_manual_mapping.jpg" alt="Current manual capability mapping form" width="78%"></p>
 
-### One connection, multiple downstream devices
+#### Step 7 — Add more downstream devices
 
 A downstream Config Entry does **not** need or accept separate Serial/TCP/UDP settings. It stores a reference to the selected С2000-ПП entry and shares that gateway's already-open, serialized Modbus client. Add each downstream device with **Add hub → Via existing S2000-PP**, select the same gateway, and give it its own Orion/DPLS identity and mapping.
 
@@ -288,6 +297,44 @@ After saving, Lovelace stores a native `type: entities` card with its current en
 
 The saved list is intentionally static. If the physical device later gains a capability or a previously disabled entity is enabled, an existing card does not have to add a new row automatically. Edit the native card manually or run **Add card → Modbus Device** again to generate a fresh card.
 
+## Architecture
+
+```text
+Manufacturer
+  → Equipment model
+    → Transport or gateway
+      → Resolved mapping
+        → Coordinator snapshot
+          → Home Assistant Device and entities
+```
+
+Direct equipment is polled over its configured Modbus connection. Gateway-backed Bolid equipment uses an additional mapping layer that separates a physical device identity from the С2000-ПП table rows used to read or control it.
+
+### Bolid Orion and DPLS path
+
+```text
+Home Assistant
+  ← Modbus
+    ← С2000-ПП
+      ← Orion
+        ← С2000-КДЛ
+          ← DPLS device
+```
+
+Radio devices remain individual KDL-visible DPLS objects:
+
+```text
+radio device ↔ С2000Р-АРР125
+             → KDL-visible DPLS object
+             → С2000-КДЛ
+             → С2000-ПП
+             → Home Assistant
+```
+
+The radio expander is not added to a radio device's stable identity. Within one gateway, a downstream identity is based on the KDL Orion address and the device's DPLS address.
+
+Home Assistant Device Registry also records the physical topology. Each downstream instrument remains its own Device, and its entities belong to that Device; the Device page shows that it is connected through the corresponding С2000-ПП. Identical downstream addresses behind different gateways remain separate. Directly connected devices do not receive an artificial parent.
+
 ## Modbus RTU over UDP
 
 This production transport supports FC01, FC02, FC03, FC04, FC05, FC06, and FC16. It uses one persistent UDP socket, a fixed local UDP port, split-datagram accumulation, timeout handling, CRC validation, and source/slave/function validation. Requests pass through the same per-client serialization layer as the other transports.
@@ -316,36 +363,6 @@ RTU-over-UDP is implemented and covered by automated tests. Live packet capture 
 - **RTU-over-UDP static peer:** make the configured gateway destination port equal to the integration's local UDP port and verify the optional bind address belongs to the Home Assistant host.
 - **Serial connection:** verify baud rate, byte size, parity, stop bits, wiring, and slave ID.
 - **Entity unavailable after a response:** a timeout, malformed frame, wrong source/slave/function, CRC error, or invalid payload is rejected deliberately. Fix the transport/device configuration; do not disable validation.
-
-## Installation
-
-This repository must currently be installed as a **HACS custom repository** or manually. It is not documented as part of the HACS Default repository list.
-
-### HACS custom repository
-
-1. Open HACS and its custom repositories dialog.
-2. Add `https://github.com/dk-1983/Modbus_Devices` with category **Integration**.
-3. Find and install **Modbus Devices**.
-4. Restart Home Assistant.
-5. Add the integration from **Settings → Devices & services**.
-
-See the [project releases](https://github.com/dk-1983/Modbus_Devices/releases) for published packages and version history.
-
-### Manual installation
-
-Copy:
-
-```text
-custom_components/modbus_devices
-```
-
-to:
-
-```text
-/config/custom_components/modbus_devices
-```
-
-Restart Home Assistant, then add **Modbus Devices** from **Settings → Devices & services**.
 
 ## Limitations and boundaries
 

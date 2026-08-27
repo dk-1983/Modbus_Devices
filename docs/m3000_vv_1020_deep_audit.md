@@ -62,6 +62,12 @@ coverage, even when the equivalent sparse register is already documented.
 
 ## Home Assistant exposure decision
 
+The runtime removes the legacy writable datetime entity with unique ID
+`<entry_id>_clock_1` and exposes the clock as the read-only sensor
+`<entry_id>_device_time`. This is an intentional safety migration, but existing
+automations and dashboards referencing the former entity require user updates.
+The six relay switches and twelve binary-input entity identities are unchanged.
+
 ### Safe/useful to add after separate review
 
 - Read-only pulse counters 1..12. They are meaningful HA measurements, but
