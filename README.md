@@ -39,6 +39,16 @@ Version 0.5.0 is a substantial pre-1.0 architecture and workflow milestone. Exis
 
 These changes do not add M3000 pulse-counter, PWM, relay-logic, safe-state, network-configuration, service-command, or packed-register capabilities. TRM-138 remains read-only: output control, regulator settings, and configuration/service writes are not exposed.
 
+## What's new in 0.6.0
+
+- Runtime architecture is aligned with current Home Assistant 2026.10 APIs while retaining the existing configuration workflow and stable entity and device identities.
+- Missing binary-sensor and switch values are now reported as `unknown` instead of incorrectly appearing `off`; real `off` and `on` values are unchanged, and transport failures still make coordinator entities unavailable.
+- Config Entry setup and rollback use clearer resource ownership: direct entries close their own Modbus client, while equipment behind С2000-ПП continues to share the parent gateway client without closing it from a child entry.
+- Internal runtime state and DeviceInfo construction are smaller and more consistent, with direct parent Config Entry lookup and more efficient reconciliation of optimistic writes with in-flight polling snapshots.
+- The read-only M3000 **Device time** sensor and automatic RTC synchronization remain available. No Config Entry migration or entity-ID changes are required for 0.6.0.
+
+Version 0.6.0 is an architecture, compatibility, and reliability release. It does not add new equipment models or device capabilities, and the optional native Entities-card generator workflow is unchanged.
+
 ## Supported transports
 
 | Transport | Configuration |
@@ -392,7 +402,7 @@ equipment class
 
 One physical model is normally represented by one equipment class. Small reusable bases provide common protocol mechanics without merging distinct physical devices. Changes should preserve persisted Config Entries, stable device identifiers, entity unique IDs, and existing mapping serialization whenever possible.
 
-The runtime uses typed `entry.runtime_data`, coordinator-owned polling, grouped reads where supported, a `SerializedModbusClient` per connection, common strict Modbus response validation, and explicit manufacturer/equipment registries.
+The runtime keeps only the client, coordinator, and client-ownership flag in typed `entry.runtime_data`. The coordinator owns the equipment reference and polling snapshot. Direct entries own their serialized client; downstream С2000-ПП entries borrow the parent entry's serialized client. Grouped reads where supported, common strict Modbus response validation, and explicit manufacturer/equipment registries remain shared infrastructure.
 
 ## Validation and quality
 
