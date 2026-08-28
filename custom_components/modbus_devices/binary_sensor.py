@@ -120,13 +120,13 @@ class ModBusBinarySensorEntity(
         )
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return sensor state."""
 
         data = self.coordinator.data
 
         if not data:
-            return False
+            return None
 
         inputs = data.get("inputs", {})
 
@@ -135,7 +135,7 @@ class ModBusBinarySensorEntity(
         )
 
         if input_state is None:
-            return False
+            return None
 
         return input_state["state"]
 

@@ -68,7 +68,6 @@ class TRM138:
         self.attr_init_time: datetime | None = None
         self.attr_description: str = "Measuring regulator"
         self.attr_secret: str | None = None
-        self.attr_clock_iter: list[int] = list(range(1, 2))
         self.attr_platforms: list[Platform] = [
             Platform.SENSOR,
         ]

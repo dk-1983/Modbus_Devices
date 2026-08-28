@@ -126,13 +126,13 @@ class ModBusSwitchEntity(
         return outputs.get(self._output_number)
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return switch state."""
 
         output = self.current_output
 
         if output is None:
-            return False
+            return None
 
         return output["state"]
 

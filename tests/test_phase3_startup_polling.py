@@ -6,15 +6,16 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+import custom_components.modbus_devices as integration
 from custom_components.modbus_devices.binary_sensor import async_setup_entry as setup_binary
 from custom_components.modbus_devices.button import async_setup_entry as setup_button
 from custom_components.modbus_devices.const import Config
-from custom_components.modbus_devices.datetime import async_setup_entry as setup_datetime
 from custom_components.modbus_devices.equipment.bolid import C2000KPB, M3000BB1020, S2000PP
 from custom_components.modbus_devices.equipment.dyna_drive import DN310
 from custom_components.modbus_devices.equipment.owen import TRM138
 from custom_components.modbus_devices.sensor import async_setup_entry as setup_sensor
 from custom_components.modbus_devices.switch import async_setup_entry as setup_switch
+from homeassistant.const import Platform
 
 
 class Response:
@@ -108,6 +109,52 @@ async def test_m3000_first_snapshot_owns_all_startup_io_without_clock_write():
 
 
 @pytest.mark.asyncio
+async def test_m3000_snapshot_sensor_and_legacy_clock_cleanup_are_one_path(
+    monkeypatch,
+):
+    """Keep RTC display while removing only the former writable datetime entity."""
+    client = CountingClient()
+    device = M3000BB1020(client, 1)
+    device._local_now = lambda: datetime(2026, 1, 2, 3, 4, 5)
+    await device.data_init()
+    snapshot = await device.async_get_snapshot()
+    coordinator = SimpleNamespace(
+        data=snapshot,
+        last_update_success=True,
+        async_add_listener=Mock(return_value=Mock()),
+    )
+    entry = SimpleNamespace(
+        entry_id="m3000-entry",
+        options={},
+        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+    )
+    added = []
+
+    await setup_sensor(object(), entry, lambda entities: added.extend(entities))
+
+    device_time = next(
+        entity for entity in added if entity.unique_id.endswith("_device_time")
+    )
+    assert device_time.unique_id == "m3000-entry_device_time"
+    assert device_time.native_value == "2026-01-02 03:04:05"
+
+    registry = SimpleNamespace(
+        async_get_entity_id=Mock(return_value="datetime.m3000_clock"),
+        async_remove=Mock(),
+    )
+    monkeypatch.setattr(integration.er, "async_get", lambda _hass: registry)
+    integration._remove_legacy_clock_control(object(), entry, device)
+
+    registry.async_get_entity_id.assert_called_once_with(
+        Platform.DATETIME,
+        Config.DOMAIN,
+        "m3000-entry_clock_1",
+    )
+    registry.async_remove.assert_called_once_with("datetime.m3000_clock")
+    assert Platform.DATETIME not in device.attr_platforms
+
+
+@pytest.mark.asyncio
 async def test_s2000pp_first_snapshot_reads_service_and_diagnostics_once():
     client = CountingClient()
     device = S2000PP(client, 1)
@@ -138,7 +185,6 @@ async def test_bolid_downstream_local_init_validates_mapping_without_polling():
         (setup_binary, {"inputs": {}}, {}),
         (setup_sensor, {"chanels": {}}, {}),
         (setup_switch, {"outputs": {}}, {}),
-        (setup_datetime, {"time": None}, {"attr_clock_iter": []}),
         (setup_button, {}, {}),
     ],
 )
@@ -170,7 +216,6 @@ async def test_platform_setup_uses_snapshot_or_static_descriptions_without_io(
 @pytest.mark.asyncio
 async def test_all_platforms_resolve_one_shared_entry_runtime_object():
     device = SimpleNamespace(
-        attr_clock_iter=[],
         get_inputs=AsyncMock(),
         get_outputs=AsyncMock(),
         get_chanels=AsyncMock(),
@@ -184,7 +229,6 @@ async def test_all_platforms_resolve_one_shared_entry_runtime_object():
         setup_sensor,
         setup_binary,
         setup_switch,
-        setup_datetime,
         setup_button,
     ):
         await setup(hass, entry, lambda _entities: None)

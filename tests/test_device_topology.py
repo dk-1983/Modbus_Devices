@@ -9,7 +9,6 @@ from homeassistant.helpers.entity import EntityCategory
 from custom_components.modbus_devices.binary_sensor import ModBusBinarySensorEntity
 from custom_components.modbus_devices.button import ModBusCommandButtonEntity
 from custom_components.modbus_devices.const import Config
-from custom_components.modbus_devices.datetime import ModBusDevicesDateTime
 from custom_components.modbus_devices.device_info import via_device_for_entry
 from custom_components.modbus_devices.equipment.bolid import (
     C2000KPB,
@@ -301,9 +300,51 @@ def test_all_entity_platform_device_info_uses_the_same_parent() -> None:
             entry,
             {"button_id": "command", "name": "Command", "command": "run"},
         ),
-        ModBusDevicesDateTime(coord, device, entry, 1),
     )
 
     assert {entity.device_info["via_device"] for entity in entities} == {
         (Config.DOMAIN, "gateway-1")
     }
+
+
+def test_missing_binary_and_switch_snapshot_values_are_unknown() -> None:
+    """A successful partial snapshot must not turn missing values into false."""
+    device = S2000PP(None, 1)
+    entry = Entry("gateway-1")
+    empty_snapshot = coordinator(device, {"inputs": {}, "outputs": {}})
+
+    binary = ModBusBinarySensorEntity(
+        empty_snapshot, device, entry, device.attr_in1
+    )
+    switch = ModBusSwitchEntity(
+        empty_snapshot,
+        device,
+        entry,
+        {
+            "out_number": 1,
+            "out_number_view": 1,
+            "out_type": "Output",
+            "device_class": None,
+        },
+    )
+
+    assert binary.is_on is None
+    assert switch.is_on is None
+
+    empty_snapshot.data = {
+        "inputs": {1: {"state": False}},
+        "outputs": {1: {"state": False}},
+    }
+    assert binary.is_on is False
+    assert switch.is_on is False
+
+    empty_snapshot.data = {
+        "inputs": {1: {"state": True}},
+        "outputs": {1: {"state": True}},
+    }
+    assert binary.is_on is True
+    assert switch.is_on is True
+
+    empty_snapshot.last_update_success = False
+    assert binary.available is False
+    assert switch.available is False
