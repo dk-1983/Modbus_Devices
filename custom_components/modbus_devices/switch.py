@@ -5,12 +5,10 @@ from __future__ import annotations
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import Config
-from .device_info import via_device_for_entry
+from .device_info import device_info_for_entry
 from .runtime import ModbusDevicesConfigEntry
 
 async def async_setup_entry(
@@ -21,8 +19,8 @@ async def async_setup_entry(
     """Set up Modbus switch entities."""
 
     runtime = entry.runtime_data
-    device = runtime.device
     coordinator = runtime.coordinator
+    device = coordinator.device
 
     entities = []
 
@@ -86,36 +84,7 @@ class ModBusSwitchEntity(
 
         self._attr_device_class = output["device_class"]
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (
-                    Config.DOMAIN,
-                    getattr(device, "attr_device_identifier", None)
-                    or self._entry.entry_id,
-                ),
-            },
-            manufacturer=device.attr_manufactures_name,
-            model=device.attr_model_name,
-            name=device.attr_description,
-            hw_version=(
-                None
-                if device.attr_hardware_version is None
-                else str(device.attr_hardware_version)
-            ),
-            sw_version=(
-                None
-                if device.attr_software_version is None
-                else str(device.attr_software_version)
-            ),
-            serial_number=device.attr_serial_number,
-            via_device=via_device_for_entry(entry),
-        )
-
-    @property
-    def available(self) -> bool:
-        """Return entity availability."""
-
-        return self.coordinator.last_update_success
+        self._attr_device_info = device_info_for_entry(device, entry)
 
     @property
     def current_output(self) -> dict | None:

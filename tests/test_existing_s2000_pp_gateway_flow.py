@@ -58,6 +58,9 @@ class FakeHass:
         self.data = {}
         self._entries = list(entries)
         self.config_entries = SimpleNamespace(
+            async_get_entry=lambda entry_id: next(
+                (entry for entry in self._entries if entry.entry_id == entry_id), None
+            ),
             async_entries=lambda _domain: list(self._entries),
             async_update_entry=Mock(),
             async_forward_entry_setups=AsyncMock(),
@@ -362,6 +365,9 @@ async def test_child_setup_reuses_gateway_client_and_child_unload_does_not_close
         },
     )
     hass = FakeHass([gateway, child])
+    hass.config_entries.async_entries = Mock(
+        side_effect=AssertionError("setup scanned all config entries")
+    )
 
     class Device:
         required_gateway = GatewayType.S2000_PP
@@ -383,7 +389,11 @@ async def test_child_setup_reuses_gateway_client_and_child_unload_does_not_close
         async_config_entry_first_refresh=AsyncMock(), data={}
     )
     monkeypatch.setattr(integration, "get_class", lambda *_args: Device)
-    monkeypatch.setattr(integration, "ModbusDeviceCoordinator", lambda **_kwargs: coordinator)
+    def coordinator_factory(**kwargs):
+        coordinator.device = kwargs["device"]
+        return coordinator
+
+    monkeypatch.setattr(integration, "ModbusDeviceCoordinator", coordinator_factory)
     connect = AsyncMock(side_effect=AssertionError("child opened a connection"))
     monkeypatch.setattr(integration, "connect_modbus", connect)
 

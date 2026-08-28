@@ -7,8 +7,6 @@ from dataclasses import dataclass
 import logging
 import socket
 import struct
-from typing import Any
-
 from pymodbus.exceptions import ModbusException
 
 _LOGGER = logging.getLogger(__name__)

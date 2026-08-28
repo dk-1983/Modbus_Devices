@@ -9,7 +9,6 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
 )
@@ -17,9 +16,8 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
 
-from .const import Config
 from .coordinator import ModbusDeviceCoordinator
-from .device_info import via_device_for_entry
+from .device_info import device_info_for_entry
 from .runtime import ModbusDevicesConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,8 +31,8 @@ async def async_setup_entry(
     """Set up binary sensors."""
 
     runtime = entry.runtime_data
-    device = runtime.device
     coordinator = runtime.coordinator
+    device = coordinator.device
 
     entities = []
 
@@ -94,30 +92,7 @@ class ModBusBinarySensorEntity(
 
         self._attr_device_class = input_data["device_class"]
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (
-                    Config.DOMAIN,
-                    getattr(device, "attr_device_identifier", None)
-                    or self._entry.entry_id,
-                ),
-            },
-            manufacturer=device.attr_manufactures_name,
-            model=device.attr_model_name,
-            name=device.attr_description,
-            hw_version=(
-                None
-                if device.attr_hardware_version is None
-                else str(device.attr_hardware_version)
-            ),
-            sw_version=(
-                None
-                if device.attr_software_version is None
-                else str(device.attr_software_version)
-            ),
-            serial_number=device.attr_serial_number,
-            via_device=via_device_for_entry(entry),
-        )
+        self._attr_device_info = device_info_for_entry(device, entry)
 
     @property
     def is_on(self) -> bool | None:
@@ -138,12 +113,6 @@ class ModBusBinarySensorEntity(
             return None
 
         return input_state["state"]
-
-    @property
-    def available(self) -> bool:
-        """Return availability."""
-
-        return self.coordinator.last_update_success
 
     @property
     def extra_state_attributes(self) -> dict:

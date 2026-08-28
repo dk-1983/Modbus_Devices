@@ -17,10 +17,6 @@ from custom_components.modbus_devices.equipment.equipment import (
     get_equipment_classes_by_manufacturer,
     get_equipment_display_name,
 )
-from custom_components.modbus_devices.equipment.owen import (
-    PLC110_24_60_K_M,
-    TRM138,
-)
 from custom_components.modbus_devices.equipment.dyna_drive import DN310
 from custom_components.modbus_devices.manufacturer import (
     MANUFACTURERS,

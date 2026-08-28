@@ -140,11 +140,21 @@ class ModbusDeviceCoordinator(
             self._pending_write_patches.items()
         ):
             if generation > update_generation:
-                patched = self._copy_and_patch(data, path, value)
-                data.clear()
-                data.update(patched)
+                self._patch_in_place(data, path, value)
             else:
                 self._pending_write_patches.pop(path, None)
+
+    @staticmethod
+    def _patch_in_place(data: dict, path: tuple, value: object) -> None:
+        """Patch a newly fetched snapshot without repeatedly copying it."""
+        current = data
+        for key in path[:-1]:
+            child = current.get(key)
+            if not isinstance(child, dict):
+                child = {}
+                current[key] = child
+            current = child
+        current[path[-1]] = value
 
     @staticmethod
     def _copy_and_patch(data: dict, path: tuple, value: object) -> dict:

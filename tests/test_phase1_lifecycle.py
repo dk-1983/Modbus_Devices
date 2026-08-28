@@ -40,6 +40,9 @@ class FakeHass:
     def __init__(self, entries=()):
         self.data = {}
         self.config_entries = SimpleNamespace(
+            async_get_entry=lambda entry_id: next(
+                (entry for entry in entries if entry.entry_id == entry_id), None
+            ),
             async_entries=lambda _domain: list(entries),
             async_update_entry=Mock(),
             async_forward_entry_setups=AsyncMock(),
@@ -387,6 +390,7 @@ async def test_setup_first_refresh_platform_forward_unload_and_reload(monkeypatc
 
     class Coordinator:
         def __init__(self, hass, device):
+            self.device = device
             self.async_config_entry_first_refresh = AsyncMock()
             coordinators.append(self)
 
@@ -400,9 +404,11 @@ async def test_setup_first_refresh_platform_forward_unload_and_reload(monkeypatc
     first_runtime = entry.runtime_data
     assert isinstance(first_runtime, ModbusDevicesRuntimeData)
     assert first_runtime.client is clients[0]
-    assert first_runtime.device is devices[0]
     assert first_runtime.coordinator is coordinators[0]
-    assert first_runtime.gateway_mapping is None
+    assert first_runtime.coordinator.device is devices[0]
+    assert not hasattr(first_runtime, "device")
+    assert not hasattr(first_runtime, "gateway_mapping")
+    assert not hasattr(first_runtime, "gateway_entry_id")
     devices[0].data_init.assert_awaited_once_with()
     coordinators[0].async_config_entry_first_refresh.assert_awaited_once_with()
     hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(entry, [Platform.SENSOR])
@@ -417,7 +423,7 @@ async def test_setup_first_refresh_platform_forward_unload_and_reload(monkeypatc
     assert await integration.async_setup_entry(hass, entry) is True
     assert entry.runtime_data is not first_runtime
     assert entry.runtime_data.client is clients[1]
-    assert entry.runtime_data.device is devices[1]
+    assert entry.runtime_data.coordinator.device is devices[1]
     assert devices[1].attr_unique_id_prefix == "frozen-direct-id"
 
 
@@ -559,6 +565,7 @@ async def test_optional_post_refresh_transport_failure_does_not_block_setup(monk
 
     class Coordinator:
         def __init__(self, hass, device):
+            self.device = device
             self.data = {"time": datetime(2000, 1, 1)}
             self.async_config_entry_first_refresh = AsyncMock()
 
@@ -567,7 +574,7 @@ async def test_optional_post_refresh_transport_failure_does_not_block_setup(monk
     monkeypatch.setattr(integration, "ModbusDeviceCoordinator", Coordinator)
 
     assert await integration.async_setup_entry(hass, entry) is True
-    runtime_device = entry.runtime_data.device
+    runtime_device = entry.runtime_data.coordinator.device
     runtime_device.async_post_first_refresh.assert_awaited_once_with(
         {"time": datetime(2000, 1, 1)}
     )
@@ -578,10 +585,11 @@ async def test_optional_post_refresh_transport_failure_does_not_block_setup(monk
 async def test_binary_sensor_platform_uses_first_refresh_snapshot_without_io():
     device = SimpleNamespace(get_inputs=AsyncMock(side_effect=RuntimeError("input bug")))
     coordinator = Mock(data={"inputs": {}})
+    coordinator.device = device
     hass = SimpleNamespace(data={})
     entry = SimpleNamespace(
         entry_id="entry-1",
-        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+        runtime_data=SimpleNamespace(coordinator=coordinator),
     )
     add_entities = Mock()
 

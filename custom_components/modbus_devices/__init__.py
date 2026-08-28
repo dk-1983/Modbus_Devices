@@ -86,20 +86,14 @@ async def async_setup_entry(
     client = None
     owns_client = True
     gateway_entry_id = options.get(Config.CONF_GATEWAY_ENTRY_ID)
+    setup_succeeded = False
 
     try:
         # -----------------------------------
         # Create Modbus client
         # -----------------------------------
         if gateway_entry_id:
-            gateway_entry = next(
-                (
-                    candidate
-                    for candidate in hass.config_entries.async_entries(Config.DOMAIN)
-                    if candidate.entry_id == gateway_entry_id
-                ),
-                None,
-            )
+            gateway_entry = hass.config_entries.async_get_entry(gateway_entry_id)
             if gateway_entry is None or not hasattr(gateway_entry, "runtime_data"):
                 raise ConfigEntryNotReady("S2000-PP gateway is not loaded")
             client = gateway_entry.runtime_data.client
@@ -222,11 +216,8 @@ async def async_setup_entry(
         # -----------------------------------
         entry.runtime_data = ModbusDevicesRuntimeData(
             client=client,
-            device=device,
             coordinator=coordinator,
-            gateway_mapping=gateway_mapping,
             owns_client=owns_client,
-            gateway_entry_id=gateway_entry_id,
         )
 
         _LOGGER.info(
@@ -250,26 +241,16 @@ async def async_setup_entry(
             device.attr_platforms,
         )
 
+        setup_succeeded = True
         return True
 
     except (ConnectionException, ModbusException, OSError, TimeoutError) as exc:
-        _clear_runtime_data(entry)
-        if owns_client:
-            _close_client(client)
         raise ConfigEntryNotReady(f"Modbus connection failed: {exc}") from exc
-
-    except (ConfigEntryError, ConfigEntryNotReady):
-        _clear_runtime_data(entry)
-        if owns_client:
-            _close_client(client)
-        raise
-
-    except Exception:
-        # Programming and platform errors must remain visible to Home Assistant.
-        _clear_runtime_data(entry)
-        if owns_client:
-            _close_client(client)
-        raise
+    finally:
+        if not setup_succeeded:
+            _clear_runtime_data(entry)
+            if owns_client:
+                _close_client(client)
 
 
 async def async_unload_entry(
@@ -283,7 +264,7 @@ async def async_unload_entry(
         return True
 
     runtime = entry.runtime_data
-    device = runtime.device
+    device = runtime.coordinator.device
     client = runtime.client
 
     unload_ok = await hass.config_entries.async_unload_platforms(

@@ -372,6 +372,7 @@ async def test_sensor_platform_adds_device_time_without_modbus_io():
     device = M3000BB1020(Client(), 1)
     device.get_time = AsyncMock(side_effect=AssertionError("platform RTC read"))
     coordinator = SimpleNamespace(
+        device=device,
         data={"time": datetime(2026, 8, 26, 20, 45, 12)},
         last_update_success=True,
         async_add_listener=Mock(return_value=Mock()),
@@ -379,7 +380,7 @@ async def test_sensor_platform_adds_device_time_without_modbus_io():
     entry = SimpleNamespace(
         entry_id="m3000",
         options={},
-        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+        runtime_data=SimpleNamespace(coordinator=coordinator),
     )
     added = []
 

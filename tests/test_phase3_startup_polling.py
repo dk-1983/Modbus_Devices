@@ -119,6 +119,7 @@ async def test_m3000_snapshot_sensor_and_legacy_clock_cleanup_are_one_path(
     await device.data_init()
     snapshot = await device.async_get_snapshot()
     coordinator = SimpleNamespace(
+        device=device,
         data=snapshot,
         last_update_success=True,
         async_add_listener=Mock(return_value=Mock()),
@@ -126,7 +127,7 @@ async def test_m3000_snapshot_sensor_and_legacy_clock_cleanup_are_one_path(
     entry = SimpleNamespace(
         entry_id="m3000-entry",
         options={},
-        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+        runtime_data=SimpleNamespace(coordinator=coordinator),
     )
     added = []
 
@@ -198,9 +199,10 @@ async def test_platform_setup_uses_snapshot_or_static_descriptions_without_io(
         **extra,
     )
     coordinator = Mock(data=snapshot, last_update_success=True)
+    coordinator.device = device
     entry = SimpleNamespace(
         entry_id="entry-1",
-        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+        runtime_data=SimpleNamespace(coordinator=coordinator),
     )
     hass = SimpleNamespace(data={})
     added = []
@@ -221,7 +223,8 @@ async def test_all_platforms_resolve_one_shared_entry_runtime_object():
         get_chanels=AsyncMock(),
     )
     coordinator = Mock(data={"inputs": {}, "outputs": {}, "chanels": {}})
-    runtime = SimpleNamespace(device=device, coordinator=coordinator)
+    coordinator.device = device
+    runtime = SimpleNamespace(coordinator=coordinator)
     entry = SimpleNamespace(entry_id="entry-1", runtime_data=runtime)
     hass = SimpleNamespace(data={})
 

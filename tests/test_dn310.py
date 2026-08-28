@@ -287,10 +287,11 @@ def test_direct_identity_remains_entry_transport_and_slave_scoped():
 async def test_button_platform_setup_creates_only_dn310_buttons():
     device = DN310(Client(), 1)
     coordinator = Mock(last_update_success=True)
+    coordinator.device = device
     entry = SimpleNamespace(
         entry_id="entry-1",
         title="DN310",
-        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+        runtime_data=SimpleNamespace(coordinator=coordinator),
     )
     hass = SimpleNamespace(data={})
     entities = []
@@ -305,9 +306,10 @@ async def test_button_platform_setup_creates_only_dn310_buttons():
 async def test_button_platform_is_a_noop_for_equipment_without_descriptions():
     device = SimpleNamespace()
     coordinator = Mock(last_update_success=True)
+    coordinator.device = device
     entry = SimpleNamespace(
         entry_id="entry-1",
-        runtime_data=SimpleNamespace(device=device, coordinator=coordinator),
+        runtime_data=SimpleNamespace(coordinator=coordinator),
     )
     hass = SimpleNamespace(data={})
     entities = []
@@ -346,13 +348,13 @@ async def test_button_identity_device_link_and_user_press_lifecycle():
 async def test_unload_uses_same_platform_set_and_releases_entry_resources():
     device = DN310(Client(), 1)
     client = Mock()
+    coordinator = Mock(device=device)
     entry = SimpleNamespace(
         entry_id="entry-1",
         title="DN310",
         runtime_data=SimpleNamespace(
-            device=device,
             client=client,
-            coordinator=Mock(),
+            coordinator=coordinator,
         ),
     )
     config_entries = SimpleNamespace(async_unload_platforms=AsyncMock(return_value=True))
