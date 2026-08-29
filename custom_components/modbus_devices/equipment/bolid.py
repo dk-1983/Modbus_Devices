@@ -44,12 +44,14 @@ from ..modbus_validation import (
     validated_registers,
 )
 from ..s2000_pp import (
-    S2000PPCounterValueReader,
-    S2000PPRuntimeReader,
-    S2000PPNumericValueReader,
-    S2000PPZoneState,
     NumericParameterKind,
     NumericResultStatus,
+    S2000PPConfiguration,
+    S2000PPCounterValueReader,
+    S2000PPNumericValueReader,
+    S2000PPRuntimeReader,
+    S2000PPZoneState,
+    resolve_zone_row,
 )
 from .equipment import canonical_equipment_class_name
 
@@ -2020,6 +2022,79 @@ class MIP24Isp20:
     def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
         """Return required and optional exact S2000-PP capabilities."""
         return cls.capability_requirements
+
+    @classmethod
+    def reconcile_gateway_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> ResolvedDeviceMapping:
+        """Validate persisted rows against the live PP table and repair drift."""
+        rows = configuration.zones_for_device(mapping.identity.orion_address)
+        canonical_rows = []
+        for spec in cls.capability_requirements:
+            matches = [
+                row
+                for row in rows
+                if row.local_zone_number == spec.local_object_number
+                and row.zone_type == spec.zone_type
+            ]
+            if len(matches) != 1:
+                canonical_rows = []
+                break
+            canonical_rows.append(matches[0])
+
+        if canonical_rows:
+            canonical = ResolvedDeviceMapping(
+                identity=mapping.identity,
+                source=mapping.source,
+                objects=tuple(
+                    resolve_zone_row(
+                        row,
+                        configuration.partition_id(row.partition_number),
+                    )
+                    for row in canonical_rows
+                ),
+            )
+            return canonical
+
+        if cls._is_exact_legacy_mapping(mapping, configuration):
+            return mapping
+
+        raise ValueError(
+            "MIP-24 isp.20 mapping does not match one unambiguous current "
+            "S2000-PP Input 0-5 footprint"
+        )
+
+    @classmethod
+    def _is_exact_legacy_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> bool:
+        """Accept a semantically exact pre-type-8 footprint without guessing."""
+        if len(mapping.objects) != 6:
+            return False
+        actual_rows = {row.table_number: row for row in configuration.zones}
+        expected_types = {0: 3, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1}
+        seen_inputs: set[int] = set()
+        for item in mapping.objects:
+            row = actual_rows.get(item.gateway_object_number)
+            if (
+                row is None
+                or row.device_address != mapping.identity.orion_address
+                or row.local_zone_number != item.local_object_number
+                or row.zone_type != expected_types.get(item.local_object_number)
+            ):
+                return False
+            expected = resolve_zone_row(
+                row,
+                configuration.partition_id(row.partition_number),
+            )
+            if item != expected:
+                return False
+            seen_inputs.add(item.local_object_number)
+        return seen_inputs == set(expected_types)
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Validate and apply the configured Orion object subset."""

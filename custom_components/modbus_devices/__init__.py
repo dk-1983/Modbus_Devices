@@ -17,9 +17,57 @@ from .gateway import ResolvedDeviceMapping
 from .manufacturer import canonicalize_manufacturer_options
 from .modbus_client import connect_modbus
 from .runtime import ModbusDevicesConfigEntry, ModbusDevicesRuntimeData
+from .s2000_pp import S2000PPConfigurationCache, S2000PPConfigurationReader
 
 _LOGGER = getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(Config.DOMAIN)
+
+
+async def _async_reconcile_gateway_mapping(
+    hass: HomeAssistant,
+    entry: ModbusDevicesConfigEntry,
+    options: dict,
+    device_class,
+    client,
+    mapping: ResolvedDeviceMapping,
+) -> tuple[dict, ResolvedDeviceMapping]:
+    """Repair an equipment mapping only from an unambiguous live table."""
+    reconcile = getattr(device_class, "reconcile_gateway_mapping", None)
+    if not callable(reconcile):
+        return options, mapping
+
+    domain_data = hass.data.setdefault(Config.DOMAIN, {})
+    cache = domain_data.setdefault(
+        "s2000_pp_mapping_reconciliation_cache",
+        S2000PPConfigurationCache(),
+    )
+    gateway = mapping.identity.gateway
+    configuration = await cache.async_get_or_load(
+        gateway.stable_id,
+        S2000PPConfigurationReader(
+            client,
+            gateway.modbus_unit_id,
+        ).async_read,
+    )
+    try:
+        reconciled = reconcile(mapping, configuration)
+    except ValueError as exc:
+        raise ConfigEntryError(
+            "Persisted equipment mapping does not match the current S2000-PP "
+            "configuration; reconfigure the device mapping"
+        ) from exc
+
+    if reconciled == mapping:
+        return options, mapping
+
+    repaired_options = dict(options)
+    repaired_options[Config.CONF_GATEWAY_MAPPING] = reconciled.to_dict()
+    hass.config_entries.async_update_entry(
+        entry,
+        data={},
+        options=repaired_options,
+    )
+    return repaired_options, reconciled
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -150,6 +198,16 @@ async def async_setup_entry(
         ):
             raise ConfigEntryError(
                 f"Gateway mapping type does not match {device_name}"
+            )
+
+        if gateway_mapping is not None:
+            options, gateway_mapping = await _async_reconcile_gateway_mapping(
+                hass,
+                entry,
+                options,
+                device_class,
+                client,
+                gateway_mapping,
             )
 
         # -----------------------------------

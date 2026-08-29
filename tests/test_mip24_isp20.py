@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.config_entries import ConfigEntryError
 from homeassistant.const import (
     PERCENTAGE,
     Platform,
@@ -15,6 +18,8 @@ from homeassistant.const import (
 from homeassistant.helpers.entity import EntityCategory
 from pymodbus.exceptions import ModbusException
 
+import custom_components.modbus_devices as integration
+from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.equipment.bolid import MIP24Isp20
 from custom_components.modbus_devices.equipment.equipment import (
     get_equipment_classes_by_manufacturer,
@@ -210,6 +215,215 @@ def test_legacy_type_1_mapping_remains_loadable():
     ))
     assert len(device.get_state_sensor_descriptions()) == 6
     assert device.get_numeric_sensor_descriptions() == []
+
+
+def current_configuration(*extra_rows):
+    return S2000PPConfiguration(
+        zones=(
+            S2000PPZoneRow(20, 2, 0, 14, 3),
+            *(S2000PPZoneRow(20 + local, 2, local, 14, 8)
+              for local in range(1, 6)),
+            *extra_rows,
+        ),
+        relays=(),
+        partitions=(),
+        unparsed_registers=(),
+    )
+
+
+class RowAwareClient(Client):
+    """Return deterministic states by actual PP row, not persisted semantics."""
+
+    def __init__(self):
+        super().__init__(numeric=[0x1B30] * 10)
+        self.states = {
+            20: 152, 21: 193, 22: 195, 23: 200, 24: 197, 25: 1,
+            30: 109, 31: 193, 32: 195, 33: 195, 34: 197, 35: 197,
+        }
+
+    async def read_holding_registers(self, *, address, count, device_id):
+        self.holding_calls.append((address, count, device_id))
+        if address == 46328:
+            return Response([next(self.numeric)], function_code=3)
+        first_row = address - 40000 + 1
+        return Response(
+            [self.states[first_row + offset] << 8 for offset in range(count)],
+            function_code=3,
+        )
+
+    async def read_input_registers(self, *, address, count, device_id):
+        self.input_calls.append((address, count, device_id))
+        first_row = ((address - 4096) // 16) + 1
+        values = []
+        for offset in range(count // 16):
+            row = first_row + offset
+            expanded = 152 if row in (20, 30) else self.states[row]
+            values.extend([expanded, *([0] * 15)])
+        return Response(values, function_code=4)
+
+
+def stale_type_8_objects():
+    return tuple(
+        manual_zone_mapping(local, 30 + local, 3 if local == 0 else 8, 14, None)
+        for local in range(6)
+    )
+
+
+def test_stale_type_8_mapping_reproduces_live_shifted_semantic_states():
+    persisted = mapping(*stale_type_8_objects())
+    restored = ResolvedDeviceMapping.from_dict(persisted.to_dict())
+    device = MIP24Isp20(RowAwareClient(), 1)
+    device.apply_gateway_mapping(restored)
+
+    snapshot = asyncio.run(device.async_get_snapshot())
+
+    assert snapshot["binary_sensors"]["tamper"]["state"] is False
+    assert {
+        key: value["state"] for key, value in snapshot["state_sensors"].items()
+    } == {
+        "device_state": "disarmed",
+        "output_power_state": "output_voltage_connected",
+        "output_load_state": "power_overload_restored",
+        "battery_state": "power_overload_restored",
+        "charger_state": "charger_restored",
+        "mains_state": "charger_restored",
+    }
+    assert device._state_mappings["battery_state"].gateway_object_number == 33
+    assert device._state_mappings["mains_state"].gateway_object_number == 35
+    assert device._state_mappings["device_state"].gateway_object_number == 30
+
+
+def test_live_table_reconciliation_repairs_stale_and_shuffled_mapping():
+    persisted = mapping(*reversed(stale_type_8_objects()))
+
+    repaired = MIP24Isp20.reconcile_gateway_mapping(
+        persisted,
+        current_configuration(),
+    )
+    device = MIP24Isp20(RowAwareClient(), 1)
+    device.apply_gateway_mapping(repaired)
+    snapshot = asyncio.run(device.async_get_snapshot())
+
+    assert [item.local_object_number for item in repaired.objects] == list(range(6))
+    assert [item.gateway_object_number for item in repaired.objects] == list(range(20, 26))
+    assert repaired.identity == persisted.identity
+    assert repaired.source is persisted.source
+    assert device.attr_device_identifier == persisted.identity.stable_id
+    assert snapshot["binary_sensors"]["tamper"]["state"] is False
+    assert {
+        key: value["state"] for key, value in snapshot["state_sensors"].items()
+    } == {
+        "device_state": "enclosure_tamper_restored",
+        "output_power_state": "output_voltage_connected",
+        "output_load_state": "power_overload_restored",
+        "battery_state": "battery_restored",
+        "charger_state": "charger_restored",
+        "mains_state": "mains_restored",
+    }
+
+
+def test_exact_legacy_mapping_remains_loadable_only_when_pp_table_matches():
+    legacy_objects = (
+        manual_zone_mapping(0, 1, 3, 7, None),
+        *(manual_zone_mapping(local, local + 1, 1, 7, None)
+          for local in range(1, 6)),
+    )
+    persisted = mapping(*reversed(legacy_objects))
+    configuration = S2000PPConfiguration(
+        zones=(
+            S2000PPZoneRow(1, 2, 0, 7, 3),
+            *(S2000PPZoneRow(local + 1, 2, local, 7, 1)
+              for local in range(1, 6)),
+        ),
+        relays=(), partitions=(), unparsed_registers=(),
+    )
+
+    assert MIP24Isp20.reconcile_gateway_mapping(persisted, configuration) is persisted
+
+
+@pytest.mark.parametrize("configuration", [
+    current_configuration(S2000PPZoneRow(26, 2, 3, 14, 8)),
+    S2000PPConfiguration(
+        zones=current_configuration().zones[:-1],
+        relays=(), partitions=(), unparsed_registers=(),
+    ),
+])
+def test_ambiguous_or_missing_current_footprint_fails_instead_of_guessing(
+    configuration,
+):
+    with pytest.raises(ValueError, match="unambiguous current"):
+        MIP24Isp20.reconcile_gateway_mapping(
+            mapping(*stale_type_8_objects()),
+            configuration,
+        )
+
+
+@pytest.mark.asyncio
+async def test_config_entry_repair_persists_only_reconciled_objects(monkeypatch):
+    persisted = mapping(*stale_type_8_objects())
+    options = {
+        Config.CONF_DEVICE_CLASS: "MIP24Isp20",
+        Config.CONF_GATEWAY_MAPPING: persisted.to_dict(),
+    }
+    update_entry = Mock()
+    hass = SimpleNamespace(
+        data={},
+        config_entries=SimpleNamespace(async_update_entry=update_entry),
+    )
+    entry = SimpleNamespace(data={}, options=options)
+
+    class Reader:
+        def __init__(self, *_args):
+            pass
+
+        async def async_read(self):
+            return current_configuration()
+
+    monkeypatch.setattr(integration, "S2000PPConfigurationReader", Reader)
+
+    repaired_options, repaired = await integration._async_reconcile_gateway_mapping(
+        hass, entry, options, MIP24Isp20, object(), persisted
+    )
+
+    assert [item.gateway_object_number for item in repaired.objects] == list(range(20, 26))
+    assert repaired.identity == persisted.identity
+    assert repaired_options[Config.CONF_GATEWAY_MAPPING] == repaired.to_dict()
+    update_entry.assert_called_once_with(
+        entry,
+        data={},
+        options=repaired_options,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_config_entry_fails_with_reconfigure_action(monkeypatch):
+    persisted = mapping(*stale_type_8_objects())
+    options = {Config.CONF_GATEWAY_MAPPING: persisted.to_dict()}
+    update_entry = Mock()
+    hass = SimpleNamespace(
+        data={},
+        config_entries=SimpleNamespace(async_update_entry=update_entry),
+    )
+
+    class Reader:
+        def __init__(self, *_args):
+            pass
+
+        async def async_read(self):
+            return current_configuration(S2000PPZoneRow(26, 2, 3, 14, 8))
+
+    monkeypatch.setattr(integration, "S2000PPConfigurationReader", Reader)
+
+    with pytest.raises(ConfigEntryError, match="reconfigure the device mapping"):
+        await integration._async_reconcile_gateway_mapping(
+            hass,
+            SimpleNamespace(data={}, options=options),
+            options,
+            MIP24Isp20,
+            object(),
+            persisted,
+        )
+    update_entry.assert_not_called()
 
 
 def test_grouped_atomic_polling_and_independent_states():
