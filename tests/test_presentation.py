@@ -258,31 +258,31 @@ async def test_c2000_vt_card_expands_and_shrinks_with_registry(registry_hass):
     hass.entity_registry.entities.append(temperature_state)
     second = await async_build_device_card(hass, device.id)
     assert entity_ids(second) == [
-        "sensor.vt_temperature",
         "sensor.vt_temperature_state",
+        "sensor.vt_temperature",
     ]
     assert second.card["entities"] == [
-        {"entity": "sensor.vt_temperature", "name": "Temperature"},
         {
             "entity": "sensor.vt_temperature_state",
             "name": "Temperature State",
         },
+        {"entity": "sensor.vt_temperature", "name": "Temperature"},
     ]
 
     hass.entity_registry.entities.extend((humidity, humidity_state))
     expanded = await async_build_device_card(hass, device.id)
     assert entity_ids(expanded) == [
-        "sensor.vt_temperature",
-        "sensor.vt_humidity",
         "sensor.vt_temperature_state",
+        "sensor.vt_temperature",
         "sensor.vt_humidity_state",
+        "sensor.vt_humidity",
     ]
 
     hass.entity_registry.entities.remove(humidity)
     shrunk = await async_build_device_card(hass, device.id)
     assert entity_ids(shrunk) == [
-        "sensor.vt_temperature",
         "sensor.vt_temperature_state",
+        "sensor.vt_temperature",
         "sensor.vt_humidity_state",
     ]
 

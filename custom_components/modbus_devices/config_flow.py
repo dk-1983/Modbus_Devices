@@ -25,6 +25,7 @@ from .equipment.equipment import (
     validate_equipment_gateway_mapping,
 )
 from .gateway import (
+    CapabilityRequirement,
     DPLSSubIdentity,
     DownstreamDeviceMetadata,
     GatewayContext,
@@ -1124,7 +1125,17 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             except (KeyError, ValueError):
                 errors["base"] = "invalid_mapping"
             else:
-                if user_input[Config.CONF_ADD_ANOTHER_OBJECT]:
+                remaining = available_gateway_capabilities(
+                    self._gateway_capabilities,
+                    self._manual_objects,
+                    self._dpls_identity,
+                )
+                required_remain = any(
+                    item.requirement
+                    is CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION
+                    for item in remaining.values()
+                )
+                if required_remain or user_input[Config.CONF_ADD_ANOTHER_OBJECT]:
                     return await self.async_step_manual_capability()
                 return await self._async_finish_manual_mapping()
 

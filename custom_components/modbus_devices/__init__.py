@@ -13,7 +13,7 @@ from .const import Config
 from .coordinator import ModbusDeviceCoordinator
 from .dashboard import async_register_dashboard_frontend
 from .equipment.equipment import get_class
-from .gateway import ResolvedDeviceMapping
+from .gateway import ResolvedDeviceMapping, dpls_ranges_overlap
 from .manufacturer import canonicalize_manufacturer_options
 from .modbus_client import connect_modbus
 from .runtime import ModbusDevicesConfigEntry, ModbusDevicesRuntimeData
@@ -56,6 +56,27 @@ async def _async_reconcile_gateway_mapping(
             "Persisted equipment mapping does not match the current S2000-PP "
             "configuration; reconfigure the device mapping"
         ) from exc
+
+    async_entries = getattr(hass.config_entries, "async_entries", None)
+    if callable(async_entries):
+        for other in async_entries(Config.DOMAIN):
+            if getattr(other, "entry_id", None) == getattr(entry, "entry_id", None):
+                continue
+            other_data = (other.options or other.data).get(Config.CONF_GATEWAY_MAPPING)
+            if not other_data:
+                continue
+            try:
+                other_identity = ResolvedDeviceMapping.from_dict(other_data).identity
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (
+                other_identity.stable_id == reconciled.identity.stable_id
+                or dpls_ranges_overlap(other_identity, reconciled.identity)
+            ):
+                raise ConfigEntryError(
+                    "Persisted equipment mappings claim the same physical DPLS "
+                    "device; reconfigure the duplicate entries"
+                )
 
     if reconciled == mapping:
         return options, mapping

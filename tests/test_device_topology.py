@@ -161,30 +161,27 @@ def test_c2000_vt_entities_share_one_device_and_gateway_parent() -> None:
     device = C2000VT(None, 1)
     device.apply_gateway_mapping(vt_mapping())
     entry = child_entry("vt-entry", "gateway-1")
-    state = next(
-        item
-        for item in device.get_state_sensor_descriptions()
-        if item["sensor_id"] == "temperature_state"
-    )
-    numeric = next(
-        item
-        for item in device.get_numeric_sensor_descriptions()
-        if item["sensor_id"] == "temperature"
-    )
-    state_entity = ModBusStateSensorEntity(coordinator(device), device, entry, state)
-    numeric_entity = ModBusNumericSensorEntity(
-        coordinator(device), device, entry, numeric
-    )
+    state_entities = [
+        ModBusStateSensorEntity(coordinator(device), device, entry, description)
+        for description in device.get_state_sensor_descriptions()
+    ]
+    numeric_entities = [
+        ModBusNumericSensorEntity(coordinator(device), device, entry, description)
+        for description in device.get_numeric_sensor_descriptions()
+    ]
+    entities = state_entities + numeric_entities
 
     expected_identifier = {(Config.DOMAIN, device.attr_device_identifier)}
     expected_parent = (Config.DOMAIN, "gateway-1")
-    assert state_entity.device_info["identifiers"] == expected_identifier
-    assert numeric_entity.device_info["identifiers"] == expected_identifier
-    assert state_entity.device_info["via_device"] == expected_parent
-    assert numeric_entity.device_info["via_device"] == expected_parent
-    assert state_entity.entity_category is EntityCategory.DIAGNOSTIC
-    assert state_entity.unique_id == f"{device.attr_unique_id_prefix}_temperature_state"
-    assert numeric_entity.unique_id == f"{device.attr_unique_id_prefix}_temperature"
+    assert len(entities) == 4
+    assert len({entity.unique_id for entity in entities}) == 4
+    assert all(entity.device_info["identifiers"] == expected_identifier for entity in entities)
+    assert all(entity.device_info["via_device"] == expected_parent for entity in entities)
+    assert all(entity.entity_category is EntityCategory.DIAGNOSTIC for entity in state_entities)
+    assert {entity.unique_id for entity in entities} == {
+        f"{device.attr_unique_id_prefix}_{key}"
+        for key in ("temperature_state", "temperature", "humidity_state", "humidity")
+    }
 
 
 def test_mip_six_rows_share_one_device_parent_and_unique_entity_ids() -> None:

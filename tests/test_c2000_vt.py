@@ -1,5 +1,9 @@
 """Tests for C2000-VT model and mapping."""
 
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 from custom_components.modbus_devices.equipment.bolid import C2000VT
 from custom_components.modbus_devices.gateway import (
     DownstreamDeviceIdentity,
@@ -11,6 +15,7 @@ from custom_components.modbus_devices.gateway import (
     ResolvedDeviceMapping,
 )
 from custom_components.modbus_devices.s2000_pp import (
+    S2000PPConfiguration,
     S2000PPRuntimeReader,
     S2000PPZoneRow,
     S2000PPZoneState,
@@ -19,11 +24,17 @@ from custom_components.modbus_devices.s2000_pp import (
     manual_zone_mapping,
     resolve_zone_row,
 )
+from custom_components.modbus_devices.rtu_over_udp import append_modbus_rtu_crc
 import pytest
 
 from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.config_entries import ConfigEntryError
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.helpers.entity import EntityCategory
+from pymodbus.exceptions import ModbusException
+
+import custom_components.modbus_devices as integration
+from custom_components.modbus_devices.const import Config
 
 
 def make_mapping(*objects, base=20, kdl=10, variant="vt"):
@@ -44,7 +55,11 @@ def make_mapping(*objects, base=20, kdl=10, variant="vt"):
 def test_variants_and_service_metadata(variant):
     device = C2000VT(None, 1)
     device.apply_gateway_mapping(
-        make_mapping(manual_zone_mapping(20, 1, 6, 0, None), variant=variant)
+        make_mapping(
+            manual_zone_mapping(20, 1, 6, 0, None),
+            manual_zone_mapping(21, 2, 6, 0, None),
+            variant=variant,
+        )
     )
     assert device.attr_device_metadata["variant"].startswith("С2000-ВТ")
     assert device.attr_serial_number is None
@@ -130,6 +145,7 @@ def test_temperature_and_unknown_state_fallback_are_independent():
     device = C2000VT(None, 1)
 
     assert decode_s2000_pp_q8_8(0x1480) == 20.5
+    assert decode_s2000_pp_q8_8(0xFB80) == -4.5
     assert device._state_sensor_value(
         S2000PPZoneState(1, 254, (254,))
     )["state"] == "unknown_254"
@@ -151,6 +167,107 @@ def test_wrong_zone_type_or_local_number_rejected():
         C2000VT(None, 1).apply_gateway_mapping(
             make_mapping(manual_zone_mapping(22, 1, 6, 0, None))
         )
+
+
+@pytest.mark.parametrize("channel", ["temperature", "humidity"])
+def test_partial_legacy_mapping_reproduces_old_one_channel_failure(channel):
+    item = (
+        manual_zone_mapping(20, 11, 6, 0, None)
+        if channel == "temperature"
+        else manual_zone_mapping(21, 12, 6, 0, None)
+    )
+
+    with pytest.raises(ValueError, match="both temperature and humidity"):
+        C2000VT(None, 1).apply_gateway_mapping(make_mapping(item))
+
+
+def configuration(*rows):
+    return S2000PPConfiguration(
+        zones=rows,
+        relays=(),
+        partitions=(),
+        unparsed_registers=(),
+    )
+
+
+def test_partial_legacy_mapping_is_repaired_from_unambiguous_live_table():
+    partial = make_mapping(manual_zone_mapping(20, 41, 6, 3, None))
+    live = configuration(
+        S2000PPZoneRow(41, 10, 20, 3, 6),
+        S2000PPZoneRow(42, 10, 21, 3, 6),
+    )
+
+    repaired = C2000VT.reconcile_gateway_mapping(partial, live)
+
+    assert [item.gateway_object_number for item in repaired.objects] == [41, 42]
+    assert repaired.identity == partial.identity
+    assert repaired.source is partial.source
+    device = C2000VT(None, 1)
+    device.apply_gateway_mapping(repaired)
+    assert set(device._numeric_mappings) == {"temperature", "humidity"}
+
+
+@pytest.mark.asyncio
+async def test_overlapping_legacy_entries_fail_explicitly_instead_of_duplicating(
+    monkeypatch,
+):
+    first = make_mapping(manual_zone_mapping(20, 41, 6, 3, None))
+    overlapping = make_mapping(
+        manual_zone_mapping(21, 42, 6, 3, None), base=21
+    )
+    current_entry = SimpleNamespace(entry_id="temperature", data={}, options={})
+    other_entry = SimpleNamespace(
+        entry_id="humidity",
+        data={},
+        options={Config.CONF_GATEWAY_MAPPING: overlapping.to_dict()},
+    )
+    hass = SimpleNamespace(
+        data={},
+        config_entries=SimpleNamespace(
+            async_entries=lambda _domain: [current_entry, other_entry],
+            async_update_entry=Mock(),
+        ),
+    )
+
+    class Reader:
+        def __init__(self, *_args):
+            pass
+
+        async def async_read(self):
+            return configuration(
+                S2000PPZoneRow(41, 10, 20, 3, 6),
+                S2000PPZoneRow(42, 10, 21, 3, 6),
+            )
+
+    monkeypatch.setattr(integration, "S2000PPConfigurationReader", Reader)
+
+    with pytest.raises(ConfigEntryError, match="duplicate entries"):
+        await integration._async_reconcile_gateway_mapping(
+            hass, current_entry, {}, C2000VT, object(), first
+        )
+    hass.config_entries.async_update_entry.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        (S2000PPZoneRow(41, 10, 20, 3, 6),),
+        (
+            S2000PPZoneRow(41, 10, 20, 3, 6),
+            S2000PPZoneRow(42, 10, 21, 3, 6),
+            S2000PPZoneRow(43, 10, 21, 3, 6),
+        ),
+        (
+            S2000PPZoneRow(41, 10, 20, 3, 6),
+            S2000PPZoneRow(42, 10, 22, 3, 6),
+        ),
+    ],
+)
+def test_missing_ambiguous_or_non_adjacent_footprint_is_rejected(rows):
+    partial = make_mapping(manual_zone_mapping(20, 41, 6, 3, None))
+
+    with pytest.raises(ValueError, match="unambiguous adjacent"):
+        C2000VT.reconcile_gateway_mapping(partial, configuration(*rows))
 
 
 def test_manual_and_automatic_objects_are_equivalent():
@@ -192,7 +309,10 @@ async def test_pending_preserves_previous_confirmed_value():
 
     device = C2000VT(Client(), 1)
     device.apply_gateway_mapping(
-        make_mapping(manual_zone_mapping(20, 1, 6, 0, None))
+        make_mapping(
+            manual_zone_mapping(20, 1, 6, 0, None),
+            manual_zone_mapping(21, 2, 6, 0, None),
+        )
     )
     device._numeric_values["temperature"] = {
         "value": 23.5,
@@ -201,3 +321,178 @@ async def test_pending_preserves_previous_confirmed_value():
     }
     snapshot = await device.async_get_snapshot()
     assert snapshot["numeric_sensors"]["temperature"]["value"] == 23.5
+
+
+class RoundRobinResponse:
+    def __init__(self, *, registers=None, exception_code=None, address=None, value=None,
+                 function_code=None):
+        self.registers = registers
+        self.exception_code = exception_code
+        self.address = address
+        self.value = value
+        self.function_code = function_code
+
+    def isError(self):
+        return self.exception_code is not None
+
+
+class RoundRobinClient:
+    def __init__(self, results, state_registers=(0x4E00, 0x4800)):
+        self.results = iter(results)
+        self.state_registers = state_registers
+        self.calls = []
+
+    async def write_register(self, *, address, value, device_id):
+        self.calls.append(("select", address, value))
+        return RoundRobinResponse(address=address, value=value, function_code=6)
+
+    async def read_holding_registers(self, *, address, count, device_id):
+        self.calls.append(("holding", address, count))
+        if address == 46328:
+            result = next(self.results)
+            if result == "pending":
+                return RoundRobinResponse(exception_code=15)
+            if result == "error":
+                return RoundRobinResponse(exception_code=3)
+            return RoundRobinResponse(registers=[result], function_code=3)
+        return RoundRobinResponse(
+            registers=list(self.state_registers[:count]), function_code=3
+        )
+
+    async def read_input_registers(self, *, address, count, device_id):
+        self.calls.append(("input", address, count))
+        blocks = ([78, *([0] * 15)], [72, *([0] * 15)])
+        return RoundRobinResponse(
+            registers=[value for block in blocks for value in block][:count],
+            function_code=4,
+        )
+
+
+def round_robin_device(client):
+    device = C2000VT(client, 1)
+    device.apply_gateway_mapping(
+        make_mapping(
+            manual_zone_mapping(20, 1, 6, 0, None),
+            manual_zone_mapping(21, 2, 6, 0, None),
+        )
+    )
+    return device
+
+
+@pytest.mark.asyncio
+async def test_numeric_round_robin_reads_one_channel_and_caches_the_other():
+    client = RoundRobinClient([0x1480, 0x3780, 0x1580])
+    device = round_robin_device(client)
+
+    first = await device.async_get_snapshot()
+    second = await device.async_get_snapshot()
+    third = await device.async_get_snapshot()
+
+    assert first["numeric_sensors"] == {
+        "temperature": {
+            "value": 20.5,
+            "raw_register": 0x1480,
+            "parameter_kind": "temperature",
+        }
+    }
+    assert second["numeric_sensors"]["temperature"]["value"] == 20.5
+    assert second["numeric_sensors"]["humidity"]["value"] == 55.5
+    assert third["numeric_sensors"]["temperature"]["value"] == 21.5
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 1),
+        ("select", 46179, 2),
+        ("select", 46179, 1),
+    ]
+    assert all(len(snapshot["state_sensors"]) == 2 for snapshot in (first, second, third))
+    assert first["state_sensors"]["temperature_state"]["state"] == "temperature_normal"
+    assert first["state_sensors"]["humidity_state"]["state"] == "level_normal"
+
+
+@pytest.mark.asyncio
+async def test_pending_repeats_result_without_selector_or_cursor_advance():
+    client = RoundRobinClient(["pending", 0x1480, 0x3700])
+    device = round_robin_device(client)
+
+    first = await device.async_get_snapshot()
+    second = await device.async_get_snapshot()
+    third = await device.async_get_snapshot()
+
+    assert first["numeric_sensors"] == {}
+    assert second["numeric_sensors"]["temperature"]["value"] == 20.5
+    assert third["numeric_sensors"]["humidity"]["value"] == 55.0
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 1),
+        ("select", 46179, 2),
+    ]
+    assert len([
+        call for call in client.calls
+        if call == ("holding", 46328, 1)
+    ]) == 3
+
+
+def test_round_robin_polling_budget_is_four_requests_per_ready_refresh():
+    client = RoundRobinClient([0x1480])
+    asyncio.run(round_robin_device(client).async_get_snapshot())
+
+    assert len(client.calls) == 4
+    assert client.calls[0:2] == [
+        ("holding", 40000, 2),
+        ("input", 4096, 32),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rows", "temperature_raw", "temperature", "humidity_raw", "humidity"),
+    [
+        ((5, 6), 0x13F0, 19.9375, 0x3960, 57.375),
+        ((7, 8), 0x1440, 20.25, 0x3CC0, 60.75),
+    ],
+)
+def test_local_hardware_numeric_fixtures(
+    rows, temperature_raw, temperature, humidity_raw, humidity
+):
+    assert rows[1] == rows[0] + 1
+    assert decode_s2000_pp_q8_8(temperature_raw) == temperature
+    assert decode_s2000_pp_q8_8(humidity_raw) == humidity
+
+
+@pytest.mark.parametrize(
+    ("primary_register", "expected"),
+    [
+        (0x4EC8, (78, 200)),
+        (0x48C8, (72, 200)),
+        (0x4E2F, (78, 47)),
+        (0x482F, (72, 47)),
+    ],
+)
+def test_local_hardware_primary_state_fixtures(primary_register, expected):
+    assert decode_s2000_pp_zone_state_register(primary_register) == expected
+
+
+@pytest.mark.parametrize(
+    ("body", "frame"),
+    [
+        ("02 06 B4 63 00 05", "02 06 B4 63 00 05 9E 14"),
+        ("02 03 B4 F8 00 01", "02 03 B4 F8 00 01 22 38"),
+        ("02 03 02 13 F0", "02 03 02 13 F0 F1 30"),
+        ("02 03 02 39 60", "02 03 02 39 60 EE 3C"),
+        ("02 03 02 14 40", "02 03 02 14 40 F2 B4"),
+        ("02 03 02 3C C0", "02 03 02 3C C0 ED 14"),
+        ("02 03 02 3C 40", "02 03 02 3C 40 EC B4"),
+        ("02 83 0F", "02 83 0F F1 34"),
+    ],
+)
+def test_local_hardware_rtu_frames_have_valid_crc(body, frame):
+    assert append_modbus_rtu_crc(bytes.fromhex(body)) == bytes.fromhex(frame)
+
+
+@pytest.mark.asyncio
+async def test_zero_is_real_and_unexpected_numeric_exception_remains_fatal():
+    zero_client = RoundRobinClient([0x1480, 0x0000])
+    device = round_robin_device(zero_client)
+    await device.async_get_snapshot()
+    snapshot = await device.async_get_snapshot()
+    assert snapshot["numeric_sensors"]["humidity"]["value"] == 0.0
+
+    with pytest.raises(ModbusException, match="read numeric result"):
+        await round_robin_device(RoundRobinClient(["error"])).async_get_snapshot()

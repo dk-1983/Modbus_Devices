@@ -4014,13 +4014,13 @@ class C2000VT(BolidDPLSNumericDeviceBase):
             key="temperature", name="Temperature", object_kind=ObjectKind.ZONE,
             local_object_number=0, local_object_offset=0,
             zone_type=6,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
             key="humidity", name="Humidity", object_kind=ObjectKind.ZONE,
             local_object_number=0, local_object_offset=1,
             zone_type=6,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
     numeric_kinds = {
@@ -4036,18 +4036,96 @@ class C2000VT(BolidDPLSNumericDeviceBase):
         super().__init__(client, device_id)
         self.attr_model_name = "С2000-ВТ"
         self.attr_description = "Addressable temperature and humidity sensor"
+        self._numeric_cursor = 0
+
+    @classmethod
+    def reconcile_gateway_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> ResolvedDeviceMapping:
+        """Repair a partial VT mapping only from its exact two-address footprint."""
+        identity = mapping.identity
+        dpls = identity.dpls
+        if dpls is None or dpls.address_count != 2:
+            raise ValueError("C2000VT requires one two-address DPLS identity")
+        rows = configuration.zones_for_device(identity.orion_address)
+        resolved = []
+        for address in (dpls.base_address, dpls.base_address + 1):
+            matches = [
+                row for row in rows
+                if row.local_zone_number == address and row.zone_type == 6
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "C2000VT mapping does not match one unambiguous adjacent "
+                    "temperature/humidity footprint"
+                )
+            row = matches[0]
+            resolved.append(
+                resolve_zone_row(
+                    row,
+                    configuration.partition_id(row.partition_number),
+                )
+            )
+        return ResolvedDeviceMapping(identity, mapping.source, tuple(resolved))
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Require both logical channels of one physical thermohygrometer."""
+        super().apply_gateway_mapping(mapping)
+        if set(self._numeric_mappings) != {"temperature", "humidity"}:
+            raise ValueError("C2000VT requires both temperature and humidity channels")
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Poll grouped states and one numeric channel per coordinator refresh."""
+        mapping = self.attr_gateway_mapping
+        if mapping is None:
+            raise ValueError("Equipment requires a validated S2000-PP mapping")
+        zone_states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states(self._numeric_mappings.values())
+
+        keys = ("temperature", "humidity")
+        key = keys[self._numeric_cursor]
+        item = self._numeric_mappings[key]
+        result = await S2000PPNumericValueReader(
+            self.attr_client,
+            self.attr_device_id,
+            mapping.identity.gateway.stable_id,
+        ).async_read(item.gateway_object_number, self.numeric_kinds[key])
+        if result.status is NumericResultStatus.READY:
+            self._numeric_values[key] = {
+                "value": result.value,
+                "raw_register": result.raw_register,
+                "parameter_kind": result.parameter_kind.value,
+            }
+            self._numeric_cursor = (self._numeric_cursor + 1) % len(keys)
+        elif result.status is NumericResultStatus.PROTOCOL_ERROR:
+            raise ModbusException(result.message or "numeric protocol error")
+
+        return {
+            "numeric_sensors": {
+                sensor_id: dict(value)
+                for sensor_id, value in self._numeric_values.items()
+            },
+            "state_sensors": {
+                f"{sensor_id}_state": self._state_sensor_value(
+                    zone_states[channel.gateway_object_number]
+                )
+                for sensor_id, channel in self._numeric_mappings.items()
+            },
+        }
 
 
-class C2000VTI(BolidDPLSNumericDeviceBase):
+class C2000VTI(C2000VT):
     """Bolid С2000-ВТИ and С2000-ВТИ исп.01 display thermohygrometers."""
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-ВТИ"
     dpls_address_count = 3
-    gateway_transport_supported = False
-    gateway_transport_limitation = (
-        "Current S2000-PP documentation does not confirm numeric values from C2000-VTI"
-    )
+    unsupported_variants = {
+        "vti_01": "С2000-ВТИ исп.01 CO channel is not hardware validated"
+    }
 
     class Variant(str, Enum):
         VTI = "vti"
@@ -4101,6 +4179,23 @@ class C2000VTI(BolidDPLSNumericDeviceBase):
         super().__init__(client, device_id)
         self.attr_model_name = "С2000-ВТИ"
         self.attr_description = "Addressable display thermohygrometer"
+
+    @classmethod
+    def reconcile_gateway_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> ResolvedDeviceMapping:
+        """Reconcile only the hardware-confirmed two-channel VTI variant."""
+        if mapping.identity.metadata.variant != cls.Variant.VTI.value:
+            raise ValueError("C2000-VTI isp.01 requires separate CO validation")
+        return super().reconcile_gateway_mapping(mapping, configuration)
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Apply the shared VT contract only to ordinary C2000-VTI."""
+        if mapping.identity.metadata.variant != self.Variant.VTI.value:
+            raise ValueError("C2000-VTI isp.01 requires separate CO validation")
+        super().apply_gateway_mapping(mapping)
 
 
 class C2000SP2:

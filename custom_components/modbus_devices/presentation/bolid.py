@@ -25,10 +25,10 @@ M3000_BB_1020_PROFILE = PresentationProfile(
 C2000_VT_PROFILE = PresentationProfile(
     profile_id="bolid_c2000_vt",
     roles=(
+        PresentationRole("temperature_state"),
         PresentationRole("temperature"),
+        PresentationRole("humidity_state"),
         PresentationRole("humidity"),
-        PresentationRole("temperature_state", PresentationSection.DIAGNOSTIC),
-        PresentationRole("humidity_state", PresentationSection.DIAGNOSTIC),
     ),
 )
 
@@ -81,6 +81,12 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "C2000VT",
         C2000_VT_PROFILE,
         models=("С2000-ВТ", "С2000-ВТ исп.01"),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000VTI",
+        C2000_VT_PROFILE,
+        models=("С2000-ВТИ",),
     )
     registry.register_equipment(
         "Bolid",

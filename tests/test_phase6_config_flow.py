@@ -13,6 +13,7 @@ from custom_components.modbus_devices.gateway import (
     CapabilityRequirement,
     DPLSSubIdentity,
     DownstreamDeviceIdentity,
+    DownstreamDeviceMetadata,
     GatewayContext,
     GatewayType,
     MappingSource,
@@ -28,6 +29,7 @@ from custom_components.modbus_devices.mapping import (
 )
 from custom_components.modbus_devices.gateway import GatewayCapabilitySpec
 from custom_components.modbus_devices.s2000_pp import manual_zone_mapping
+from custom_components.modbus_devices.equipment.bolid import C2000VT
 
 
 class FakeHass:
@@ -43,6 +45,67 @@ class FakeHass:
 
 def form_fields(result):
     return {marker.schema for marker in result["data_schema"].schema}
+
+
+@pytest.mark.asyncio
+async def test_c2000_vt_manual_flow_cannot_finish_after_one_channel():
+    flow = ModbusDevicesConfigFlow()
+    flow.hass = FakeHass()
+    flow._selected_manufacturer = "Bolid"
+    flow._gateway_context = GatewayContext(
+        GatewayType.S2000_PP, "PP", "tcp:test:502", 1
+    )
+    flow._orion_address = 10
+    flow._dpls_identity = DPLSSubIdentity(20, 2)
+    flow._device_metadata = DownstreamDeviceMetadata("vt")
+    flow._gateway_capabilities = C2000VT.capability_requirements
+
+    result = await flow.async_step_manual_capability(
+        {
+            Config.CONF_CAPABILITY_KEY: "temperature",
+            Config.CONF_GATEWAY_OBJECT_NUMBER: 41,
+            Config.CONF_ADD_ANOTHER_OBJECT: False,
+        }
+    )
+
+    assert result["step_id"] == "manual_capability"
+    options = next(iter(result["data_schema"].schema.values())).config["options"]
+    assert options == [{"value": "humidity", "label": "Humidity"}]
+    assert [item.local_object_number for item in flow._manual_objects] == [20]
+
+
+@pytest.mark.asyncio
+async def test_second_c2000_vt_flow_is_rejected_as_overlap_without_exception():
+    gateway = GatewayContext(GatewayType.S2000_PP, "PP", "tcp:test:502", 1)
+    existing = ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(
+            gateway,
+            "C2000VT",
+            3,
+            DPLSSubIdentity(51, 2),
+            DownstreamDeviceMetadata("vt"),
+        ),
+        MappingSource.AUTOMATIC,
+        (
+            manual_zone_mapping(51, 5, 6, 1, None),
+            manual_zone_mapping(52, 6, 6, 1, None),
+        ),
+    )
+    entry = SimpleNamespace(
+        data={}, options={Config.CONF_GATEWAY_MAPPING: existing.to_dict()}
+    )
+    flow = ModbusDevicesConfigFlow()
+    flow.hass = FakeHass((entry,))
+    flow._selected_manufacturer = "Bolid"
+    flow._data = {Config.CONF_DEVICE_CLASS: "C2000VT"}
+
+    duplicate = ResolvedDeviceMapping(
+        existing.identity,
+        MappingSource.MANUAL,
+        existing.objects,
+    )
+
+    assert await flow._async_validate_and_store_mapping(duplicate) is False
 
 
 @pytest.mark.asyncio

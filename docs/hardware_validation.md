@@ -256,3 +256,86 @@ result read on the normal coordinator cadence. The 60-second interval is a
 validation policy, not an official Bolid timing requirement. The final interval
 will be reconsidered after numeric measurements work and hardware stability is
 confirmed.
+# С2000-ВТ development audit
+
+Official Bolid documentation identifies one physical С2000-ВТ (or
+С2000-ВТ исп.01) as two logical DPLS devices: `С2000-ВТ Т` for temperature and
+`С2000-ВТ В` for relative humidity. Their addresses are always adjacent, with
+the humidity address equal to the temperature address plus one. The integration
+therefore treats the lower temperature address as the stable physical base and
+requires both S2000-PP zone-type-6 rows before exposing the device.
+
+The documented S2000-PP numeric path is selector register 46179 followed by one
+register at 46328. The returned temperature or humidity value is signed Q8.8.
+State reads remain grouped on the normal 5-second coordinator cadence. Numeric
+reads use a device-specific two-channel round robin: at most one new
+selector/result transaction per refresh, so each value is normally refreshed
+about every 10 seconds. A pending result is completed on later refreshes without
+sending a second selector. This cadence is an integration load policy, not an
+official Bolid minimum interval.
+
+Previous partial mappings could expose only temperature or only humidity and
+could lead users to attempt a second overlapping Config Flow. Setup now repairs
+a single old partial entry only when the current read-only S2000-PP table contains
+one unambiguous adjacent pair for the saved Orion address and DPLS base. Missing
+or ambiguous pairs require reconfiguration instead of guessed ownership.
+
+Documentation confirms temperature range -30…+55 °C, humidity range 0…100%,
+and measurements produced once per second by the physical sensor. No downstream
+firmware, hardware revision, or serial-number path is documented through the
+S2000-PP mapping used here, so native DeviceInfo metadata remains unset. The
+current official product/manual does not document an enclosure tamper exposed
+through these two measurement channels; no synthetic tamper entity is created.
+
+The controlled validation below records the two PP rows, primary and expanded
+states, one selector/result exchange for each channel, raw Q8.8 values, pending
+responses and transaction latency. No configuration or actuator writes were
+performed.
+
+### Local С2000-ВТ / С2000-ВТИ validation
+
+A controlled non-production Modbus RTU validation was completed against a local
+S2000-PP 3.01 at 115200 baud, 8N1, slave ID 2. The read-only FC04 configuration
+response confirmed the following actual table; ownership is based on Orion plus
+DPLS identity, not on assumed PP-row adjacency:
+
+| Physical device | PP row | Orion | DPLS | Partition | PP zone type |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| С2000-ВТ #1 temperature | 5 | 3 | 51 | 1 | 6 |
+| С2000-ВТ #1 humidity | 6 | 3 | 52 | 1 | 6 |
+| С2000-ВТ #2 temperature | 7 | 3 | 53 | 1 | 6 |
+| С2000-ВТ #2 humidity | 8 | 3 | 54 | 1 | 6 |
+| С2000-ВТИ temperature | 9 | 3 | 55 | 1 | 6 |
+| С2000-ВТИ humidity | 10 | 3 | 56 | 1 | 6 |
+
+The grouped primary registers for rows 5-10 were respectively `4EC8`, `48C8`,
+`4E2F`, `482F`, `4E2F`, and `482F`. Expanded state blocks preserved the separate
+temperature/humidity routing. Rows 5/6 included codes 78/72, 200, 47, 188, 251,
+111; rows 7-10 included 78/72, 47, 188, 251, 111.
+
+All six documented FC06 46179 → FC03 46328 transactions returned valid signed
+Q8.8 measurements:
+
+| Device/channel | Raw | Decoded |
+| --- | ---: | ---: |
+| С2000-ВТ #1 temperature | `0x13F0` | 19.9375 °C |
+| С2000-ВТ #1 humidity | `0x3960` | 57.375 % |
+| С2000-ВТ #2 temperature | `0x1440` | 20.25 °C |
+| С2000-ВТ #2 humidity | `0x3CC0` | 60.75 % |
+| С2000-ВТИ temperature | `0x1440` | 20.25 °C |
+| С2000-ВТИ humidity | `0x3C40` | 60.25 % |
+
+The first VT temperature result was ready immediately. Rows 6-10 returned
+exception code 15 on the immediate result read and were ready after one
+result-only retry about 500 ms later; no selector was repeated. Complete response
+latency was approximately 4-12 ms after the first transaction, with the initial
+selector taking about 24 ms. CRC was valid for every logged request and response.
+This supports the 5-second, two-channel round robin without an additional
+cooldown: a pending result remains parked and is completed on the next refresh.
+
+The ordinary two-address С2000-ВТИ therefore shares the validated VT state,
+numeric, pending and presentation lifecycle. С2000-ВТИ исп.01 is a distinct
+three-address model whose third channel is CO; it remains explicitly unsupported
+until that full footprint and CO numeric path are separately hardware validated.
+No case-open/tamper channel or downstream firmware/serial metadata path was
+observed or documented through these PP rows.
