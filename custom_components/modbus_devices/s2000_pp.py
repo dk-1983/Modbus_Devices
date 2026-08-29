@@ -87,6 +87,7 @@ class S2000PPCounterResult:
     raw_count: int | None = None
     exception_code: int | None = None
     message: str | None = None
+    result_register_read: bool = False
 
 
 @dataclass(slots=True)
@@ -307,7 +308,12 @@ class S2000PPCounterValueReader:
             count=S2000_PP_COUNTER_REGISTER_COUNT,
             device_id=self._modbus_unit_id,
         )
-        error = _counter_error_result(response, zone, "read counter result")
+        error = _counter_error_result(
+            response,
+            zone,
+            "read counter result",
+            result_register_read=True,
+        )
         if error is not None:
             return error
         try:
@@ -331,7 +337,9 @@ class S2000PPCounterValueReader:
         )
 
 
-def _counter_error_result(response, zone, operation):
+def _counter_error_result(
+    response, zone, operation, *, result_register_read: bool = False
+):
     if response is None:
         return S2000PPCounterResult(
             NumericResultStatus.PROTOCOL_ERROR,
@@ -360,6 +368,7 @@ def _counter_error_result(response, zone, operation):
         zone,
         exception_code=code,
         message=f"Modbus exception during {operation}: {response}",
+        result_register_read=result_register_read,
     )
 
 

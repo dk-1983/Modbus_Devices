@@ -149,6 +149,25 @@ async def test_remote_modbus_exception_is_returned_for_common_validation():
 
 
 @pytest.mark.asyncio
+async def test_captured_fc03_counter_exception_frame_and_dynamic_source_port():
+    request = bytes.fromhex("01 03 B4 FC 00 03 E2 0B")
+    exception = bytes.fromhex("01 83 03 01 31")
+    assert modbus_rtu_crc(request[:-2]) == int.from_bytes(request[-2:], "little")
+    assert modbus_rtu_crc(exception[:-2]) == int.from_bytes(exception[-2:], "little")
+
+    client, _socket, sent = prepared(peer(exception, port=41723))
+    result = await client.read_holding_registers(
+        address=46332, count=3, device_id=1
+    )
+
+    assert sent[0][0] == request
+    assert result.dev_id == 1
+    assert result.function_code == 0x83
+    assert result.exception_code == 3
+    assert result.isError() is True
+
+
+@pytest.mark.asyncio
 async def test_response_can_be_accumulated_from_multiple_datagrams():
     frame = response(bytes.fromhex("01 03 04 00 0A 00 0B"))
     client, _socket, _sent = prepared(peer(frame[:3]), peer(frame[3:6]), peer(frame[6:]))

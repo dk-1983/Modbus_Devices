@@ -2911,6 +2911,7 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
     supported_kdl_input_types = (13,)
     dpls_address_count = 1
     pulse_volume_m3 = 0.001
+    optional_counter_result_exceptions: frozenset[int] = frozenset()
     physical_capabilities = (
         "cumulative_water_consumption",
         "initial_reading",
@@ -2969,6 +2970,12 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
                 "value": result.raw_count * self.pulse_volume_m3,
                 "raw_count": result.raw_count,
             }
+        elif (
+            result.status is NumericResultStatus.PROTOCOL_ERROR
+            and result.result_register_read
+            and result.exception_code in self.optional_counter_result_exceptions
+        ):
+            self._water_value = None
         elif result.status is NumericResultStatus.PROTOCOL_ERROR:
             raise ModbusException(result.message or "counter protocol error")
         snapshot["numeric_sensors"] = (
@@ -2986,6 +2993,7 @@ class SVK15_3_8_1_B3(BolidDPLSWaterMeterBase):
     detector_model = "СВК15-3-8-1-Б3"
     detector_description = "Radio DPLS-visible water meter"
     documented_target_firmware = "1.07"
+    optional_counter_result_exceptions = frozenset({3})
     physical_capabilities = BolidDPLSWaterMeterBase.physical_capabilities + (
         "radio_supervision",
         "radio_signal_quality",

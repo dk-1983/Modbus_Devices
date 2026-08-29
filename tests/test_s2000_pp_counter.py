@@ -94,6 +94,23 @@ async def test_counter_exception_semantics(code, status):
     assert result.status is status
     assert result.raw_count is None
     assert result.exception_code == code
+    assert result.result_register_read is True
+
+
+@pytest.mark.asyncio
+async def test_selector_exception_3_is_distinct_from_result_read_exception_3():
+    client = Client()
+
+    async def selector_error(**kwargs):
+        return Response(error=True, code=3)
+
+    client.write_register = selector_error
+    result = await S2000PPCounterValueReader(
+        client, 1, "counter-selector-exception-3"
+    ).async_read(1)
+    assert result.status is NumericResultStatus.PROTOCOL_ERROR
+    assert result.exception_code == 3
+    assert result.result_register_read is False
 
 
 @pytest.mark.asyncio

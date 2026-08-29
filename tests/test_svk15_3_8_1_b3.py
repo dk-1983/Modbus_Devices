@@ -1,5 +1,7 @@
 """Tests for the radio СВК15-3-8-1-Б3 water meter."""
 
+from types import SimpleNamespace
+
 import pytest
 from pymodbus.exceptions import ModbusException
 
@@ -16,6 +18,7 @@ from custom_components.modbus_devices.gateway import (
 from custom_components.modbus_devices.mapping import (
     AutomaticDeviceMappingProvider, DeviceMappingNotFoundError,
 )
+from custom_components.modbus_devices.sensor import ModBusNumericSensorEntity
 from custom_components.modbus_devices.s2000_pp import (
     NumericResultStatus, S2000PPCounterResult, S2000PPZoneState,
     S2000PPConfiguration, S2000PPConfigurationCache, S2000PPZoneRow,
@@ -144,3 +147,112 @@ async def test_pending_preserves_last_confirmed_and_protocol_error_fails(monkeyp
     CounterReader.status = NumericResultStatus.PROTOCOL_ERROR
     with pytest.raises(ModbusException):
         await device.async_get_snapshot()
+
+
+@pytest.mark.asyncio
+async def test_hardware_counter_exception_3_preserves_state_and_clears_value(
+    monkeypatch,
+):
+    expanded = (39, 200, 47, 188, 251, 111)
+
+    class StateReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read_zone_states(self, mappings):
+            return {
+                11: S2000PPZoneState(
+                    11,
+                    39,
+                    expanded,
+                    primary_register=0x27C8,
+                    priority_states=(39, 200),
+                )
+            }
+
+    class CounterReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read(self, zone):
+            return S2000PPCounterResult(
+                NumericResultStatus.PROTOCOL_ERROR,
+                zone,
+                exception_code=3,
+                result_register_read=True,
+            )
+
+    monkeypatch.setattr(bolid, "S2000PPRuntimeReader", StateReader)
+    monkeypatch.setattr(bolid, "S2000PPCounterValueReader", CounterReader)
+    device = configured()
+    device._water_value = {"value": 2.5, "raw_count": 2500}
+
+    snapshot = await device.async_get_snapshot()
+
+    assert snapshot["numeric_sensors"] == {}
+    assert device._water_value is None
+    state = snapshot["state_sensors"]["meter_state"]
+    assert state["state"] == "equipment_normal"
+    assert state["primary_code"] == 39
+    assert state["expanded_codes"] == expanded
+    assert state["expanded_states"] == (
+        "equipment_normal",
+        "battery_restored",
+        "dpls_restored",
+        "input_communication_restored",
+        "device_communication_restored",
+        "input_control_enabled",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exception_code", "result_register_read"),
+    [(2, True), (3, False), (4, True)],
+)
+async def test_only_result_read_exception_3_is_optional(
+    monkeypatch, exception_code, result_register_read
+):
+    class StateReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read_zone_states(self, mappings):
+            return {11: S2000PPZoneState(11, 39, (39,))}
+
+    class CounterReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read(self, zone):
+            return S2000PPCounterResult(
+                NumericResultStatus.PROTOCOL_ERROR,
+                zone,
+                exception_code=exception_code,
+                result_register_read=result_register_read,
+            )
+
+    monkeypatch.setattr(bolid, "S2000PPRuntimeReader", StateReader)
+    monkeypatch.setattr(bolid, "S2000PPCounterValueReader", CounterReader)
+
+    with pytest.raises(ModbusException):
+        await configured().async_get_snapshot()
+
+
+def test_unknown_water_value_keeps_entity_available():
+    device = configured()
+    coordinator = SimpleNamespace(
+        data={"numeric_sensors": {}},
+        device=device,
+        last_update_success=True,
+    )
+    entry = SimpleNamespace(entry_id="svk-entry", data={}, options={})
+    entity = ModBusNumericSensorEntity(
+        coordinator,
+        device,
+        entry,
+        device.get_numeric_sensor_descriptions()[0],
+    )
+
+    assert entity.available is True
+    assert entity.native_value is None
