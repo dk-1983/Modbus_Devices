@@ -288,6 +288,32 @@ async def test_c2000_vt_card_expands_and_shrinks_with_registry(registry_hass):
 
 
 @pytest.mark.asyncio
+async def test_mip_card_puts_tamper_first_and_keeps_device_state_diagnostic(
+    registry_hass,
+):
+    device = Device("mip", "mip-stable", model="МИП-24 исп.20")
+    entities = [
+        entity(device, "device_state", category=EntityCategory.DIAGNOSTIC),
+        entity(device, "mains_voltage"),
+        entity(device, "output_voltage"),
+        entity(
+            device,
+            "tamper",
+            domain="binary_sensor",
+            category=EntityCategory.DIAGNOSTIC,
+        ),
+    ]
+    result = await build(registry_hass, device, entities, "MIP24Isp20")
+
+    assert result.profile_id == "bolid_mip24_isp20"
+    assert entity_ids(result) == [
+        "binary_sensor.mip_tamper",
+        "sensor.mip_output_voltage",
+        "sensor.mip_mains_voltage",
+        "sensor.mip_device_state",
+    ]
+
+@pytest.mark.asyncio
 async def test_disabled_is_excluded_but_unavailable_is_included(registry_hass):
     device = Device("vt", "vt-stable")
     result = await build(

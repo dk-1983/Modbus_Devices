@@ -47,6 +47,18 @@ async def async_setup_entry(
             )
         )
 
+    description_reader = getattr(device, "get_binary_sensor_descriptions", None)
+    if callable(description_reader):
+        for description in description_reader():
+            entities.append(
+                ModBusDescribedBinarySensorEntity(
+                    coordinator=coordinator,
+                    device=device,
+                    entry=entry,
+                    description=description,
+                )
+            )
+
     async_add_entities(entities)
 
     _LOGGER.info(
@@ -132,3 +144,47 @@ class ModBusBinarySensorEntity(
             return self._input["icon_on"]
 
         return self._input["icon_off"]
+
+
+class ModBusDescribedBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
+    """Representation of a semantic binary state derived by equipment."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, coordinator, device, entry: ConfigEntry, description) -> None:
+        super().__init__(coordinator)
+        self._sensor_id = description["sensor_id"]
+        self._attr_name = description["name"]
+        self._attr_device_class = description["device_class"]
+        self._attr_entity_category = description.get("entity_category")
+        self._attr_icon = description.get("icon")
+        identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
+        self._attr_unique_id = f"{identity}_{self._sensor_id}"
+        self._attr_device_info = device_info_for_entry(device, entry)
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return the current semantic binary state or unknown."""
+        current = (self.coordinator.data or {}).get("binary_sensors", {}).get(
+            self._sensor_id
+        )
+        return None if current is None else current.get("state")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose lossless source-state evidence and device metadata."""
+        current = (self.coordinator.data or {}).get("binary_sensors", {}).get(
+            self._sensor_id
+        )
+        metadata = dict(getattr(self.coordinator.device, "attr_device_metadata", {}))
+        if current is None:
+            return metadata
+        return {
+            **metadata,
+            **{
+                key: current[key]
+                for key in ("primary_code", "expanded_codes")
+                if key in current
+            },
+        }

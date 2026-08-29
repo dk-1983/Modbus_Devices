@@ -40,6 +40,7 @@ S2000_PP_EXPANDED_ZONE_START = 4096
 S2000_PP_EXPANDED_ZONE_SIZE = 16
 S2000_PP_RUNTIME_READ_CHUNK_SIZE = 120
 S2000_PP_NUMERIC_SELECTOR = 46179
+S2000_PP_POWER_NUMERIC_SELECTOR = 46181
 S2000_PP_NUMERIC_RESULT = 46328
 S2000_PP_NUMERIC_ZONE_TYPE = 6
 S2000_PP_COUNTER_SELECTOR = 46180
@@ -54,6 +55,20 @@ class NumericParameterKind(str, Enum):
     TEMPERATURE = "temperature"
     RELATIVE_HUMIDITY = "relative_humidity"
     CO_CONCENTRATION = "co_concentration"
+    OUTPUT_VOLTAGE = "output_voltage"
+    OUTPUT_CURRENT = "output_current"
+    BATTERY_VOLTAGE = "battery_voltage"
+    BATTERY_CHARGE = "battery_charge"
+    MAINS_VOLTAGE = "mains_voltage"
+
+
+_POWER_NUMERIC_KINDS = {
+    NumericParameterKind.OUTPUT_VOLTAGE,
+    NumericParameterKind.OUTPUT_CURRENT,
+    NumericParameterKind.BATTERY_VOLTAGE,
+    NumericParameterKind.BATTERY_CHARGE,
+    NumericParameterKind.MAINS_VOLTAGE,
+}
 
 
 class NumericResultStatus(str, Enum):
@@ -115,6 +130,13 @@ def decode_s2000_pp_q8_8(raw: int) -> float:
     return signed / 256
 
 
+def decode_s2000_pp_unsigned_q8_8(raw: int) -> float:
+    """Decode the documented unsigned direct-code Q8.8 physical value."""
+    if not 0 <= raw <= 0xFFFF:
+        raise ValueError("S2000-PP numeric register must be an unsigned 16-bit value")
+    return raw / 256
+
+
 def decode_s2000_pp_counter(registers: list[int]) -> int:
     """Decode the documented three-register unsigned big-endian counter."""
     if not isinstance(registers, list) or len(registers) != 3:
@@ -170,8 +192,13 @@ class S2000PPNumericValueReader:
             return result
 
     async def _select(self, zone: int, kind: NumericParameterKind):
+        selector = (
+            S2000_PP_POWER_NUMERIC_SELECTOR
+            if kind in _POWER_NUMERIC_KINDS
+            else S2000_PP_NUMERIC_SELECTOR
+        )
         response = await self._client.write_register(
-            address=S2000_PP_NUMERIC_SELECTOR,
+            address=selector,
             value=zone,
             device_id=self._modbus_unit_id,
         )
@@ -181,7 +208,7 @@ class S2000PPNumericValueReader:
         try:
             validate_fc06_response(
                 response,
-                address=S2000_PP_NUMERIC_SELECTOR,
+                address=selector,
                 value=zone,
                 device_id=self._modbus_unit_id,
                 operation="select numeric zone",
@@ -222,7 +249,11 @@ class S2000PPNumericValueReader:
             )
         raw = registers[0]
         try:
-            value = decode_s2000_pp_q8_8(raw)
+            value = (
+                decode_s2000_pp_unsigned_q8_8(raw)
+                if kind in _POWER_NUMERIC_KINDS
+                else decode_s2000_pp_q8_8(raw)
+            )
         except (ModbusException, TypeError, ValueError) as exc:
             return S2000PPNumericResult(
                 NumericResultStatus.PROTOCOL_ERROR,

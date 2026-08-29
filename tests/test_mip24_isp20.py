@@ -5,16 +5,23 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import (
+    PERCENTAGE,
+    Platform,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+)
+from homeassistant.helpers.entity import EntityCategory
 from pymodbus.exceptions import ModbusException
 
-from homeassistant.const import Platform
-from homeassistant.helpers.entity import EntityCategory
-
 from custom_components.modbus_devices.equipment.bolid import MIP24Isp20
-from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
+from custom_components.modbus_devices.equipment.equipment import (
+    get_equipment_classes_by_manufacturer,
+)
 from custom_components.modbus_devices.gateway import (
-    DPLSSubIdentity,
     DownstreamDeviceIdentity,
+    DPLSSubIdentity,
     GatewayContext,
     GatewayType,
     MappingSource,
@@ -32,22 +39,34 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, registers=None, *, error=False, function_code=None):
+    def __init__(
+        self, registers=None, *, error=False, function_code=None, address=None,
+        value=None, code=None
+    ):
         self.registers = registers
         self._error = error
         self.function_code = function_code
+        self.address = address
+        self.value = value
+        self.exception_code = code
 
     def isError(self):
         return self._error
 
 
 class Client:
-    def __init__(self, primary=None, expanded=None, failure=None):
+    def __init__(self, primary=None, expanded=None, numeric=None, failure=None):
         self.primary = primary or [39, 193, 195, 200, 197, 1]
-        self.expanded = expanded or [149, 152, 203, 61, 62, 0]
+        self.expanded = expanded or [149, 203, 194, 202, 196, 2]
+        self.numeric = iter(numeric or [0x1B80, 0x0180, 0x1800, 0x6400, 0xE600])
         self.failure = failure
         self.holding_calls = []
         self.input_calls = []
+        self.writes = []
+
+    async def write_register(self, *, address, value, device_id):
+        self.writes.append((address, value, device_id))
+        return Response(function_code=6, address=address, value=value)
 
     async def read_holding_registers(self, *, address, count, device_id):
         self.holding_calls.append((address, count, device_id))
@@ -57,7 +76,7 @@ class Client:
             return Response(error=True)
         if self.failure == "invalid":
             return object()
-        values = self.primary[:count]
+        values = [next(self.numeric)] if address == 46328 else self.primary[:count]
         if self.failure == "truncated":
             values = values[:-1]
         return Response(values, function_code=3)
@@ -77,7 +96,7 @@ def gateway(name="pp-a", connection="serial:COM1"):
     return GatewayContext(GatewayType.S2000_PP, name, connection, 1)
 
 
-def identity(orion=12, gateway_context=None, dpls=None):
+def identity(orion=2, gateway_context=None, dpls=None):
     return DownstreamDeviceIdentity(
         gateway=gateway_context or gateway(),
         model="MIP24Isp20",
@@ -95,9 +114,9 @@ def mapping(*objects, **identity_options):
 
 
 def all_objects():
-    return tuple(
-        manual_zone_mapping(local, local + 1, 3 if local == 0 else 1, 0, None)
-        for local in range(6)
+    return (manual_zone_mapping(0, 20, 3, 0, None),) + tuple(
+        manual_zone_mapping(local, local + 20, 8, 0, None)
+        for local in range(1, 6)
     )
 
 
@@ -132,35 +151,33 @@ def test_direct_orion_identity_is_stable_and_has_no_dpls():
 
 def test_dpls_identity_is_rejected():
     with pytest.raises(ValueError, match="must not contain DPLS"):
-        configured(objects=(manual_zone_mapping(0, 1, 3, 0, None),)).apply_gateway_mapping(
-            mapping(
-                manual_zone_mapping(0, 1, 3, 0, None),
-                dpls=DPLSSubIdentity(1, 1),
-            )
+        MIP24Isp20(None, 1).apply_gateway_mapping(
+            mapping(*all_objects(), dpls=DPLSSubIdentity(1, 1))
         )
 
 
-def test_six_exact_capabilities_required_optional_and_categories():
+def test_canonical_input_zero_and_five_type_8_capabilities():
     capabilities = MIP24Isp20.get_gateway_capabilities()
     assert [(item.local_object_number, item.zone_type) for item in capabilities] == [
-        (0, 3), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1)
+        (0, 3), (1, 8), (2, 8), (3, 8), (4, 8), (5, 8)
     ]
     descriptions = {item["sensor_id"]: item for item in configured().get_state_sensor_descriptions()}
-    assert configured().attr_platforms == [Platform.SENSOR]
+    assert configured().attr_platforms == [Platform.SENSOR, Platform.BINARY_SENSOR]
     assert descriptions["device_state"]["entity_category"] is EntityCategory.DIAGNOSTIC
     assert descriptions["charger_state"]["entity_category"] is EntityCategory.DIAGNOSTIC
     assert descriptions["mains_state"]["entity_category"] is None
 
 
-def test_partial_optional_subset_creates_only_mapped_entities():
-    device = configured(objects=(
-        manual_zone_mapping(0, 1, 3, 0, None),
-        manual_zone_mapping(3, 4, 1, 0, None),
-        manual_zone_mapping(5, 6, 1, 0, None),
-    ))
-    assert [item["sensor_id"] for item in device.get_state_sensor_descriptions()] == [
-        "device_state", "battery_state", "mains_state"
+def test_hardware_rows_20_to_25_aggregate_into_one_device():
+    device = configured()
+    assert [item.gateway_object_number for item in device.attr_gateway_mapping.objects] == [
+        20, 21, 22, 23, 24, 25
     ]
+    assert {item["sensor_id"] for item in device.get_state_sensor_descriptions()} == {
+        "device_state", "output_power_state", "output_load_state", "battery_state",
+        "charger_state", "mains_state",
+    }
+    assert len({device.attr_device_identifier}) == 1
 
 
 @pytest.mark.parametrize("bad_object", [
@@ -168,7 +185,6 @@ def test_partial_optional_subset_creates_only_mapped_entities():
     manual_zone_mapping(0, 2, 1, 0, None),
     manual_zone_mapping(1, 2, 3, 0, None),
     manual_zone_mapping(1, 2, 6, 0, None),
-    manual_zone_mapping(1, 2, 8, 0, None),
     manual_zone_mapping(1, 2, 7, 0, None),
     manual_relay_mapping(1, 1),
 ])
@@ -178,25 +194,228 @@ def test_unsupported_local_type_relay_numeric_and_counter_are_rejected(bad_objec
 
 
 def test_missing_required_and_duplicate_mapping_are_errors():
-    with pytest.raises(ValueError, match="requires zone type 3"):
-        configured(objects=(manual_zone_mapping(1, 2, 1, 0, None),))
+    with pytest.raises(ValueError, match="requires input 0"):
+        configured(objects=all_objects()[1:])
     with pytest.raises(ValueError, match="Duplicate"):
         configured(objects=(
-            manual_zone_mapping(0, 1, 3, 0, None),
-            manual_zone_mapping(0, 2, 3, 0, None),
+            *all_objects(),
+            manual_zone_mapping(1, 26, 8, 0, None),
         ))
+
+
+def test_legacy_type_1_mapping_remains_loadable():
+    device = configured(objects=(manual_zone_mapping(0, 1, 3, 0, None),) + tuple(
+        manual_zone_mapping(local, local + 1, 1, 0, None)
+        for local in range(1, 6)
+    ))
+    assert len(device.get_state_sensor_descriptions()) == 6
+    assert device.get_numeric_sensor_descriptions() == []
 
 
 def test_grouped_atomic_polling_and_independent_states():
     client = Client()
     snapshot = asyncio.run(configured(client).async_get_snapshot())["state_sensors"]
-    assert len(client.holding_calls) == 1
+    assert client.holding_calls == [(46328, 1, 1), (40019, 6, 1)]
     assert len(client.input_calls) == 1
-    assert snapshot["device_state"]["state"] == "equipment_normal"
     assert snapshot["output_power_state"]["state"] == "output_voltage_connected"
     assert snapshot["mains_state"]["state"] == "mains_restored"
+    assert snapshot["output_power_state"]["expanded_states"] == ("device_restarted",)
     assert snapshot["device_state"]["expanded_states"] == ("enclosure_tamper",)
     assert snapshot["charger_state"]["primary_code"] == 197
+
+
+def test_numeric_entity_matrix_and_unsigned_q8_8_decoding():
+    device = configured()
+    descriptions = {
+        item["sensor_id"]: item for item in device.get_numeric_sensor_descriptions()
+    }
+    assert {
+        key: (item["device_class"], item["state_class"], item["unit"])
+        for key, item in descriptions.items()
+    } == {
+        "output_voltage": (SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT,
+                           UnitOfElectricPotential.VOLT),
+        "output_current": (SensorDeviceClass.CURRENT, SensorStateClass.MEASUREMENT,
+                           UnitOfElectricCurrent.AMPERE),
+        "battery_voltage": (SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT,
+                            UnitOfElectricPotential.VOLT),
+        "battery_charge": (SensorDeviceClass.BATTERY, SensorStateClass.MEASUREMENT,
+                           PERCENTAGE),
+        "mains_voltage": (SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT,
+                          UnitOfElectricPotential.VOLT),
+    }
+    snapshots = [asyncio.run(device.async_get_snapshot()) for _ in range(5)]
+    snapshot = snapshots[-1]
+    assert {key: value["value"] for key, value in snapshot["numeric_sensors"].items()} == {
+        "output_voltage": 27.5,
+        "output_current": 1.5,
+        "battery_voltage": 24.0,
+        "battery_charge": 100.0,
+        "mains_voltage": 230.0,
+    }
+    assert device.attr_client.writes == [
+        (46181, row, 1) for row in range(21, 26)
+    ]
+    assert set(snapshots[0]["numeric_sensors"]) == {"output_voltage"}
+    assert set(snapshots[1]["numeric_sensors"]) == {
+        "output_voltage", "output_current"
+    }
+
+
+def test_round_robin_cycles_one_numeric_input_per_state_refresh():
+    client = Client(numeric=[0x0100, 0x0200, 0x0300, 0x0400, 0x0500, 0x0600])
+    device = configured(client)
+
+    snapshots = [asyncio.run(device.async_get_snapshot()) for _ in range(6)]
+
+    assert client.writes == [
+        (46181, 21, 1),
+        (46181, 22, 1),
+        (46181, 23, 1),
+        (46181, 24, 1),
+        (46181, 25, 1),
+        (46181, 21, 1),
+    ]
+    assert [len(snapshot["numeric_sensors"]) for snapshot in snapshots] == [
+        1, 2, 3, 4, 5, 5
+    ]
+    assert snapshots[0]["numeric_sensors"]["output_voltage"]["value"] == 1.0
+    assert snapshots[4]["numeric_sensors"]["output_voltage"]["value"] == 1.0
+    assert snapshots[5]["numeric_sensors"]["output_voltage"]["value"] == 6.0
+    assert all(len(snapshot["state_sensors"]) == 6 for snapshot in snapshots)
+    assert len(client.input_calls) == 6
+    assert len(client.holding_calls) == 12
+
+
+def test_round_robin_order_is_independent_of_mapping_object_order():
+    client = Client()
+    objects = all_objects()
+    device = configured(client, (objects[0], *reversed(objects[1:])))
+
+    for _ in range(5):
+        asyncio.run(device.async_get_snapshot())
+
+    assert client.writes == [(46181, row, 1) for row in range(21, 26)]
+
+
+def test_first_refresh_leaves_not_yet_read_numeric_entities_unknown():
+    snapshot = asyncio.run(configured().async_get_snapshot())
+
+    assert snapshot["numeric_sensors"] == {
+        "output_voltage": {
+            "value": 27.5,
+            "raw_register": 0x1B80,
+            "parameter_kind": "output_voltage",
+        }
+    }
+    assert snapshot["numeric_sensors"].get("output_current") is None
+    assert snapshot["numeric_sensors"].get("battery_voltage") is None
+    assert snapshot["numeric_sensors"].get("battery_charge") is None
+    assert snapshot["numeric_sensors"].get("mains_voltage") is None
+
+
+def test_round_robin_steady_state_load_is_48_requests_per_minute():
+    client = Client(numeric=[0x0100] * 12)
+    device = configured(client)
+
+    for _ in range(12):
+        asyncio.run(device.async_get_snapshot())
+
+    assert len(client.writes) == 12
+    assert len([call for call in client.holding_calls if call[0] == 46328]) == 12
+    assert len([call for call in client.holding_calls if call[0] == 40019]) == 12
+    assert len(client.input_calls) == 12
+    assert len(client.writes) + len(client.holding_calls) + len(client.input_calls) == 48
+
+
+def test_local_hardware_rows_and_numeric_payloads():
+    """Preserve the read-only COM3 validation fixture without using real hardware."""
+    objects = (manual_zone_mapping(0, 6, 3, 14, None),) + tuple(
+        manual_zone_mapping(local, local + 6, 8, 14, None)
+        for local in range(1, 6)
+    )
+    client = Client(
+        primary=[0x98FB, 0xC1C7, 0xC3FB, 0xC8FB, 0xC5FB, 0x01FB],
+        expanded=[152, 193, 195, 200, 197, 1],
+        numeric=[0x1B30, 0x0070, 0x1B20, 0x0000, 0xD400],
+    )
+
+    device = configured(client, objects)
+    snapshots = [asyncio.run(device.async_get_snapshot()) for _ in range(5)]
+    snapshot = snapshots[-1]
+
+    assert snapshot["binary_sensors"]["tamper"]["state"] is False
+    assert {
+        key: value["value"] for key, value in snapshot["numeric_sensors"].items()
+    } == {
+        "output_voltage": 27.1875,
+        "output_current": 0.4375,
+        "battery_voltage": 27.125,
+        "battery_charge": 0.0,
+        "mains_voltage": 212.0,
+    }
+    assert client.writes == [(46181, row, 1) for row in range(7, 12)]
+
+
+@pytest.mark.parametrize(("code", "expected"), [(149, True), (152, False), (39, None)])
+def test_input_zero_tamper_open_restored_and_unknown(code, expected):
+    client = Client(expanded=[code, 0, 0, 0, 0, 0])
+    snapshot = asyncio.run(configured(client).async_get_snapshot())
+    assert snapshot["binary_sensors"]["tamper"] == {
+        "state": expected,
+        "primary_code": 39,
+        "expanded_codes": (code, *([0] * 15)),
+    }
+    description = configured().get_binary_sensor_descriptions()[0]
+    assert description["device_class"].value == "tamper"
+    assert description["entity_category"] is EntityCategory.DIAGNOSTIC
+
+
+@pytest.mark.asyncio
+async def test_pending_numeric_request_retries_result_without_new_selector():
+    class PendingClient(Client):
+        def __init__(self):
+            super().__init__()
+            self.pending = True
+
+        async def read_holding_registers(self, *, address, count, device_id):
+            if address == 46328 and self.pending:
+                self.holding_calls.append((address, count, device_id))
+                return Response(error=True, code=15, function_code=0x83)
+            return await super().read_holding_registers(
+                address=address, count=count, device_id=device_id
+            )
+
+    client = PendingClient()
+    device = configured(client)
+    first = await device.async_get_snapshot()
+    assert first["numeric_sensors"] == {}
+    assert client.writes == [(46181, 21, 1)]
+
+    client.pending = False
+    second = await device.async_get_snapshot()
+    assert second["numeric_sensors"]["output_voltage"]["value"] == 27.5
+    assert client.writes[0] == (46181, 21, 1)
+    assert client.writes.count((46181, 21, 1)) == 1
+
+    third = await device.async_get_snapshot()
+    assert third["numeric_sensors"]["output_voltage"]["value"] == 27.5
+    assert client.writes[-1] == (46181, 22, 1)
+
+
+def test_numeric_protocol_error_remains_fatal_and_does_not_publish_zero():
+    client = Client()
+
+    async def unavailable(*, address, count, device_id):
+        if address == 46328:
+            return Response(error=True, code=3, function_code=0x83)
+        return await Client.read_holding_registers(
+            client, address=address, count=count, device_id=device_id
+        )
+
+    client.read_holding_registers = unavailable
+    with pytest.raises(ModbusException):
+        asyncio.run(configured(client).async_get_snapshot())
 
 
 @pytest.mark.parametrize("code, name", [
@@ -225,15 +444,14 @@ def test_invalid_and_communication_responses_are_not_normal(failure):
 
 def test_manual_and_configuration_assisted_mapping_are_equivalent():
     configuration = S2000PPConfiguration(
-        zones=tuple(
-            S2000PPZoneRow(local + 1, 12, local, 0, 3 if local == 0 else 1)
-            for local in range(6)
+        zones=(S2000PPZoneRow(20, 2, 0, 0, 3),) + tuple(
+            S2000PPZoneRow(local + 20, 2, local, 0, 8)
+            for local in range(1, 6)
         ) + (
-            S2000PPZoneRow(20, 12, 7, 0, 1),
-            S2000PPZoneRow(21, 12, 1, 0, 8),
-            S2000PPZoneRow(22, 13, 0, 0, 3),
+            S2000PPZoneRow(19, 2, 7, 0, 1),
+            S2000PPZoneRow(26, 3, 0, 0, 3),
         ),
-        relays=(S2000PPRelayRow(1, 12, 1),),
+        relays=(S2000PPRelayRow(1, 2, 1),),
         partitions=(),
         unparsed_registers=(),
     )
@@ -245,17 +463,16 @@ def test_manual_and_configuration_assisted_mapping_are_equivalent():
     automatic = asyncio.run(AutomaticDeviceMappingProvider(
         Reader(), S2000PPConfigurationCache()
     ).async_resolve(
-        gateway(), "MIP24Isp20", 12,
+        gateway(), "MIP24Isp20", 2,
         capabilities=MIP24Isp20.get_gateway_capabilities(),
     ))
     assert automatic.objects == mapping(*all_objects()).objects
 
 
-def test_no_numeric_outputs_controls_or_invented_service_metadata():
+def test_no_outputs_controls_or_invented_service_metadata():
     device = configured()
-    assert not hasattr(device, "get_numeric_sensor_descriptions")
     assert not hasattr(device, "get_output_descriptions")
-    assert device.attr_platforms == [Platform.SENSOR]
+    assert device.attr_platforms == [Platform.SENSOR, Platform.BINARY_SENSOR]
     assert asyncio.run(device.get_device_info()) == {
         "device_type": None,
         "serial_number": None,

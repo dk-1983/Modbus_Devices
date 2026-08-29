@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.helpers.entity import EntityCategory
 
-from custom_components.modbus_devices.binary_sensor import ModBusBinarySensorEntity
+from custom_components.modbus_devices.binary_sensor import (
+    ModBusBinarySensorEntity,
+    ModBusDescribedBinarySensorEntity,
+)
 from custom_components.modbus_devices.button import ModBusCommandButtonEntity
 from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.device_info import via_device_for_entry
@@ -14,6 +18,7 @@ from custom_components.modbus_devices.equipment.bolid import (
     C2000KPB,
     C2000SP4,
     C2000VT,
+    MIP24Isp20,
     S2000PP,
 )
 from custom_components.modbus_devices.gateway import (
@@ -83,6 +88,21 @@ def vt_mapping(gateway_entry_id: str = "gateway-1") -> ResolvedDeviceMapping:
         (
             manual_zone_mapping(20, 1, 6, 0, None),
             manual_zone_mapping(21, 2, 6, 0, None),
+        ),
+    )
+
+
+def mip_mapping(gateway_entry_id: str = "gateway-1") -> ResolvedDeviceMapping:
+    return ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(
+            gateway_context(gateway_entry_id),
+            "MIP24Isp20",
+            2,
+        ),
+        MappingSource.MANUAL,
+        (manual_zone_mapping(0, 20, 3, 0, None),) + tuple(
+            manual_zone_mapping(local, local + 20, 8, 0, None)
+            for local in range(1, 6)
         ),
     )
 
@@ -162,6 +182,57 @@ def test_c2000_vt_entities_share_one_device_and_gateway_parent() -> None:
     assert state_entity.entity_category is EntityCategory.DIAGNOSTIC
     assert state_entity.unique_id == f"{device.attr_unique_id_prefix}_temperature_state"
     assert numeric_entity.unique_id == f"{device.attr_unique_id_prefix}_temperature"
+
+
+def test_mip_six_rows_share_one_device_parent_and_unique_entity_ids() -> None:
+    device = MIP24Isp20(None, 1)
+    device.apply_gateway_mapping(mip_mapping())
+    entry = child_entry("mip-entry", "gateway-1")
+    state_entities = [
+        ModBusStateSensorEntity(coordinator(device), device, entry, description)
+        for description in device.get_state_sensor_descriptions()
+    ]
+    numeric_entities = [
+        ModBusNumericSensorEntity(coordinator(device), device, entry, description)
+        for description in device.get_numeric_sensor_descriptions()
+    ]
+    binary_entities = [
+        ModBusDescribedBinarySensorEntity(
+            coordinator(device), device, entry, description
+        )
+        for description in device.get_binary_sensor_descriptions()
+    ]
+    entities = state_entities + numeric_entities + binary_entities
+
+    assert len(entities) == 12
+    assert len({entity.unique_id for entity in entities}) == 12
+    expected_identifier = {(Config.DOMAIN, device.attr_device_identifier)}
+    assert all(entity.device_info["identifiers"] == expected_identifier for entity in entities)
+    assert {entity.device_info["via_device"] for entity in entities} == {
+        (Config.DOMAIN, "gateway-1")
+    }
+    tamper = binary_entities[0]
+    assert tamper.unique_id == f"{device.attr_unique_id_prefix}_tamper"
+    assert tamper.device_class is BinarySensorDeviceClass.TAMPER
+    assert tamper.is_on is None
+
+    open_tamper = ModBusDescribedBinarySensorEntity(
+        coordinator(device, {"binary_sensors": {"tamper": {"state": True}}}),
+        device,
+        entry,
+        device.get_binary_sensor_descriptions()[0],
+    )
+    assert open_tamper.is_on is True
+
+    failed_coordinator = coordinator(device)
+    failed_coordinator.last_update_success = False
+    unavailable_tamper = ModBusDescribedBinarySensorEntity(
+        failed_coordinator,
+        device,
+        entry,
+        device.get_binary_sensor_descriptions()[0],
+    )
+    assert unavailable_tamper.available is False
 
 
 def test_two_kpb_children_keep_distinct_devices_and_one_parent() -> None:

@@ -17,7 +17,14 @@ from pymodbus.exceptions import ModbusException
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
-from homeassistant.const import PERCENTAGE, Platform, UnitOfTemperature, UnitOfVolume
+from homeassistant.const import (
+    PERCENTAGE,
+    Platform,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfTemperature,
+    UnitOfVolume,
+)
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
 
@@ -1863,14 +1870,15 @@ class MIP24Isp20:
         "output_voltage",
         "output_current",
         "battery_voltage",
+        "battery_charge",
         "mains_voltage",
         "temperature",
     )
     gateway_transport_limitation = (
-        "Physical and Orion numeric measurements are documented, but the "
-        "S2000-PP 3.01 Modbus numeric path does not confirm MIP-24 isp.20; "
+        "S2000-PP exposes input 0 as the type-3 global/tamper state row and "
+        "inputs 1-5 as type-8 state/numeric rows; "
         "runtime service information and autonomous alarm-output control are "
-        "also unavailable through this transport"
+        "unavailable through this transport"
     )
     capability_requirements = (
         GatewayCapabilitySpec(
@@ -1886,40 +1894,40 @@ class MIP24Isp20:
             name="Output power state",
             object_kind=ObjectKind.ZONE,
             local_object_number=1,
-            zone_type=1,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            zone_type=8,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
             key="output_load_state",
             name="Output load state",
             object_kind=ObjectKind.ZONE,
             local_object_number=2,
-            zone_type=1,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            zone_type=8,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
             key="battery_state",
             name="Battery state",
             object_kind=ObjectKind.ZONE,
             local_object_number=3,
-            zone_type=1,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            zone_type=8,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
             key="charger_state",
             name="Charger state",
             object_kind=ObjectKind.ZONE,
             local_object_number=4,
-            zone_type=1,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            zone_type=8,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
             key="mains_state",
             name="Mains state",
             object_kind=ObjectKind.ZONE,
             local_object_number=5,
-            zone_type=1,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            zone_type=8,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
     STATE_NAMES = C2000KPB.STATE_NAMES
@@ -1931,9 +1939,55 @@ class MIP24Isp20:
         "charger_state": ("mdi:battery-charging", EntityCategory.DIAGNOSTIC),
         "mains_state": ("mdi:transmission-tower", None),
     }
+    _NUMERIC_KINDS = {
+        "output_voltage": NumericParameterKind.OUTPUT_VOLTAGE,
+        "output_current": NumericParameterKind.OUTPUT_CURRENT,
+        "battery_voltage": NumericParameterKind.BATTERY_VOLTAGE,
+        "battery_charge": NumericParameterKind.BATTERY_CHARGE,
+        "mains_voltage": NumericParameterKind.MAINS_VOLTAGE,
+    }
+    _NUMERIC_METADATA = {
+        "output_voltage": (
+            "Output voltage",
+            SensorDeviceClass.VOLTAGE,
+            UnitOfElectricPotential.VOLT,
+            2,
+        ),
+        "output_current": (
+            "Output current",
+            SensorDeviceClass.CURRENT,
+            UnitOfElectricCurrent.AMPERE,
+            2,
+        ),
+        "battery_voltage": (
+            "Battery voltage",
+            SensorDeviceClass.VOLTAGE,
+            UnitOfElectricPotential.VOLT,
+            2,
+        ),
+        "battery_charge": (
+            "Battery charge",
+            SensorDeviceClass.BATTERY,
+            PERCENTAGE,
+            0,
+        ),
+        "mains_voltage": (
+            "Mains voltage",
+            SensorDeviceClass.VOLTAGE,
+            UnitOfElectricPotential.VOLT,
+            0,
+        ),
+    }
+    _NUMERIC_STATE_KEYS = {
+        "output_power_state": "output_voltage",
+        "output_load_state": "output_current",
+        "battery_state": "battery_voltage",
+        "charger_state": "battery_charge",
+        "mains_state": "mains_voltage",
+    }
 
     def __init__(self, client, device_id) -> None:
-        """Initialize the state-only equipment model."""
+        """Initialize the six-row state and numeric equipment model."""
         self.attr_client = client
         self.attr_device_id = device_id
         self.attr_manufactures_name = "Bolid"
@@ -1952,10 +2006,14 @@ class MIP24Isp20:
             "full_designation": self.full_designation,
             "documented_target_firmware": self.documented_target_firmware,
             "documented_orion_state_objects": 6,
+            "validated_s2000_pp_rows": 6,
             "physical_numeric_capabilities": self.physical_numeric_capabilities,
             "gateway_transport_limitation": self.gateway_transport_limitation,
         }
         self._state_mappings: dict[str, ResolvedObjectMapping] = {}
+        self._numeric_mappings: dict[str, ResolvedObjectMapping] = {}
+        self._numeric_values: dict[str, dict[str, Any]] = {}
+        self._numeric_cursor = 0
 
     @classmethod
     def get_gateway_capabilities(cls) -> tuple[GatewayCapabilitySpec, ...]:
@@ -1979,6 +2037,13 @@ class MIP24Isp20:
         for item in mapping.objects:
             zone_type = None if item.zone_details is None else item.zone_details.zone_type
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
+            if spec is None and zone_type == 1 and 1 <= item.local_object_number <= 5:
+                # Preserve already-stored mappings created by the pre-type-8 model.
+                spec = next(
+                    candidate
+                    for candidate in self.capability_requirements
+                    if candidate.local_object_number == item.local_object_number
+                )
             if spec is None:
                 raise ValueError("Mapping contains an unsupported MIP-24 isp.20 object")
             if item.data_area is not ModbusDataArea.HOLDING_REGISTER:
@@ -1987,14 +2052,25 @@ class MIP24Isp20:
                 raise ValueError("Duplicate MIP-24 isp.20 capability mapping")
             resolved[spec.key] = item
 
-        if "device_state" not in resolved:
-            raise ValueError("MIP-24 isp.20 requires zone type 3, local object 0")
+        canonical_keys = {"device_state", *self._NUMERIC_STATE_KEYS}
+        if not canonical_keys.issubset(resolved):
+            raise ValueError("MIP-24 isp.20 requires input 0 and all five input rows")
 
         self.attr_gateway_mapping = mapping
         self.attr_device_identifier = mapping.identity.stable_id
         self.attr_unique_id_prefix = mapping.identity.stable_id
         self._state_mappings = resolved
-        self.attr_platforms = [Platform.SENSOR]
+        self._numeric_mappings = {
+            numeric_key: resolved[state_key]
+            for state_key, numeric_key in self._NUMERIC_STATE_KEYS.items()
+            if state_key in resolved
+            for item in (resolved[state_key],)
+            if item.zone_details is not None
+            and item.zone_details.zone_type == 8
+        }
+        self._numeric_values = {}
+        self._numeric_cursor = 0
+        self.attr_platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
     async def get_device_info(self) -> dict[str, Any]:
         """Return only runtime service fields exposed by the transport."""
@@ -2019,18 +2095,74 @@ class MIP24Isp20:
             for key in self._state_mappings
         ]
 
+    def get_numeric_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe numeric values of configured type-8 PP rows."""
+        return [
+            {
+                "sensor_id": key,
+                "name": self._NUMERIC_METADATA[key][0],
+                "device_class": self._NUMERIC_METADATA[key][1],
+                "state_class": SensorStateClass.MEASUREMENT,
+                "unit": self._NUMERIC_METADATA[key][2],
+                "precision": self._NUMERIC_METADATA[key][3],
+            }
+            for key in self._numeric_mappings
+        ]
+
+    def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe the documented enclosure tamper derived from input 0."""
+        return [{
+            "sensor_id": "tamper",
+            "name": "Enclosure tamper",
+            "device_class": BinarySensorDeviceClass.TAMPER,
+            "entity_category": EntityCategory.DIAGNOSTIC,
+            "icon": "mdi:shield-lock-open",
+        }]
+
     async def async_get_snapshot(self) -> dict[str, dict]:
         """Read all mapped state objects into one atomic snapshot."""
         if not self._state_mappings:
             raise ValueError("MIP-24 isp.20 requires a validated S2000-PP mapping")
+        mapping = self.attr_gateway_mapping
+        numeric_reader = S2000PPNumericValueReader(
+            self.attr_client,
+            self.attr_device_id,
+            mapping.identity.gateway.stable_id,
+        )
+        numeric_items = tuple(self._numeric_mappings.items())
+        if numeric_items:
+            key, item = numeric_items[self._numeric_cursor]
+            result = await numeric_reader.async_read(
+                item.gateway_object_number, self._NUMERIC_KINDS[key]
+            )
+            if result.status is NumericResultStatus.READY:
+                self._numeric_values[key] = {
+                    "value": result.value,
+                    "raw_register": result.raw_register,
+                    "parameter_kind": result.parameter_kind.value,
+                }
+                self._numeric_cursor = (self._numeric_cursor + 1) % len(numeric_items)
+            elif result.status is NumericResultStatus.PROTOCOL_ERROR:
+                raise ModbusException(result.message or "numeric protocol error")
+
         states = await S2000PPRuntimeReader(
             self.attr_client, self.attr_device_id
         ).async_read_zone_states(self._state_mappings.values())
+        state_snapshot = {
+            key: self._state_sensor_value(key, states[item.gateway_object_number])
+            for key, item in self._state_mappings.items()
+        }
+        device_state = states[self._state_mappings["device_state"].gateway_object_number]
         return {
-            "state_sensors": {
-                key: self._state_sensor_value(key, states[item.gateway_object_number])
-                for key, item in self._state_mappings.items()
-            }
+            "numeric_sensors": {
+                key: dict(value) for key, value in self._numeric_values.items()
+            },
+            "state_sensors": state_snapshot,
+            "binary_sensors": {"tamper": {
+                "state": self._tamper_state(device_state),
+                "primary_code": device_state.primary_state,
+                "expanded_codes": device_state.expanded_states,
+            }},
         }
 
     async def data_init(self) -> bool:
@@ -2057,6 +2189,16 @@ class MIP24Isp20:
                 cls._state_name(code) for code in expanded_codes if code != 0
             ),
         }
+
+    @staticmethod
+    def _tamper_state(state: S2000PPZoneState) -> bool | None:
+        """Derive case-open semantics from documented input-0 state codes."""
+        for code in (state.primary_state, *state.expanded_states):
+            if code == 149:
+                return True
+            if code == 152:
+                return False
+        return None
 
 
 class C2000KDL:

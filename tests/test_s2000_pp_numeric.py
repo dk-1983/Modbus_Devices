@@ -9,6 +9,7 @@ from custom_components.modbus_devices.s2000_pp import (
     NumericResultStatus,
     S2000PPNumericValueReader,
     decode_s2000_pp_q8_8,
+    decode_s2000_pp_unsigned_q8_8,
 )
 
 
@@ -52,6 +53,11 @@ def test_q8_8(raw, value):
     assert decode_s2000_pp_q8_8(raw) == value
 
 
+@pytest.mark.parametrize(("raw", "value"), [(0x1B80, 27.5), (0xFFFF, 255.99609375)])
+def test_unsigned_q8_8(raw, value):
+    assert decode_s2000_pp_unsigned_q8_8(raw) == value
+
+
 @pytest.mark.asyncio
 async def test_selector_and_ready_result_are_validated():
     client = Client(Response(registers=[0x0180]))
@@ -61,6 +67,17 @@ async def test_selector_and_ready_result_are_validated():
     assert result.status is NumericResultStatus.READY
     assert result.value == 1.5
     assert client.writes[0] == {"address": 46179, "value": 10, "device_id": 3}
+
+
+@pytest.mark.asyncio
+async def test_type_8_power_value_uses_selector_46181_and_unsigned_q8_8():
+    client = Client(Response(registers=[0xFF00]))
+    result = await S2000PPNumericValueReader(client, 2, "mip").async_read(
+        21, NumericParameterKind.OUTPUT_VOLTAGE
+    )
+    assert result.status is NumericResultStatus.READY
+    assert result.value == 255.0
+    assert client.writes == [{"address": 46181, "value": 21, "device_id": 2}]
 
 
 @pytest.mark.asyncio

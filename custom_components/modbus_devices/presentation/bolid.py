@@ -32,6 +32,24 @@ C2000_VT_PROFILE = PresentationProfile(
     ),
 )
 
+MIP24_ISP20_PROFILE = PresentationProfile(
+    profile_id="bolid_mip24_isp20",
+    roles=(
+        PresentationRole("tamper", entity_domain="binary_sensor"),
+        PresentationRole("output_power_state"),
+        PresentationRole("output_voltage"),
+        PresentationRole("output_load_state"),
+        PresentationRole("output_current"),
+        PresentationRole("battery_state"),
+        PresentationRole("battery_voltage"),
+        PresentationRole("charger_state"),
+        PresentationRole("battery_charge"),
+        PresentationRole("mains_state"),
+        PresentationRole("mains_voltage"),
+        PresentationRole("device_state", PresentationSection.DIAGNOSTIC),
+    ),
+)
+
 C2000_KPB_PROFILE = PresentationProfile(
     profile_id="bolid_c2000_kpb",
     roles=tuple(PresentationRole(f"output_{number}", entity_domain="switch") for number in range(1, 7)),
@@ -63,6 +81,12 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "C2000VT",
         C2000_VT_PROFILE,
         models=("С2000-ВТ", "С2000-ВТ исп.01"),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "MIP24Isp20",
+        MIP24_ISP20_PROFILE,
+        models=("МИП-24 исп.20",),
     )
     registry.register_equipment(
         "Bolid",
