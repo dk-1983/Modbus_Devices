@@ -156,6 +156,71 @@ test("device selector is integration-filtered and generates one complete native 
   ]);
 });
 
+test("background hass updates preserve the active device picker node", async () => {
+  const generated = nativeConfig("MIP-24", [
+    { entity: "sensor.mip_output_voltage", name: "Output voltage" },
+  ]);
+  const { calls, editor } = editorHarness(generated);
+  const selector = editor.shadowRoot.find("ha-selector");
+  const selectorModel = selector.selector;
+  selector.interactionOpen = true;
+
+  for (let sequence = 0; sequence < 100; sequence += 1) {
+    editor.hass = {
+      sequence,
+      devices: [{ id: `background-${sequence}` }],
+      async callWS(message) {
+        calls.push(message);
+        return structuredClone(generated);
+      },
+    };
+    editor.setConfig({ type: `custom:${DEVICE_CARD_TAG}` });
+    assert.equal(editor.shadowRoot.find("ha-selector"), selector);
+    assert.equal(selector.selector, selectorModel);
+    assert.equal(selector.interactionOpen, true);
+  }
+
+  await select(editor, "device-mip");
+  assert.equal(editor.shadowRoot.find("ha-selector"), selector);
+  assert.equal(calls.length, 1);
+  assert.equal(
+    editor.events.filter((event) => event.type === "config-changed").length,
+    1,
+  );
+  assert.deepEqual(emittedConfig(editor), generated);
+});
+
+test("loading and recovery status never replace the selected picker", async () => {
+  let finish;
+  const response = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const calls = [];
+  const editor = new ModbusDeviceCardEditor();
+  editor.hass = {
+    callWS(message) {
+      calls.push(message);
+      return response;
+    },
+  };
+  editor.setConfig({ type: `custom:${DEVICE_CARD_TAG}` });
+  const selector = editor.shadowRoot.find("ha-selector");
+
+  selector.emit("value-changed", { value: "device-mip" });
+  assert.equal(editor.shadowRoot.find("ha-selector"), selector);
+  assert.ok(editor.shadowRoot.find("ha-linear-progress"));
+
+  editor.hass = { ...editor._hass, backgroundSequence: 1 };
+  assert.equal(editor.shadowRoot.find("ha-selector"), selector);
+  finish(nativeConfig("MIP-24", ["sensor.mip_output_voltage"]));
+  await tick();
+  await tick();
+
+  assert.equal(editor.shadowRoot.find("ha-selector"), selector);
+  assert.equal(calls.length, 1);
+  assert.equal(emittedConfig(editor).type, "entities");
+});
+
 test("KPB and Owen backend results pass through without editor branching", async () => {
   const fixtures = [
     nativeConfig("KPB Hallway 9", [

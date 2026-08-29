@@ -34,6 +34,7 @@ export class ModbusDeviceCardEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._generation = 0;
+    this._render();
   }
 
   setConfig(config) {
@@ -63,52 +64,64 @@ export class ModbusDeviceCardEditor extends HTMLElement {
     if (!this.shadowRoot) {
       return;
     }
-    const container = document.createElement("div");
-    container.style.display = "grid";
-    container.style.gap = "12px";
+    if (!this._selector) {
+      const container = document.createElement("div");
+      container.style.display = "grid";
+      container.style.gap = "12px";
 
-    const selector = document.createElement("ha-selector");
-    selector.hass = this._hass;
-    selector.selector = {
-      device: { filter: { integration: "modbus_devices" } },
-    };
-    selector.value = this._deviceId;
-    selector.label = "Modbus Device";
-    selector.addEventListener("value-changed", (event) => {
-      const deviceId = event.detail?.value;
-      if (deviceId === this._deviceId) {
-        return;
-      }
-      this._deviceId = deviceId;
-      if (!deviceId) {
-        this._generation += 1;
-        this._loading = false;
-        this._error = undefined;
-        this._render();
-        return;
-      }
-      void this._generate(deviceId);
-    });
-    container.append(selector);
+      this._selector = document.createElement("ha-selector");
+      this._selector.selector = {
+        device: { filter: { integration: "modbus_devices" } },
+      };
+      this._selector.label = "Modbus Device";
+      this._selector.addEventListener("value-changed", (event) => {
+        const deviceId = event.detail?.value;
+        if (deviceId === this._deviceId) {
+          return;
+        }
+        this._deviceId = deviceId;
+        if (!deviceId) {
+          this._generation += 1;
+          this._loading = false;
+          this._error = undefined;
+          this._renderStatus();
+          return;
+        }
+        void this._generate(deviceId);
+      });
+      this._status = document.createElement("div");
+      this._status.style.display = "contents";
+      container.append(this._selector, this._status);
+      this.shadowRoot.replaceChildren(container);
+    }
 
+    this._selector.hass = this._hass;
+    if (this._selector.value !== this._deviceId) {
+      this._selector.value = this._deviceId;
+    }
+    this._renderStatus();
+  }
+
+  _renderStatus() {
+    const status = [];
     if (this._loading) {
       const progress = document.createElement("ha-linear-progress");
       progress.indeterminate = true;
-      container.append(progress);
+      status.push(progress);
     }
     if (this._error) {
       const error = document.createElement("ha-alert");
       error.alertType = "error";
       error.textContent = this._error;
-      container.append(error);
+      status.push(error);
       const retry = document.createElement("ha-button");
       retry.textContent = "Retry";
       retry.addEventListener("click", () => {
         void this._generate(this._deviceId);
       });
-      container.append(retry);
+      status.push(retry);
     }
-    this.shadowRoot.replaceChildren(container);
+    this._status?.replaceChildren(...status);
   }
 
   async _generate(deviceId) {
@@ -118,7 +131,7 @@ export class ModbusDeviceCardEditor extends HTMLElement {
     const generation = ++this._generation;
     this._loading = true;
     this._error = undefined;
-    this._render();
+    this._renderStatus();
     try {
       const generatedConfig = await this._hass.callWS({
         type: "modbus_devices/presentation/build",
@@ -149,7 +162,7 @@ export class ModbusDeviceCardEditor extends HTMLElement {
     } finally {
       if (generation === this._generation) {
         this._loading = false;
-        this._render();
+        this._renderStatus();
       }
     }
   }
