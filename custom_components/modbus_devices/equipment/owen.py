@@ -113,10 +113,10 @@ class TRM138:
             tzinfo=timezone(timedelta(hours=Config.TIME_ZONE)),
             microsecond=0,
         )
-        self.attr_device_type = "Not supported"
-        self.attr_software_version = "Not supported"
-        self.attr_hardware_version = "Not supported"
-        self.attr_serial_number = "Not supported"
+        self.attr_device_type = None
+        self.attr_software_version = None
+        self.attr_hardware_version = None
+        self.attr_serial_number = None
         return True
 
     async def get_chanel(self, chanel: int) -> dict[str, Any]:

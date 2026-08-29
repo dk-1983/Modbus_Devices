@@ -13,7 +13,10 @@ from custom_components.modbus_devices.binary_sensor import (
 )
 from custom_components.modbus_devices.button import ModBusCommandButtonEntity
 from custom_components.modbus_devices.const import Config
-from custom_components.modbus_devices.device_info import via_device_for_entry
+from custom_components.modbus_devices.device_info import (
+    EquipmentMetadata,
+    via_device_for_entry,
+)
 from custom_components.modbus_devices.equipment.bolid import (
     C2000KPB,
     C2000SP4,
@@ -376,6 +379,57 @@ def test_all_entity_platform_device_info_uses_the_same_parent() -> None:
     assert {entity.device_info["via_device"] for entity in entities} == {
         (Config.DOMAIN, "gateway-1")
     }
+
+
+def test_protocol_metadata_uses_native_device_info_fields_consistently() -> None:
+    device = SimpleNamespace(
+        attr_device_identifier="child-identity",
+        attr_unique_id_prefix="child-identity",
+        attr_manufactures_name="Test",
+        attr_model_name="Test child",
+        attr_description="Test child",
+        attr_device_type=36,
+        attr_hardware_version="2.0",
+        attr_software_version="3.01",
+        attr_serial_number="ABC123",
+    )
+    entry = child_entry("child-entry", "gateway-1")
+    coord = coordinator(device)
+    entities = (
+        ModBusStateSensorEntity(
+            coord, device, entry, {"sensor_id": "state", "name": "State"}
+        ),
+        ModBusNumericSensorEntity(
+            coord,
+            device,
+            entry,
+            {
+                "sensor_id": "numeric",
+                "name": "Numeric",
+                "device_class": None,
+                "state_class": None,
+                "unit": None,
+                "precision": 0,
+            },
+        ),
+    )
+
+    expected = {
+        "model_id": "36",
+        "hw_version": "2.0",
+        "sw_version": "3.01",
+        "serial_number": "ABC123",
+    }
+    assert all(
+        {key: entity.device_info[key] for key in expected} == expected
+        for entity in entities
+    )
+
+
+def test_missing_protocol_metadata_stays_none_without_placeholders() -> None:
+    device = SimpleNamespace(attr_device_type=None)
+
+    assert EquipmentMetadata.from_device(device) == EquipmentMetadata()
 
 
 def test_missing_binary_and_switch_snapshot_values_are_unknown() -> None:

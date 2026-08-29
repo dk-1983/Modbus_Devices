@@ -685,8 +685,9 @@ class S2000PP:
         return True
 
     async def async_get_snapshot(self) -> dict[str, Any]:
-        """Read service metadata and diagnostics in one coordinator refresh."""
-        await self.get_device_info()
+        """Read diagnostics and cache service metadata on the first snapshot."""
+        if self.attr_device_type is None:
+            await self.get_device_info()
         inputs = await self.get_inputs()
         return {"inputs": {item["input_number"]: item for item in inputs}}
 

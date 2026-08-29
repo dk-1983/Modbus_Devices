@@ -346,6 +346,16 @@ def test_local_hardware_rows_and_numeric_payloads():
 
     assert snapshot["binary_sensors"]["tamper"]["state"] is False
     assert {
+        key: value["state"] for key, value in snapshot["state_sensors"].items()
+    } == {
+        "device_state": "enclosure_tamper_restored",
+        "output_power_state": "output_voltage_connected",
+        "output_load_state": "power_overload_restored",
+        "battery_state": "battery_restored",
+        "charger_state": "charger_restored",
+        "mains_state": "mains_restored",
+    }
+    assert {
         key: value["value"] for key, value in snapshot["numeric_sensors"].items()
     } == {
         "output_voltage": 27.1875,

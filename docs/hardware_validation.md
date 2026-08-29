@@ -118,6 +118,31 @@ S2000-PP documentation does not define Modbus result registers for those MIP
 service values, so the integration does not publish synthetic entities for
 them.
 
+### MIP device metadata and state-semantics audit
+
+The MIP manual documents software release history (including a target/current
+manual release), but this is not evidence of the firmware installed in a
+particular connected unit. The S2000-PP 3.01 Modbus service registers 46152 and
+46153 identify the S2000-PP itself (type 36 and its firmware version). Its
+documented downstream zone table contains Orion address, input, partition and
+zone type, while the downstream runtime paths expose state and selected numeric
+values. No documented S2000-PP Modbus path was found for the MIP's firmware,
+hardware revision, serial number, or exact protocol model ID. Consequently no
+metadata probe was sent to the local stand, no MIP version is hardcoded, and
+these native Home Assistant DeviceInfo fields remain absent until a documented
+per-device read path is available. This limitation adds zero Modbus requests.
+
+The local hardware fixture also protects the input ownership of the observed
+primary states. Rows 6-11 decoded respectively to enclosure restored (input 0),
+output voltage connected (input 1), output overload restored (input 2), battery
+restored (input 3), charger restored (input 4), and mains restored (input 5).
+These codes agree with the official input table. In particular, overload state
+belongs to input 2, battery state to input 3, charger state to input 4, and
+mains state to input 5. A live UI showing those labels on different named
+inputs indicates a stale or shifted saved row mapping rather than a different
+event-code meaning; the six-row mapping should be revalidated before changing
+the state table.
+
 ## S2000R-ARR125
 
 State communication was observed with firmware 1.31 after the firmware update.

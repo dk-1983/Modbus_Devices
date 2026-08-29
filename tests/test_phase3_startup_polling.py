@@ -156,7 +156,7 @@ async def test_m3000_snapshot_sensor_and_legacy_clock_cleanup_are_one_path(
 
 
 @pytest.mark.asyncio
-async def test_s2000pp_first_snapshot_reads_service_and_diagnostics_once():
+async def test_s2000pp_first_snapshot_caches_service_info_for_later_refreshes():
     client = CountingClient()
     device = S2000PP(client, 1)
 
@@ -166,6 +166,13 @@ async def test_s2000pp_first_snapshot_reads_service_and_diagnostics_once():
     snapshot = await device.async_get_snapshot()
     assert set(snapshot["inputs"]) == {1, 2, 3, 4}
     assert client.calls == [("holding", 46152, 2), ("discrete", 8, 4)]
+
+    await device.async_get_snapshot()
+    assert client.calls == [
+        ("holding", 46152, 2),
+        ("discrete", 8, 4),
+        ("discrete", 8, 4),
+    ]
 
 
 @pytest.mark.asyncio
