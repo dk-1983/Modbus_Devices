@@ -1,6 +1,7 @@
 """Tests for C2000-VT model and mapping."""
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -428,6 +429,91 @@ async def test_pending_repeats_result_without_selector_or_cursor_advance():
         call for call in client.calls
         if call == ("holding", 46328, 1)
     ]) == 3
+
+
+@pytest.mark.asyncio
+async def test_production_like_reconciled_rows_publish_initial_values(caplog):
+    """Rows repaired from the live table drive selectors and populate both caches."""
+    persisted = make_mapping(
+        manual_zone_mapping(51, 5, 6, 14, None),
+        base=51,
+        kdl=3,
+    )
+    live = configuration(
+        S2000PPZoneRow(63, 3, 51, 14, 6),
+        S2000PPZoneRow(64, 3, 52, 14, 6),
+    )
+    reconciled = C2000VT.reconcile_gateway_mapping(persisted, live)
+    client = RoundRobinClient(["pending", "pending", 0x13F0, 0x3960])
+    device = C2000VT(client, 2)
+    device.apply_gateway_mapping(reconciled)
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.modbus_devices.equipment.bolid",
+    ):
+        snapshots = [await device.async_get_snapshot() for _ in range(4)]
+
+    assert [item.gateway_object_number for item in reconciled.objects] == [63, 64]
+    assert snapshots[0]["numeric_sensors"] == {}
+    assert snapshots[1]["numeric_sensors"] == {}
+    assert snapshots[2]["numeric_sensors"]["temperature"]["value"] == 19.9375
+    assert snapshots[3]["numeric_sensors"] == {
+        "temperature": {
+            "value": 19.9375,
+            "raw_register": 0x13F0,
+            "parameter_kind": "temperature",
+        },
+        "humidity": {
+            "value": 57.375,
+            "raw_register": 0x3960,
+            "parameter_kind": "relative_humidity",
+        },
+    }
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 63),
+        ("select", 46179, 64),
+    ]
+    assert all(len(snapshot["state_sensors"]) == 2 for snapshot in snapshots)
+    assert "channel=temperature PP-row=63 status=pending" in caplog.text
+    assert "channel=temperature PP-row=63 status=ready" in caplog.text
+    assert "channel=humidity PP-row=64 status=ready" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_shared_selector_pending_owner_completes_before_other_vt_starts():
+    client = RoundRobinClient(["pending", 0x13F0, 0x1440])
+    first = C2000VT(client, 2)
+    first.apply_gateway_mapping(
+        make_mapping(
+            manual_zone_mapping(51, 63, 6, 14, None),
+            manual_zone_mapping(52, 64, 6, 14, None),
+            base=51,
+            kdl=3,
+        )
+    )
+    second = C2000VT(client, 2)
+    second.apply_gateway_mapping(
+        make_mapping(
+            manual_zone_mapping(53, 65, 6, 14, None),
+            manual_zone_mapping(54, 66, 6, 14, None),
+            base=53,
+            kdl=3,
+        )
+    )
+
+    assert (await first.async_get_snapshot())["numeric_sensors"] == {}
+    assert (await second.async_get_snapshot())["numeric_sensors"] == {}
+    assert (await first.async_get_snapshot())["numeric_sensors"]["temperature"][
+        "value"
+    ] == 19.9375
+    assert (await second.async_get_snapshot())["numeric_sensors"]["temperature"][
+        "value"
+    ] == 20.25
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 63),
+        ("select", 46179, 65),
+    ]
 
 
 def test_round_robin_polling_budget_is_four_requests_per_ready_refresh():

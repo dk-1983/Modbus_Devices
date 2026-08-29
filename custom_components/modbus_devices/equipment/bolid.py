@@ -4088,11 +4088,27 @@ class C2000VT(BolidDPLSNumericDeviceBase):
         keys = ("temperature", "humidity")
         key = keys[self._numeric_cursor]
         item = self._numeric_mappings[key]
+        _LOGGER.debug(
+            "C2000-VT numeric poll channel=%s PP-row=%s cursor=%s",
+            key,
+            item.gateway_object_number,
+            self._numeric_cursor,
+        )
         result = await S2000PPNumericValueReader(
             self.attr_client,
             self.attr_device_id,
             mapping.identity.gateway.stable_id,
         ).async_read(item.gateway_object_number, self.numeric_kinds[key])
+        _LOGGER.debug(
+            "C2000-VT numeric result channel=%s PP-row=%s status=%s "
+            "exception=%s raw=%s decoded=%s",
+            key,
+            item.gateway_object_number,
+            result.status.value,
+            result.exception_code,
+            result.raw_register,
+            result.value,
+        )
         if result.status is NumericResultStatus.READY:
             self._numeric_values[key] = {
                 "value": result.value,
@@ -4100,6 +4116,11 @@ class C2000VT(BolidDPLSNumericDeviceBase):
                 "parameter_kind": result.parameter_kind.value,
             }
             self._numeric_cursor = (self._numeric_cursor + 1) % len(keys)
+            _LOGGER.debug(
+                "C2000-VT numeric cursor advanced channel=%s next=%s",
+                key,
+                keys[self._numeric_cursor],
+            )
         elif result.status is NumericResultStatus.PROTOCOL_ERROR:
             raise ModbusException(result.message or "numeric protocol error")
 
