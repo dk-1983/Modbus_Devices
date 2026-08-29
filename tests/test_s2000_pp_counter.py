@@ -192,3 +192,51 @@ async def test_counter_and_numeric_share_selector_serialization():
     assert first.status is NumericResultStatus.PENDING
     assert second.status is NumericResultStatus.RETRYABLE
     assert [write["address"] for write in client.writes] == [46180]
+
+
+@pytest.mark.asyncio
+async def test_pending_counter_repeats_only_result_until_completion():
+    client = Client(Response(error=True, code=15))
+    reader = S2000PPCounterValueReader(client, 1, "pending-counter")
+
+    first = await reader.async_read(10)
+    client.result = Response(registers=[0, 0, 25])
+    second = await reader.async_read(10)
+
+    assert first.status is NumericResultStatus.PENDING
+    assert second.status is NumericResultStatus.READY
+    assert second.raw_count == 25
+    assert [write["address"] for write in client.writes] == [46180]
+    assert [read["address"] for read in client.reads] == [46332, 46332]
+
+
+@pytest.mark.asyncio
+async def test_four_counter_transactions_remain_selector_session_serialized():
+    class TraceClient(Client):
+        def __init__(self):
+            super().__init__()
+            self.trace = []
+
+        async def write_register(self, **kwargs):
+            self.trace.append(("selector", kwargs["value"]))
+            await asyncio.sleep(0)
+            return await super().write_register(**kwargs)
+
+        async def read_holding_registers(self, **kwargs):
+            self.trace.append(("result", None))
+            await asyncio.sleep(0)
+            return await super().read_holding_registers(**kwargs)
+
+    client = TraceClient()
+    results = await asyncio.gather(*(
+        S2000PPCounterValueReader(client, 1, "four-svk").async_read(zone)
+        for zone in range(1, 5)
+    ))
+
+    assert all(result.status is NumericResultStatus.READY for result in results)
+    assert client.trace == [
+        ("selector", 1), ("result", None),
+        ("selector", 2), ("result", None),
+        ("selector", 3), ("result", None),
+        ("selector", 4), ("result", None),
+    ]

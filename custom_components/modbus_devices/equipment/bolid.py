@@ -48,6 +48,8 @@ from .equipment import canonical_equipment_class_name
 
 _LOGGER = getLogger(__name__)
 
+SVK_COUNTER_POLL_INTERVAL_SECONDS = 60.0
+
 
 class InvalidM3000ClockPayload(ModbusException):
     """A successful M3000 RTC register read containing invalid calendar fields."""
@@ -2911,6 +2913,7 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
     supported_kdl_input_types = (13,)
     dpls_address_count = 1
     pulse_volume_m3 = 0.001
+    counter_poll_interval_seconds: float | None = None
     optional_counter_result_exceptions: frozenset[int] = frozenset()
     physical_capabilities = (
         "cumulative_water_consumption",
@@ -2944,6 +2947,8 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
             raise TypeError("BolidDPLSWaterMeterBase is not equipment")
         super().__init__(client, device_id)
         self._water_value: dict[str, Any] | None = None
+        self._counter_transaction_pending = False
+        self._next_counter_start_at: float | None = None
 
     def get_numeric_sensor_descriptions(self) -> list[dict[str, Any]]:
         return [{
@@ -2960,11 +2965,37 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
         mapping = self.attr_gateway_mapping
         if mapping is None or self._state_mapping is None:
             raise ValueError("Water meter counter mapping is not configured")
+        monotonic_now = self._monotonic_now()
+        if (
+            not self._counter_transaction_pending
+            and self._next_counter_start_at is not None
+            and monotonic_now < self._next_counter_start_at
+        ):
+            snapshot["numeric_sensors"] = (
+                {} if self._water_value is None
+                else {"water_consumption": dict(self._water_value)}
+            )
+            return snapshot
         result = await S2000PPCounterValueReader(
             self.attr_client,
             self.attr_device_id,
             mapping.identity.gateway.stable_id,
         ).async_read(self._state_mapping.gateway_object_number)
+        self._counter_transaction_pending = (
+            result.result_register_read
+            and result.status in {
+                NumericResultStatus.PENDING,
+                NumericResultStatus.RETRYABLE,
+            }
+        )
+        if (
+            not self._counter_transaction_pending
+            and result.status is not NumericResultStatus.RETRYABLE
+            and self.counter_poll_interval_seconds is not None
+        ):
+            self._next_counter_start_at = (
+                self._monotonic_now() + self.counter_poll_interval_seconds
+            )
         if result.status is NumericResultStatus.READY:
             self._water_value = {
                 "value": result.raw_count * self.pulse_volume_m3,
@@ -2984,6 +3015,11 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
         )
         return snapshot
 
+    @staticmethod
+    def _monotonic_now() -> float:
+        """Return event-loop monotonic time for optional counter cadence."""
+        return asyncio.get_running_loop().time()
+
 
 class SVK15_3_8_1_B3(BolidDPLSWaterMeterBase):
     """Radio water meter with integrated С2000Р-АСР1 исп.01."""
@@ -2993,6 +3029,7 @@ class SVK15_3_8_1_B3(BolidDPLSWaterMeterBase):
     detector_model = "СВК15-3-8-1-Б3"
     detector_description = "Radio DPLS-visible water meter"
     documented_target_firmware = "1.07"
+    counter_poll_interval_seconds = SVK_COUNTER_POLL_INTERVAL_SECONDS
     optional_counter_result_exceptions = frozenset({3})
     physical_capabilities = BolidDPLSWaterMeterBase.physical_capabilities + (
         "radio_supervision",

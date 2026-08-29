@@ -9,7 +9,10 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfVolume
 
 from custom_components.modbus_devices.equipment import bolid
-from custom_components.modbus_devices.equipment.bolid import SVK15_3_8_1_B3
+from custom_components.modbus_devices.equipment.bolid import (
+    SVK_COUNTER_POLL_INTERVAL_SECONDS,
+    SVK15_3_8_1_B3,
+)
 from custom_components.modbus_devices.equipment.equipment import get_equipment_classes_by_manufacturer
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity, DownstreamDeviceIdentity, DownstreamDeviceMetadata,
@@ -43,6 +46,42 @@ def configured(client=None, base=20):
     return device
 
 
+class MutableMonotonicClock:
+    def __init__(self, now=100.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+def install_snapshot_readers(monkeypatch, counter_results):
+    calls = {"state": 0, "counter": 0}
+    results = iter(counter_results)
+
+    class StateReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read_zone_states(self, mappings):
+            calls["state"] += 1
+            return {11: S2000PPZoneState(11, 39, (39,))}
+
+    class CounterReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read(self, zone):
+            calls["counter"] += 1
+            return next(results)
+
+    monkeypatch.setattr(bolid, "S2000PPRuntimeReader", StateReader)
+    monkeypatch.setattr(bolid, "S2000PPCounterValueReader", CounterReader)
+    return calls
+
+
 def test_registration_identity_and_metadata():
     device = configured()
     assert get_equipment_classes_by_manufacturer()["Bolid"].count("SVK15_3_8_1_B3") == 1
@@ -74,6 +113,7 @@ def test_water_and_meter_state_entity_metadata():
     assert water["precision"] == 3
     assert device.get_state_sensor_descriptions()[0]["name"] == "Meter state"
     assert device.attr_platforms == [bolid.Platform.SENSOR]
+    assert device.counter_poll_interval_seconds == SVK_COUNTER_POLL_INTERVAL_SECONDS == 60
 
 
 @pytest.mark.asyncio
@@ -137,7 +177,12 @@ async def test_pending_preserves_last_confirmed_and_protocol_error_fails(monkeyp
         status = NumericResultStatus.PENDING
         def __init__(self, *args): pass
         async def async_read(self, zone):
-            return S2000PPCounterResult(self.status, zone, message="bad")
+            return S2000PPCounterResult(
+                self.status,
+                zone,
+                message="bad",
+                result_register_read=self.status is NumericResultStatus.PENDING,
+            )
     monkeypatch.setattr(bolid, "S2000PPRuntimeReader", StateReader)
     monkeypatch.setattr(bolid, "S2000PPCounterValueReader", CounterReader)
     device = configured()
@@ -256,3 +301,115 @@ def test_unknown_water_value_keeps_entity_available():
 
     assert entity.available is True
     assert entity.native_value is None
+
+
+@pytest.mark.asyncio
+async def test_counter_cadence_caches_success_while_state_keeps_polling(monkeypatch):
+    ready = S2000PPCounterResult(NumericResultStatus.READY, 11, raw_count=2500)
+    calls = install_snapshot_readers(monkeypatch, [ready, ready])
+    clock = MutableMonotonicClock()
+    device = configured()
+    device._monotonic_now = clock
+
+    first = await device.async_get_snapshot()
+    assert first["numeric_sensors"]["water_consumption"]["value"] == 2.5
+    for seconds in (5, 50, 4.999):
+        clock.advance(seconds)
+        snapshot = await device.async_get_snapshot()
+        assert snapshot["numeric_sensors"]["water_consumption"]["value"] == 2.5
+
+    assert calls == {"state": 4, "counter": 1}
+    clock.advance(0.001)
+    await device.async_get_snapshot()
+    assert calls == {"state": 5, "counter": 2}
+
+
+@pytest.mark.asyncio
+async def test_state_only_poll_without_previous_measurement_keeps_unknown(monkeypatch):
+    unavailable = S2000PPCounterResult(
+        NumericResultStatus.PROTOCOL_ERROR,
+        11,
+        exception_code=3,
+        result_register_read=True,
+    )
+    calls = install_snapshot_readers(monkeypatch, [unavailable])
+    clock = MutableMonotonicClock()
+    device = configured()
+    device._monotonic_now = clock
+
+    assert (await device.async_get_snapshot())["numeric_sensors"] == {}
+    clock.advance(5)
+    assert (await device.async_get_snapshot())["numeric_sensors"] == {}
+    assert calls == {"state": 2, "counter": 1}
+
+
+@pytest.mark.asyncio
+async def test_exception_3_clears_cache_and_starts_sixty_second_cooldown(monkeypatch):
+    unavailable = S2000PPCounterResult(
+        NumericResultStatus.PROTOCOL_ERROR,
+        11,
+        exception_code=3,
+        result_register_read=True,
+    )
+    calls = install_snapshot_readers(monkeypatch, [unavailable, unavailable])
+    clock = MutableMonotonicClock()
+    device = configured()
+    device._monotonic_now = clock
+    device._water_value = {"value": 2.5, "raw_count": 2500}
+
+    assert (await device.async_get_snapshot())["numeric_sensors"] == {}
+    clock.advance(5)
+    assert (await device.async_get_snapshot())["numeric_sensors"] == {}
+    assert calls == {"state": 2, "counter": 1}
+    clock.advance(55)
+    await device.async_get_snapshot()
+    assert calls == {"state": 3, "counter": 2}
+
+
+@pytest.mark.asyncio
+async def test_pending_retries_result_then_cooldown_starts_on_completion(monkeypatch):
+    pending = S2000PPCounterResult(
+        NumericResultStatus.PENDING,
+        11,
+        exception_code=15,
+        result_register_read=True,
+    )
+    ready = S2000PPCounterResult(NumericResultStatus.READY, 11, raw_count=3000)
+    calls = install_snapshot_readers(monkeypatch, [pending, ready, ready])
+    clock = MutableMonotonicClock()
+    device = configured()
+    device._monotonic_now = clock
+
+    assert (await device.async_get_snapshot())["numeric_sensors"] == {}
+    clock.advance(5)
+    completed = await device.async_get_snapshot()
+    assert completed["numeric_sensors"]["water_consumption"]["value"] == 3.0
+    clock.advance(5)
+    await device.async_get_snapshot()
+    assert calls == {"state": 3, "counter": 2}
+    clock.advance(55)
+    await device.async_get_snapshot()
+    assert calls == {"state": 4, "counter": 3}
+
+
+@pytest.mark.asyncio
+async def test_four_svk_reduce_new_attempts_to_one_each_per_minute(monkeypatch):
+    ready = S2000PPCounterResult(NumericResultStatus.READY, 11, raw_count=1)
+    calls = install_snapshot_readers(monkeypatch, [ready] * 8)
+    clock = MutableMonotonicClock()
+    devices = [configured(base=20 + index) for index in range(4)]
+    for device in devices:
+        device._monotonic_now = clock
+
+    for device in devices:
+        await device.async_get_snapshot()
+    for _ in range(11):
+        clock.advance(5)
+        for device in devices:
+            await device.async_get_snapshot()
+    assert calls == {"state": 48, "counter": 4}
+
+    clock.advance(5)
+    for device in devices:
+        await device.async_get_snapshot()
+    assert calls == {"state": 52, "counter": 8}
