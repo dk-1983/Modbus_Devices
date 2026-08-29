@@ -32,6 +32,24 @@ C2000_VT_PROFILE = PresentationProfile(
     ),
 )
 
+C2000_DZ_PROFILE = PresentationProfile(
+    profile_id="bolid_c2000_dz",
+    roles=(
+        PresentationRole("water_leak", entity_domain="binary_sensor"),
+        PresentationRole("water_leak_state", PresentationSection.DIAGNOSTIC),
+    ),
+)
+
+C2000R_DZ_PROFILE = PresentationProfile(
+    profile_id="bolid_c2000r_dz",
+    roles=(
+        PresentationRole("water_leak", entity_domain="binary_sensor"),
+        PresentationRole("main_battery_state"),
+        PresentationRole("reserve_battery_state"),
+        PresentationRole("water_leak_state", PresentationSection.DIAGNOSTIC),
+    ),
+)
+
 MIP24_ISP20_PROFILE = PresentationProfile(
     profile_id="bolid_mip24_isp20",
     roles=(
@@ -75,6 +93,18 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "M3000BB1020",
         M3000_BB_1020_PROFILE,
         models=("M3000-BB-1020",),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000DZ",
+        C2000_DZ_PROFILE,
+        models=("С2000-ДЗ",),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000RDZ",
+        C2000R_DZ_PROFILE,
+        models=("С2000Р-ДЗ",),
     )
     registry.register_equipment(
         "Bolid",

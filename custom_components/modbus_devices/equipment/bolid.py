@@ -3644,27 +3644,14 @@ class C2000RSirena(BolidDPLSOutputBase):
             raise ValueError("C2000RSirena requires two DPLS addresses")
 
 
-class C2000DZ:
-    """One-address wired water-leak detector С2000-ДЗ."""
+class BolidDPLSWaterDetectorBase:
+    """Shared one-row S2000-PP mechanics for distinct water detectors."""
 
-    equipment_manufacturer = "Bolid"
-    equipment_model = "С2000-ДЗ"
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 1
-    variant_optional = True
-    variants = {
-        "v1_06": "С2000-ДЗ 1.06",
-        "v1_10": "С2000-ДЗ 1.10",
-        "v1_13": "С2000-ДЗ 1.13",
-    }
-    variant_metadata = {
-        "v1_06": {"dpls_current": "≤0.5 mA", "galvanic_isolation": False},
-        "v1_10": {"dpls_current": "≤1 mA", "galvanic_isolation": True},
-        "v1_13": {"dpls_current": "≤0.5 mA", "galvanic_isolation": True},
-    }
-    supported_kdl_input_types = (6, 17)
-    documented_classic_kdl_minimum = "2.10"
+    variants: dict[str, str] = {}
+    variant_metadata: dict[str, dict[str, Any]] = {}
     STATE_NAMES = {**C2000KPB.STATE_NAMES, 79: "water_alarm", 80: "water_alarm_restored"}
     capability_requirements = (
         GatewayCapabilitySpec(
@@ -3678,13 +3665,15 @@ class C2000DZ:
         "S2000-PP does not expose configured KDL input type, DPLS voltage, ADC, "
         "serial, actual firmware, hardware revision, or address programming"
     )
+    description = "Addressable water leak detector"
+    battery_state_groups: dict[str, tuple[int, ...]] = {}
 
     def __init__(self, client, device_id) -> None:
         self.attr_client = client
         self.attr_device_id = device_id
         self.attr_manufactures_name = "Bolid"
-        self.attr_model_name = "С2000-ДЗ"
-        self.attr_description = "Addressable water leak detector"
+        self.attr_model_name = self.equipment_model
+        self.attr_description = self.description
         self.attr_device_type = None
         self.attr_serial_number = None
         self.attr_hardware_version = None
@@ -3705,19 +3694,51 @@ class C2000DZ:
     def get_variant_options(cls) -> dict[str, str]:
         return dict(cls.variants)
 
+    @classmethod
+    def reconcile_gateway_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> ResolvedDeviceMapping:
+        """Resolve one exact DPLS row without using its partition as identity."""
+        identity = mapping.identity
+        dpls = identity.dpls
+        if dpls is None or dpls.address_count != 1:
+            raise ValueError("Water detector requires one DPLS address")
+        matches = [
+            row
+            for row in configuration.zones_for_device(identity.orion_address)
+            if row.local_zone_number == dpls.base_address and row.zone_type == 1
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Water detector mapping does not match one unambiguous zone-type-1 row"
+            )
+        row = matches[0]
+        return ResolvedDeviceMapping(
+            identity,
+            mapping.source,
+            (
+                resolve_zone_row(
+                    row,
+                    configuration.partition_id(row.partition_number),
+                ),
+            ),
+        )
+
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         identity = mapping.identity
         if identity.model != self.__class__.__name__:
-            raise ValueError("Gateway mapping model does not match C2000DZ")
+            raise ValueError("Gateway mapping model does not match water detector")
         if identity.gateway.gateway_type is not self.required_gateway:
-            raise ValueError("Gateway mapping type does not match C2000DZ")
+            raise ValueError("Gateway mapping type does not match water detector")
         dpls = identity.dpls
         if dpls is None or dpls.address_count != 1:
-            raise ValueError("C2000DZ requires exactly one DPLS address")
+            raise ValueError("Water detector requires exactly one DPLS address")
         if identity.metadata.variant not in {None, *self.variants}:
-            raise ValueError("Unsupported C2000DZ variant")
+            raise ValueError("Unsupported water-detector variant")
         if len(mapping.objects) != 1:
-            raise ValueError("C2000DZ requires exactly one own zone mapping")
+            raise ValueError("Water detector requires exactly one own zone mapping")
         item = mapping.objects[0]
         if (
             item.object_kind is not ObjectKind.ZONE
@@ -3726,7 +3747,9 @@ class C2000DZ:
             or item.zone_details.zone_type != 1
             or item.data_area is not ModbusDataArea.HOLDING_REGISTER
         ):
-            raise ValueError("C2000DZ mapping must be zone type 1 at its DPLS address")
+            raise ValueError(
+                "Water detector mapping must be zone type 1 at its DPLS address"
+            )
         self.attr_gateway_mapping = mapping
         self.attr_device_identifier = identity.stable_id
         self.attr_unique_id_prefix = identity.stable_id
@@ -3737,12 +3760,10 @@ class C2000DZ:
             "kdl_orion_address": identity.orion_address,
             "gateway_identity": identity.gateway.stable_id,
             "dpls_address": dpls.base_address,
-            "supported_kdl_input_types": self.supported_kdl_input_types,
-            "documented_classic_kdl_minimum": self.documented_classic_kdl_minimum,
             "transport_limitation": self.gateway_transport_limitation,
         }
         self._state_mapping = item
-        self.attr_platforms = [Platform.SENSOR]
+        self.attr_platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
     async def data_init(self) -> bool:
         self.attr_init_time = datetime.now()
@@ -3757,20 +3778,40 @@ class C2000DZ:
         }
 
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
-        return [] if self._state_mapping is None else [{
+        if self._state_mapping is None:
+            return []
+        descriptions = [{
             "sensor_id": "water_leak_state", "name": "Water leak state",
             "device_class": None, "icon": "mdi:water-alert",
+            "entity_category": EntityCategory.DIAGNOSTIC,
+        }]
+        for key in self.battery_state_groups:
+            descriptions.append({
+                "sensor_id": key,
+                "name": key.replace("_", " ").title(),
+                "device_class": None,
+                "icon": "mdi:battery-check",
+            })
+        return descriptions
+
+    def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Expose only the documented water alarm/restored binary semantic."""
+        return [] if self._state_mapping is None else [{
+            "sensor_id": "water_leak",
+            "name": "Water leak",
+            "device_class": BinarySensorDeviceClass.MOISTURE,
+            "icon": "mdi:water-alert",
         }]
 
     async def async_get_snapshot(self) -> dict[str, dict]:
         if self._state_mapping is None:
-            raise ValueError("C2000DZ zone mapping is not configured")
+            raise ValueError("Water-detector zone mapping is not configured")
         states = await S2000PPRuntimeReader(
             self.attr_client, self.attr_device_id
         ).async_read_zone_states((self._state_mapping,))
         state = states[self._state_mapping.gateway_object_number]
         active = tuple(code for code in state.expanded_states if code != 0)
-        return {"state_sensors": {"water_leak_state": {
+        raw_state = {
             "state": self.STATE_NAMES.get(
                 state.primary_state, f"unknown_{state.primary_state}"
             ),
@@ -3779,7 +3820,84 @@ class C2000DZ:
             "expanded_states": tuple(
                 self.STATE_NAMES.get(code, f"unknown_{code}") for code in active
             ),
-        }}}
+        }
+        state_sensors = {"water_leak_state": raw_state}
+        for key, codes in self.battery_state_groups.items():
+            code = next((item for item in active if item in codes), None)
+            state_sensors[key] = {
+                "state": None if code is None else self.STATE_NAMES.get(
+                    code, f"unknown_{code}"
+                ),
+                "primary_code": state.primary_state,
+                "expanded_codes": state.expanded_states,
+                "expanded_states": raw_state["expanded_states"],
+            }
+        water_state = (
+            True if state.primary_state == 79
+            else False if state.primary_state == 80
+            else None
+        )
+        return {
+            "state_sensors": state_sensors,
+            "binary_sensors": {"water_leak": {
+                "state": water_state,
+                "primary_code": state.primary_state,
+                "expanded_codes": state.expanded_states,
+            }},
+        }
+
+
+class C2000DZ(BolidDPLSWaterDetectorBase):
+    """One-address wired water-leak detector С2000-ДЗ."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000-ДЗ"
+    variant_optional = True
+    variants = {
+        "v1_06": "С2000-ДЗ 1.06",
+        "v1_10": "С2000-ДЗ 1.10",
+        "v1_13": "С2000-ДЗ 1.13",
+    }
+    variant_metadata = {
+        "v1_06": {"dpls_current": "≤0.5 mA", "galvanic_isolation": False},
+        "v1_10": {"dpls_current": "≤1 mA", "galvanic_isolation": True},
+        "v1_13": {"dpls_current": "≤0.5 mA", "galvanic_isolation": True},
+    }
+    supported_kdl_input_types = (6, 17)
+    documented_classic_kdl_minimum = "2.10"
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Keep wired-only static metadata without adding radio capabilities."""
+        super().apply_gateway_mapping(mapping)
+        self.attr_device_metadata.update({
+            "supported_kdl_input_types": self.supported_kdl_input_types,
+            "documented_classic_kdl_minimum": self.documented_classic_kdl_minimum,
+        })
+
+
+class C2000RDZ(BolidDPLSWaterDetectorBase):
+    """Ordinary two-battery radio water-leak detector С2000Р-ДЗ."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-ДЗ"
+    description = "Radio water leak detector"
+    documented_firmware_family = (
+        "1.00", "1.01", "1.02", "1.03", "1.04", "1.05", "1.06"
+    )
+    battery_state_groups = {
+        "main_battery_state": (200, 211, 202),
+        "reserve_battery_state": (213, 212),
+    }
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Attach documented metadata without guessing actual runtime versions."""
+        super().apply_gateway_mapping(mapping)
+        self.attr_device_metadata.update({
+            "battery_topology": "main_and_reserve_cr2450",
+            "documented_firmware_family": self.documented_firmware_family,
+            "tamper_capability": "documented_pp_routing_deferred",
+            "radio_supervision": "documented_product_specific_routing_deferred",
+        })
 
 
 class BolidDPLSNumericDeviceBase:
@@ -4767,6 +4885,7 @@ EQUIPMENT_CLASSES = (
     C2000KDL,
     C2000KPB,
     C2000RARR125,
+    C2000RDZ,
     C2000RDIP,
     C2000RIP,
     C2000RRM,

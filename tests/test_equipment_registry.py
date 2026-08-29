@@ -26,6 +26,7 @@ EXPECTED_CLASSES = {
         "C2000KDL",
         "C2000KPB",
         "C2000RARR125",
+        "C2000RDZ",
         "C2000RDIP",
         "C2000RIP",
         "C2000RRM",
@@ -60,6 +61,7 @@ EXPECTED_MODELS = {
         "С2000-КДЛ",
         "С2000-КПБ",
         "С2000Р-АРР125",
+        "С2000Р-ДЗ",
         "С2000Р-ДИП",
         "С2000Р-ИП",
         "С2000Р-РМ",
@@ -87,7 +89,7 @@ EXPECTED_MODELS = {
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 30
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 31
 
 
 def test_module_exports_are_the_single_registry_source():
@@ -134,6 +136,7 @@ def test_helpers_and_legacy_aliases_are_not_selectable_models():
     assert bolid.BolidDPLSDetectorBase not in registered
     assert bolid.BolidDPLSOutputBase not in registered
     assert bolid.BolidDPLSWaterMeterBase not in registered
+    assert bolid.BolidDPLSWaterDetectorBase not in registered
     assert "C2000DIP" not in EXPECTED_CLASSES["Bolid"]
     assert "C2000IP" not in EXPECTED_CLASSES["Bolid"]
 

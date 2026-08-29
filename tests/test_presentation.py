@@ -313,6 +313,50 @@ async def test_mip_card_puts_tamper_first_and_keeps_device_state_diagnostic(
         "sensor.mip_device_state",
     ]
 
+
+@pytest.mark.asyncio
+async def test_wired_water_detector_card_has_no_radio_capabilities(registry_hass):
+    device = Device("dz", "dz-stable", model="С2000-ДЗ")
+    result = await build(
+        registry_hass,
+        device,
+        [
+            entity(device, "water_leak_state", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "water_leak", domain="binary_sensor"),
+        ],
+        "C2000DZ",
+    )
+
+    assert result.profile_id == "bolid_c2000_dz"
+    assert entity_ids(result) == [
+        "binary_sensor.dz_water_leak",
+        "sensor.dz_water_leak_state",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_radio_water_detector_card_orders_confirmed_batteries(registry_hass):
+    device = Device("rdz", "rdz-stable", model="С2000Р-ДЗ")
+    result = await build(
+        registry_hass,
+        device,
+        [
+            entity(device, "reserve_battery_state"),
+            entity(device, "water_leak_state", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "main_battery_state"),
+            entity(device, "water_leak", domain="binary_sensor"),
+        ],
+        "C2000RDZ",
+    )
+
+    assert result.profile_id == "bolid_c2000r_dz"
+    assert entity_ids(result) == [
+        "binary_sensor.rdz_water_leak",
+        "sensor.rdz_main_battery_state",
+        "sensor.rdz_reserve_battery_state",
+        "sensor.rdz_water_leak_state",
+    ]
+
 @pytest.mark.asyncio
 async def test_disabled_is_excluded_but_unavailable_is_included(registry_hass):
     device = Device("vt", "vt-stable")

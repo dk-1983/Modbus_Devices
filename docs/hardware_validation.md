@@ -339,3 +339,42 @@ three-address model whose third channel is CO; it remains explicitly unsupported
 until that full footprint and CO numeric path are separately hardware validated.
 No case-open/tamper channel or downstream firmware/serial metadata path was
 observed or documented through these PP rows.
+
+# C2000-DZ / C2000R-DZ quiescent validation
+
+Official Bolid documentation and a controlled read-only local S2000-PP capture
+confirm that the wired `C2000DZ` and ordinary radio `C2000RDZ` are distinct
+physical products. The radio product is not a firmware variant of the wired
+product. `C2000R-DZ isp.01` is also distinct and remains unsupported until its
+S2000-PP footprint is validated.
+
+The FC04 configuration table at address 40 confirmed these rows:
+
+| PP rows | Product | Orion | DPLS | Partition | PP zone type |
+| --- | --- | ---: | --- | ---: | ---: |
+| 11-12 | two ordinary C2000R-DZ units | 20 | 53-54 | 20 | 1 |
+| 13-14 | two wired C2000-DZ 1.10 units | 20 | 55-56 | 24 | 1 |
+
+Partition values 20 and 24 are configuration grouping only and are not used as
+equipment identity. Both products use one observed zone-type-1 row per physical
+detector.
+
+Both ordinary radio units returned primary `0x50C8` (codes 80 and 200) and
+expanded states `80, 200, 213, 47, 188, 251, 111`. This hardware-confirms the
+quiescent main-battery-restored code 200 and reserve-battery-restored code 213
+for ordinary C2000R-DZ through the current downstream chain. Both wired 1.10
+units returned primary `0x502F` (codes 80 and 47) and expanded states
+`80, 47, 188, 251, 111`; no battery entities are exposed for the wired product.
+
+The implementation preserves a raw multistate sensor for both products and
+adds the documented 79/80 water semantic. Ordinary C2000R-DZ additionally
+exposes separate unknown-preserving main and reserve battery state sensors.
+Documented candidate low/fault codes remain mapping definitions only; no active
+battery transition has been hardware validated.
+
+Flood, tamper, communication-loss, main-battery fault/low, reserve-battery low,
+and transition priority behavior remain deferred for a separate controlled
+active-validation session. Earlier attempts made with the wrong physical
+detectors are permanently excluded from hardware evidence and regression
+fixtures. The later quiescent reading of the correct rows is not evidence of
+active flood behavior.

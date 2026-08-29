@@ -18,7 +18,9 @@ from custom_components.modbus_devices.device_info import (
     via_device_for_entry,
 )
 from custom_components.modbus_devices.equipment.bolid import (
+    C2000DZ,
     C2000KPB,
+    C2000RDZ,
     C2000SP4,
     C2000VT,
     MIP24Isp20,
@@ -136,6 +138,28 @@ def sp4_mapping(gateway_entry_id: str = "gateway-1") -> ResolvedDeviceMapping:
     )
 
 
+def water_mapping(model: str, dpls: int) -> ResolvedDeviceMapping:
+    return ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(
+            gateway_context("gateway-1"),
+            model,
+            20,
+            DPLSSubIdentity(dpls, 1),
+            DownstreamDeviceMetadata("v1_10" if model == "C2000DZ" else None),
+        ),
+        MappingSource.MANUAL,
+        (
+            manual_zone_mapping(
+                dpls,
+                11 if dpls == 53 else 13,
+                1,
+                20 if model == "C2000RDZ" else 24,
+                None,
+            ),
+        ),
+    )
+
+
 def test_direct_device_and_direct_s2000_pp_have_no_parent() -> None:
     direct = Entry("direct-device", options={Config.CONF_MODBUS_MODE: "serial"})
     gateway = Entry(
@@ -233,6 +257,35 @@ def test_mip_six_rows_share_one_device_parent_and_unique_entity_ids() -> None:
         device.get_binary_sensor_descriptions()[0],
     )
     assert unavailable_tamper.available is False
+
+
+def test_water_detector_entities_share_product_specific_device_identity() -> None:
+    for device, dpls, expected_count in (
+        (C2000DZ(None, 1), 55, 2),
+        (C2000RDZ(None, 1), 53, 4),
+    ):
+        device.apply_gateway_mapping(water_mapping(device.__class__.__name__, dpls))
+        entry = child_entry(f"{dpls}-entry", "gateway-1")
+        entities = [
+            ModBusStateSensorEntity(coordinator(device), device, entry, description)
+            for description in device.get_state_sensor_descriptions()
+        ] + [
+            ModBusDescribedBinarySensorEntity(
+                coordinator(device), device, entry, description
+            )
+            for description in device.get_binary_sensor_descriptions()
+        ]
+
+        assert len(entities) == expected_count
+        assert len({entity.unique_id for entity in entities}) == expected_count
+        assert all(
+            entity.device_info["identifiers"]
+            == {(Config.DOMAIN, device.attr_device_identifier)}
+            for entity in entities
+        )
+        assert {entity.device_info["via_device"] for entity in entities} == {
+            (Config.DOMAIN, "gateway-1")
+        }
 
 
 def test_two_kpb_children_keep_distinct_devices_and_one_parent() -> None:

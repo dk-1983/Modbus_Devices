@@ -4,6 +4,8 @@ import asyncio
 
 import pytest
 from pymodbus.exceptions import ModbusException
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.modbus_devices.equipment.bolid import C2000DZ
 from custom_components.modbus_devices.gateway import (
@@ -92,6 +94,8 @@ def test_water_alarm_restore_raw_and_unknown_states():
     assert value["expanded_states"][:3] == (
         "water_alarm", "water_alarm_restored", "unknown_999"
     )
+    snapshot = asyncio.run(device.async_get_snapshot())
+    assert snapshot["binary_sensors"]["water_leak"]["state"] is True
 
 
 @pytest.mark.parametrize("failure", ["empty", "invalid", "truncated", "error"])
@@ -102,12 +106,33 @@ def test_communication_and_payload_failures_are_not_normal(failure):
         asyncio.run(device.async_get_snapshot())
 
 
-def test_only_operational_multistate_entity_is_exposed():
+def test_wired_device_keeps_raw_state_and_adds_only_water_semantic():
     device = C2000DZ(Client(), 1)
     device.apply_gateway_mapping(mapping(manual_zone_mapping(30, 4, 1, 0, None)))
     assert device.get_state_sensor_descriptions() == [{
         "sensor_id": "water_leak_state", "name": "Water leak state",
         "device_class": None, "icon": "mdi:water-alert",
+        "entity_category": EntityCategory.DIAGNOSTIC,
+    }]
+    assert device.get_binary_sensor_descriptions() == [{
+        "sensor_id": "water_leak", "name": "Water leak",
+        "device_class": BinarySensorDeviceClass.MOISTURE,
+        "icon": "mdi:water-alert",
     }]
     assert not hasattr(device, "get_output_descriptions")
     assert not hasattr(device, "get_numeric_sensor_descriptions")
+
+
+def test_quiescent_wired_hardware_fixture_has_no_radio_battery_entities():
+    device = C2000DZ(
+        Client(primary=0x502F, expanded=[80, 47, 188, 251, 111]), 1
+    )
+    device.apply_gateway_mapping(mapping(manual_zone_mapping(30, 13, 1, 24, None)))
+
+    snapshot = asyncio.run(device.async_get_snapshot())
+
+    assert snapshot["binary_sensors"]["water_leak"]["state"] is False
+    assert snapshot["state_sensors"]["water_leak_state"]["state"] == (
+        "water_alarm_restored"
+    )
+    assert set(snapshot["state_sensors"]) == {"water_leak_state"}

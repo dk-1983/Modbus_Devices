@@ -64,7 +64,7 @@ Transport support still depends on the selected equipment and its physical inter
 
 ## Supported equipment
 
-The canonical registry in the current source tree contains **30 models: Bolid 27, Dyna Drive 1, and Owen 2**. Model names below are user-facing manufacturer names, not Python class keys.
+The canonical registry in the current source tree contains **31 models: Bolid 28, Dyna Drive 1, and Owen 2**. Model names below are user-facing manufacturer names, not Python class keys.
 
 ### Bolid — direct Modbus and С2000-ПП gateway
 
@@ -86,7 +86,8 @@ The canonical registry in the current source tree contains **30 models: Bolid 27
 | Bolid | [С2000-КДЛ](https://bolid.ru/production/s2000-kdl.html) | С2000-ПП → Orion | Multistate diagnostic sensor | Only the controller-owned type-3/local-0 state; downstream rows remain separate devices |
 | Bolid | ДИП-34А-05 | С2000-ПП → С2000-КДЛ → DPLS | Operational multistate detector state | One DPLS address; no synthetic smoke/dust sensors |
 | Bolid | С2000-ИП-03 | С2000-ПП → С2000-КДЛ → DPLS | Multistate detector state; optional temperature sensor | Type-1 state-only or type-6 state-and-temperature mapping; both modes use one DPLS identity |
-| Bolid | [С2000-ДЗ](https://bolid.ru/production/s_2000_dz.html) | С2000-ПП → С2000-КДЛ → DPLS | Multistate water-leak state | Static variants 1.06, 1.10, and 1.13; no derived moisture binary sensor |
+| Bolid | [С2000-ДЗ](https://bolid.ru/production/s_2000_dz.html) | С2000-ПП → С2000-КДЛ → DPLS | Moisture binary sensor and lossless multistate water-leak state | Wired static variants 1.06, 1.10, and 1.13; no battery, radio, or synthetic tamper entities |
+| Bolid | [С2000Р-ДЗ](https://bolid.ru/production/s2r_dz.html) | С2000-ПП → С2000-КДЛ → С2000Р-АРР → radio device | Moisture binary sensor, main/reserve battery states, and lossless multistate water-leak state | Ordinary two-CR2450 product; active flood, battery-fault, tamper, and radio-loss transitions await hardware validation; исп.01 is not included |
 | Bolid | [С2000-СТ исп.04](https://bolid.ru/production/s2_st_04.html) | С2000-ПП → С2000-КДЛ → DPLS | Operational glass-break multistate state | Wired one-address DPLS detector; DPLS service voltage is not exposed as a numeric entity through the current С2000-ПП path |
 | Bolid | [С2000-СМК](https://bolid.ru/production/amrs/addr-amrs-detection-hdw/) | С2000-ПП → С2000-КДЛ → DPLS | Opening multistate state | Wired one-address model; discontinued by the manufacturer but documented and supported by the integration |
 | Bolid | С2000-ВТ / С2000-ВТ исп.01 | С2000-ПП → С2000-КДЛ → DPLS | Temperature and relative-humidity sensors | Numeric values use the documented С2000-ПП numeric request lifecycle |
