@@ -117,7 +117,6 @@ def test_wired_device_keeps_raw_state_and_adds_only_water_semantic():
     assert device.get_binary_sensor_descriptions() == [{
         "sensor_id": "water_leak", "name": "Water leak",
         "device_class": BinarySensorDeviceClass.MOISTURE,
-        "icon": "mdi:water-alert",
     }]
     assert not hasattr(device, "get_output_descriptions")
     assert not hasattr(device, "get_numeric_sensor_descriptions")

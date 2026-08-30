@@ -3800,7 +3800,6 @@ class BolidDPLSWaterDetectorBase:
             "sensor_id": "water_leak",
             "name": "Water leak",
             "device_class": BinarySensorDeviceClass.MOISTURE,
-            "icon": "mdi:water-alert",
         }]
 
     async def async_get_snapshot(self) -> dict[str, dict]:

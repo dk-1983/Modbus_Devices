@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -170,6 +171,15 @@ class ModBusDescribedBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
             self._sensor_id
         )
         return None if current is None else current.get("state")
+
+    @property
+    def icon(self) -> str | None:
+        """Return a state-aware icon for semantic moisture sensors."""
+        if self.device_class is not BinarySensorDeviceClass.MOISTURE:
+            return self._attr_icon
+        if not self.available or self.is_on is None:
+            return None
+        return "mdi:water-alert" if self.is_on else "mdi:water-off"
 
     @property
     def extra_state_attributes(self) -> dict:

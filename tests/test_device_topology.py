@@ -288,6 +288,70 @@ def test_water_detector_entities_share_product_specific_device_identity() -> Non
         }
 
 
+def test_water_detector_moisture_icons_follow_semantic_state() -> None:
+    """Both water-detector products use one state-aware moisture icon contract."""
+    for device, dpls in ((C2000DZ(None, 1), 55), (C2000RDZ(None, 1), 53)):
+        device.apply_gateway_mapping(water_mapping(device.__class__.__name__, dpls))
+        description = device.get_binary_sensor_descriptions()[0]
+        entry = child_entry(f"{dpls}-entry", "gateway-1")
+
+        dry = ModBusDescribedBinarySensorEntity(
+            coordinator(device, {"binary_sensors": {"water_leak": {"state": False}}}),
+            device,
+            entry,
+            description,
+        )
+        wet = ModBusDescribedBinarySensorEntity(
+            coordinator(device, {"binary_sensors": {"water_leak": {"state": True}}}),
+            device,
+            entry,
+            description,
+        )
+        unknown = ModBusDescribedBinarySensorEntity(
+            coordinator(device, {"binary_sensors": {"water_leak": {"state": None}}}),
+            device,
+            entry,
+            description,
+        )
+        failed_coordinator = coordinator(
+            device, {"binary_sensors": {"water_leak": {"state": True}}}
+        )
+        failed_coordinator.last_update_success = False
+        unavailable = ModBusDescribedBinarySensorEntity(
+            failed_coordinator, device, entry, description
+        )
+
+        assert dry.icon == "mdi:water-off"
+        assert wet.icon == "mdi:water-alert"
+        assert unknown.icon is None
+        assert unavailable.icon is None
+        assert device.get_state_sensor_descriptions()[0]["icon"] == (
+            "mdi:water-alert"
+        )
+
+
+def test_unrelated_tamper_keeps_its_static_icon() -> None:
+    """Dynamic moisture icons do not affect other binary-sensor classes."""
+    device = MIP24Isp20(None, 1)
+    entry = child_entry("mip-entry", "gateway-1")
+    description = {
+        "sensor_id": "tamper",
+        "name": "Enclosure tamper",
+        "device_class": BinarySensorDeviceClass.TAMPER,
+        "icon": "mdi:shield-lock",
+    }
+
+    for state in (False, True):
+        entity = ModBusDescribedBinarySensorEntity(
+            coordinator(device, {"binary_sensors": {"tamper": {"state": state}}}),
+            device,
+            entry,
+            description,
+        )
+
+        assert entity.icon == "mdi:shield-lock"
+
+
 def test_two_kpb_children_keep_distinct_devices_and_one_parent() -> None:
     first = C2000KPB(None, 1)
     second = C2000KPB(None, 1)
