@@ -15,6 +15,12 @@ _READ_FUNCTIONS = {1, 2, 3, 4}
 _FIXED_RESPONSE_FUNCTIONS = {5, 6, 16}
 _MAX_STALE_DATAGRAMS = 16
 
+# Raw RTU-over-UDP has no transaction identifier. Rebinding the same fixed local
+# port cannot mathematically exclude every arbitrarily late datagram, but leaving
+# it unbound for one normal coordinator cycle substantially narrows the proven
+# stale-after-drain race. Healthy traffic never enters this quarantine.
+RTU_OVER_UDP_EPOCH_QUARANTINE_SECONDS = 5.0
+
 
 def modbus_rtu_crc(data: bytes) -> int:
     """Return the standard Modbus RTU CRC16 for *data*."""
@@ -47,6 +53,17 @@ class RtuOverUdpResponse:
     def isError(self) -> bool:  # noqa: N802 - pymodbus compatibility contract
         """Return whether this is a remote Modbus exception response."""
         return self.exception_code is not None
+
+
+@dataclass(frozen=True, slots=True)
+class RtuOverUdpRequestDiagnostic:
+    """Non-sensitive history for correlating adjacent UDP requests."""
+
+    seq: int
+    expected_slave: int
+    expected_function: int
+    outcome: str
+    completion_monotonic: float
 
 
 class ModbusRtuOverUdpClient:
@@ -83,6 +100,14 @@ class ModbusRtuOverUdpClient:
         self._socket: socket.socket | None = None
         self._remote_endpoint: tuple[str, int] | None = None
         self._remote_ip: str | None = None
+        self._request_sequence = 0
+        self._previous_request: RtuOverUdpRequestDiagnostic | None = None
+        self._transport_epoch = 0
+        self._epoch_tainted = False
+        self._ambiguity_cause: str | None = None
+        self._ambiguity_started: float | None = None
+        self._explicitly_closed = False
+        self._quarantine_seconds = RTU_OVER_UDP_EPOCH_QUARANTINE_SECONDS
 
     @staticmethod
     def _validate_port(port: int, name: str) -> None:
@@ -94,12 +119,30 @@ class ModbusRtuOverUdpClient:
         """Return whether the persistent UDP socket is open."""
         return self._socket is not None
 
+    @property
+    def last_request_diagnostic(self) -> RtuOverUdpRequestDiagnostic | None:
+        """Return the last non-sensitive request outcome for diagnostics."""
+        return self._previous_request
+
+    @property
+    def transport_epoch(self) -> int:
+        """Return the current fixed-port transport generation."""
+        return self._transport_epoch
+
+    @property
+    def epoch_tainted(self) -> bool:
+        """Return whether a post-send ambiguity invalidated this epoch."""
+        return self._epoch_tainted
+
     async def connect(self) -> bool:
         """Resolve the peer and bind one persistent non-blocking UDP socket."""
         if self.connected:
             return True
+        if self._epoch_tainted:
+            await self._recover_transport_epoch()
+            return True
+        self._explicitly_closed = False
         loop = asyncio.get_running_loop()
-        udp_socket: socket.socket | None = None
         try:
             addresses = await loop.getaddrinfo(
                 self.host,
@@ -110,18 +153,18 @@ class ModbusRtuOverUdpClient:
             if not addresses:
                 raise OSError("host resolution returned no UDP endpoint")
             remote = addresses[0][4]
-            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_socket.setblocking(False)
-            udp_socket.bind((self.local_bind_address, self.local_udp_port))
+            self._remote_endpoint = (remote[0], remote[1])
+            self._remote_ip = remote[0]
+            self._bind_fixed_port_socket()
         except OSError as exc:
-            if udp_socket is not None:
-                udp_socket.close()
+            self._close_socket(clear_remote=True)
             raise ModbusException(
                 f"Unable to prepare RTU-over-UDP endpoint {self.host}:{self.remote_port}"
             ) from exc
-        self._socket = udp_socket
-        self._remote_endpoint = (remote[0], remote[1])
-        self._remote_ip = remote[0]
+        self._transport_epoch += 1
+        self._epoch_tainted = False
+        self._ambiguity_cause = None
+        self._ambiguity_started = None
         _LOGGER.debug(
             "Prepared RTU-over-UDP endpoint %s:%s from %s:%s",
             self._remote_ip,
@@ -133,11 +176,97 @@ class ModbusRtuOverUdpClient:
 
     def close(self) -> None:
         """Close the persistent socket; repeated calls are harmless."""
+        self._explicitly_closed = True
+        self._epoch_tainted = False
+        self._ambiguity_cause = None
+        self._ambiguity_started = None
+        self._close_socket(clear_remote=True)
+
+    def _close_socket(self, *, clear_remote: bool) -> None:
+        """Close only the current socket, optionally forgetting its peer."""
         udp_socket, self._socket = self._socket, None
-        self._remote_endpoint = None
-        self._remote_ip = None
+        if clear_remote:
+            self._remote_endpoint = None
+            self._remote_ip = None
         if udp_socket is not None:
             udp_socket.close()
+
+    def _bind_fixed_port_socket(self) -> None:
+        """Bind one fresh non-blocking socket on the configured fixed port."""
+        udp_socket: socket.socket | None = None
+        try:
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_socket.setblocking(False)
+            udp_socket.bind((self.local_bind_address, self.local_udp_port))
+        except OSError:
+            if udp_socket is not None:
+                udp_socket.close()
+            raise
+        self._socket = udp_socket
+
+    def _taint_transport_epoch(self, cause: str, started: float) -> None:
+        """Invalidate a sent request's socket and begin fixed-port quarantine."""
+        if self._epoch_tainted:
+            return
+        self._epoch_tainted = True
+        self._ambiguity_cause = cause
+        self._ambiguity_started = started
+        self._close_socket(clear_remote=False)
+        _LOGGER.debug(
+            "RTU-over-UDP epoch=%s disposition=tainted cause=%s "
+            "quarantine_seconds=%.3f monotonic=%.6f",
+            self._transport_epoch,
+            cause,
+            self._quarantine_seconds,
+            started,
+        )
+
+    async def _recover_transport_epoch(self) -> None:
+        """Wait unbound, then create a new fixed-port transport generation."""
+        if not self._epoch_tainted:
+            return
+        loop = asyncio.get_running_loop()
+        started = self._ambiguity_started
+        if started is None:
+            raise ModbusException("RTU-over-UDP transport epoch is invalid")
+        remaining = self._quarantine_seconds - (loop.time() - started)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+        if self._explicitly_closed:
+            raise ModbusException("RTU-over-UDP client was closed during recovery")
+        if self._remote_endpoint is None or self._remote_ip is None:
+            raise ModbusException("RTU-over-UDP peer is unavailable during recovery")
+        try:
+            self._bind_fixed_port_socket()
+        except OSError as exc:
+            self._ambiguity_started = loop.time()
+            self._ambiguity_cause = "recovery-bind-failed"
+            _LOGGER.debug(
+                "RTU-over-UDP epoch=%s disposition=recovery-failed "
+                "cause=%s quarantine_seconds=%.3f monotonic=%.6f",
+                self._transport_epoch,
+                self._ambiguity_cause,
+                self._quarantine_seconds,
+                self._ambiguity_started,
+            )
+            raise ModbusException(
+                "Unable to recover RTU-over-UDP fixed-port transport"
+            ) from exc
+        self._transport_epoch += 1
+        previous_epoch = self._transport_epoch - 1
+        cause = self._ambiguity_cause
+        self._epoch_tainted = False
+        self._ambiguity_cause = None
+        self._ambiguity_started = None
+        _LOGGER.debug(
+            "RTU-over-UDP epoch recovery previous_epoch=%s epoch=%s "
+            "cause=%s local=%s:%s",
+            previous_epoch,
+            self._transport_epoch,
+            cause,
+            self.local_bind_address,
+            self.local_udp_port,
+        )
 
     async def read_coils(self, *, address: int, count: int, device_id: int):
         return await self._read_bits(1, address, count, device_id)
@@ -224,44 +353,165 @@ class ModbusRtuOverUdpClient:
     async def _request(
         self, device_id: int, function: int, payload: bytes, *, expected_count: int
     ) -> RtuOverUdpResponse:
+        if self._epoch_tainted:
+            await self._recover_transport_epoch()
         if self._socket is None or self._remote_endpoint is None:
             raise ModbusException("RTU-over-UDP socket is not connected")
-        request = append_modbus_rtu_crc(bytes((device_id, function)) + payload)
-        self._drain_stale_datagrams()
-        try:
-            await self._sendto(request, self._remote_endpoint)
-        except OSError as exc:
-            raise ModbusException("Unable to send RTU-over-UDP request") from exc
-
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self.timeout
+        self._request_sequence += 1
+        seq = self._request_sequence
+        started = loop.time()
+        address, request_count, request_value = self._request_fields(
+            function, payload, expected_count
+        )
+        local_endpoint = self._local_endpoint()
+        _LOGGER.debug(
+            "RTU-over-UDP request start seq=%s epoch=%s remote=%s:%s local=%s:%s "
+            "slave=%s expected_function=%s address=%s count=%s value=%s "
+            "monotonic=%.6f",
+            seq,
+            self._transport_epoch,
+            self._remote_endpoint[0],
+            self._remote_endpoint[1],
+            local_endpoint[0],
+            local_endpoint[1],
+            device_id,
+            function,
+            address,
+            request_count,
+            request_value,
+            started,
+        )
+        request = append_modbus_rtu_crc(bytes((device_id, function)) + payload)
+        completed = False
+        send_attempted = False
+        sent: float | None = None
         frame = bytearray()
-        expected_length: int | None = None
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                raise asyncio.TimeoutError("Timed out waiting for RTU-over-UDP response")
+        last_source: tuple[str, int] | None = None
+        try:
             try:
-                datagram, source = await asyncio.wait_for(
-                    self._recvfrom(remaining), timeout=remaining
-                )
-            except asyncio.TimeoutError:
-                raise
+                self._drain_stale_datagrams(seq, started)
+                send_attempted = True
+                await self._sendto(request, self._remote_endpoint)
             except OSError as exc:
-                raise ModbusException("Unable to receive RTU-over-UDP response") from exc
-            self._validate_source(source)
-            frame.extend(datagram)
-            expected_length = self._expected_frame_length(
-                frame, function, expected_count
-            )
-            if expected_length is None:
-                continue
-            if len(frame) > expected_length:
-                raise ModbusException("RTU-over-UDP response has trailing bytes")
-            if len(frame) == expected_length:
-                return self._decode_response(
-                    bytes(frame), device_id, function, expected_count
+                raise ModbusException("Unable to send RTU-over-UDP request") from exc
+
+            sent = loop.time()
+            deadline = sent + self.timeout
+            expected_length: int | None = None
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError(
+                        "Timed out waiting for RTU-over-UDP response"
+                    )
+                try:
+                    datagram, source = await asyncio.wait_for(
+                        self._recvfrom(remaining), timeout=remaining
+                    )
+                except asyncio.TimeoutError:
+                    raise
+                except OSError as exc:
+                    raise ModbusException(
+                        "Unable to receive RTU-over-UDP response"
+                    ) from exc
+                last_source = source
+                self._log_response_candidate(
+                    seq, sent, source, datagram, device_id, function
                 )
+                if not self._source_is_expected(source):
+                    self._log_rejected_source(seq, sent, source, datagram)
+                    continue
+                frame.extend(datagram)
+                expected_length = self._expected_frame_length(
+                    frame, function, expected_count
+                )
+                if expected_length is None:
+                    continue
+                if len(frame) > expected_length:
+                    raise ModbusException("RTU-over-UDP response has trailing bytes")
+                if len(frame) == expected_length:
+                    result = self._decode_response(
+                        bytes(frame), device_id, function, expected_count
+                    )
+                    elapsed = (loop.time() - sent) * 1000
+                    _LOGGER.debug(
+                        "RTU-over-UDP response seq=%s epoch=%s disposition=accepted "
+                        "elapsed_ms=%.3f source=%s:%s slave=%s function=%s "
+                        "expected_function=%s length=%s crc_valid=true exception=%s",
+                        seq,
+                        self._transport_epoch,
+                        elapsed,
+                        last_source[0],
+                        last_source[1],
+                        result.dev_id,
+                        result.function_code,
+                        function,
+                        len(frame),
+                        result.exception_code,
+                    )
+                    self._complete_request(seq, device_id, function, "success")
+                    completed = True
+                    return result
+        except asyncio.CancelledError:
+            self._log_terminal_failure(
+                seq,
+                started,
+                sent,
+                device_id,
+                function,
+                "cancelled",
+                None,
+                last_source,
+                frame,
+            )
+            self._complete_request(seq, device_id, function, "cancelled")
+            completed = True
+            if send_attempted:
+                self._taint_transport_epoch("cancelled", loop.time())
+            raise
+        except asyncio.TimeoutError:
+            self._log_terminal_failure(
+                seq,
+                started,
+                sent,
+                device_id,
+                function,
+                "timeout",
+                None,
+                last_source,
+                frame,
+            )
+            self._complete_request(seq, device_id, function, "timeout")
+            completed = True
+            if sent is not None:
+                self._taint_transport_epoch("timeout", loop.time())
+            raise
+        except ModbusException as exc:
+            disposition = (
+                "wrong-function"
+                if "Wrong RTU-over-UDP response function" in str(exc)
+                else "malformed"
+            )
+            self._log_terminal_failure(
+                seq,
+                started,
+                sent,
+                device_id,
+                function,
+                disposition,
+                exc,
+                last_source,
+                frame,
+            )
+            self._complete_request(seq, device_id, function, disposition)
+            completed = True
+            if sent is not None:
+                self._taint_transport_epoch(disposition, loop.time())
+            raise
+        finally:
+            if not completed:
+                self._complete_request(seq, device_id, function, "error")
 
     async def _sendto(self, data: bytes, endpoint: tuple[str, int]) -> None:
         await asyncio.get_running_loop().sock_sendto(self._socket, data, endpoint)
@@ -269,23 +519,193 @@ class ModbusRtuOverUdpClient:
     async def _recvfrom(self, _remaining: float) -> tuple[bytes, tuple[str, int]]:
         return await asyncio.get_running_loop().sock_recvfrom(self._socket, 260)
 
-    def _drain_stale_datagrams(self) -> None:
+    def _drain_stale_datagrams(self, upcoming_seq: int, started: float) -> None:
         """Discard only packets already queued immediately before a new request."""
         if self._socket is None:
             return
+        drained: list[tuple[bytes, tuple[str, int]]] = []
         for _ in range(_MAX_STALE_DATAGRAMS):
             try:
-                self._socket.recvfrom(260)
+                drained.append(self._socket.recvfrom(260))
             except (BlockingIOError, InterruptedError):
-                return
+                break
             except OSError as exc:
                 raise ModbusException("Unable to drain stale UDP datagrams") from exc
+        if drained:
+            now = asyncio.get_running_loop().time()
+            for index, (datagram, source) in enumerate(drained, start=1):
+                metadata = self._datagram_metadata(datagram)
+                _LOGGER.debug(
+                    "RTU-over-UDP drain upcoming_seq=%s drained=%s index=%s "
+                    "source=%s:%s slave=%s function=%s length=%s crc_valid=%s "
+                    "relative_ms=%.3f",
+                    upcoming_seq,
+                    len(drained),
+                    index,
+                    source[0],
+                    source[1],
+                    metadata[0],
+                    metadata[1],
+                    len(datagram),
+                    metadata[2],
+                    (now - started) * 1000,
+                )
 
-    def _validate_source(self, source: tuple[str, int]) -> None:
-        if source[0] != self._remote_ip:
-            raise ModbusException("RTU-over-UDP response came from an unexpected IP")
-        if self.strict_source_port and source[1] != self.remote_port:
-            raise ModbusException("RTU-over-UDP response came from an unexpected port")
+    def _local_endpoint(self) -> tuple[str, int]:
+        """Return the actual local endpoint when the socket exposes it."""
+        if self._socket is not None:
+            try:
+                endpoint = self._socket.getsockname()
+                return endpoint[0], endpoint[1]
+            except (AttributeError, OSError):
+                pass
+        return self.local_bind_address, self.local_udp_port
+
+    @staticmethod
+    def _request_fields(
+        function: int, payload: bytes, expected_count: int
+    ) -> tuple[int | None, int | None, int | None]:
+        """Decode non-sensitive request routing fields for diagnostics."""
+        if len(payload) < 4:
+            return None, expected_count, None
+        address, second = struct.unpack(">HH", payload[:4])
+        return (
+            address,
+            expected_count,
+            second if function in (5, 6) else None,
+        )
+
+    @staticmethod
+    def _datagram_metadata(datagram: bytes) -> tuple[int | None, int | None, bool | None]:
+        """Return safe frame metadata without accepting or decoding the frame."""
+        slave = datagram[0] if datagram else None
+        function = datagram[1] if len(datagram) >= 2 else None
+        crc_valid = None
+        if len(datagram) >= 4:
+            crc_valid = modbus_rtu_crc(datagram[:-2]) == struct.unpack(
+                "<H", datagram[-2:]
+            )[0]
+        return slave, function, crc_valid
+
+    def _log_response_candidate(
+        self,
+        seq: int,
+        sent: float,
+        source: tuple[str, int],
+        datagram: bytes,
+        expected_slave: int,
+        expected_function: int,
+    ) -> None:
+        """Log one received UDP candidate before existing validation."""
+        slave, function, crc_valid = self._datagram_metadata(datagram)
+        exception = (
+            datagram[2]
+            if len(datagram) >= 3
+            and function == (expected_function | 0x80)
+            else None
+        )
+        _LOGGER.debug(
+            "RTU-over-UDP candidate seq=%s disposition=received "
+            "elapsed_ms=%.3f source=%s:%s "
+            "slave=%s expected_slave=%s function=%s expected_function=%s "
+            "length=%s crc_valid=%s exception=%s",
+            seq,
+            (asyncio.get_running_loop().time() - sent) * 1000,
+            source[0],
+            source[1],
+            slave,
+            expected_slave,
+            function,
+            expected_function,
+            len(datagram),
+            crc_valid,
+            exception,
+        )
+
+    def _log_terminal_failure(
+        self,
+        seq: int,
+        started: float,
+        sent: float | None,
+        expected_slave: int,
+        expected_function: int,
+        disposition: str,
+        error: Exception | None,
+        source: tuple[str, int] | None,
+        frame: bytearray,
+    ) -> None:
+        """Log a terminal request outcome with adjacent-request history."""
+        previous = self._previous_request
+        now = asyncio.get_running_loop().time()
+        received_slave, received_function, crc_valid = self._datagram_metadata(frame)
+        _LOGGER.debug(
+            "RTU-over-UDP response seq=%s disposition=%s elapsed_ms=%.3f "
+            "source=%s:%s received_slave=%s expected_slave=%s "
+            "received_function=%s expected_function=%s length=%s crc_valid=%s "
+            "error=%s previous_seq=%s "
+            "previous_slave=%s previous_function=%s previous_outcome=%s "
+            "since_previous_ms=%s",
+            seq,
+            disposition,
+            (now - (started if sent is None else sent)) * 1000,
+            None if source is None else source[0],
+            None if source is None else source[1],
+            received_slave,
+            expected_slave,
+            received_function,
+            expected_function,
+            len(frame),
+            crc_valid,
+            error,
+            None if previous is None else previous.seq,
+            None if previous is None else previous.expected_slave,
+            None if previous is None else previous.expected_function,
+            None if previous is None else previous.outcome,
+            None
+            if previous is None
+            else round((now - previous.completion_monotonic) * 1000, 3),
+        )
+
+    def _complete_request(
+        self, seq: int, expected_slave: int, expected_function: int, outcome: str
+    ) -> None:
+        """Retain diagnostic history without influencing transport behavior."""
+        self._previous_request = RtuOverUdpRequestDiagnostic(
+            seq,
+            expected_slave,
+            expected_function,
+            outcome,
+            asyncio.get_running_loop().time(),
+        )
+
+    def _source_is_expected(self, source: tuple[str, int]) -> bool:
+        """Return whether a candidate came from the configured UDP peer."""
+        return source[0] == self._remote_ip and (
+            not self.strict_source_port or source[1] == self.remote_port
+        )
+
+    def _log_rejected_source(
+        self,
+        seq: int,
+        sent: float,
+        source: tuple[str, int],
+        datagram: bytes,
+    ) -> None:
+        """Record harmless foreign UDP noise without ending the request."""
+        slave, function, crc_valid = self._datagram_metadata(datagram)
+        _LOGGER.debug(
+            "RTU-over-UDP candidate seq=%s disposition=rejected "
+            "reason=unexpected-source elapsed_ms=%.3f source=%s:%s "
+            "slave=%s function=%s length=%s crc_valid=%s",
+            seq,
+            (asyncio.get_running_loop().time() - sent) * 1000,
+            source[0],
+            source[1],
+            slave,
+            function,
+            len(datagram),
+            crc_valid,
+        )
 
     @staticmethod
     def _expected_frame_length(

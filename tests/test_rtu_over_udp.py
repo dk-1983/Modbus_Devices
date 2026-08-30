@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -40,6 +41,9 @@ class FakeSocket:
 
     def close(self):
         self.closed = True
+
+    def getsockname(self):
+        return self.bound or ("0.0.0.0", 40000)
 
 
 def response(payload: bytes) -> bytes:
@@ -79,6 +83,16 @@ def prepared(*datagrams, timeout=0.05, strict_source_port=False):
 
 def peer(frame, port=40000):
     return frame, ("10.0.2.10", port)
+
+
+def recovery_socket(monkeypatch, client):
+    fresh = FakeSocket()
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.socket.socket",
+        lambda *_args: fresh,
+    )
+    client._quarantine_seconds = 0
+    return fresh
 
 
 def test_crc_known_vector_and_wire_byte_order():
@@ -140,12 +154,17 @@ async def test_response_decoding_is_compatible_with_common_validators(
 
 
 @pytest.mark.asyncio
-async def test_remote_modbus_exception_is_returned_for_common_validation():
-    client, _socket, _sent = prepared(peer(response(bytes.fromhex("01 83 02"))))
+@pytest.mark.parametrize("exception_code", [3, 4, 15])
+async def test_valid_modbus_exception_does_not_taint_transport(exception_code):
+    client, udp_socket, _sent = prepared(
+        peer(response(bytes((1, 0x83, exception_code))))
+    )
     result = await client.read_holding_registers(address=0, count=1, device_id=1)
     assert result.function_code == 0x83
-    assert result.exception_code == 2
+    assert result.exception_code == exception_code
     assert result.isError() is True
+    assert client.epoch_tainted is False
+    assert client._socket is udp_socket
 
 
 @pytest.mark.asyncio
@@ -209,20 +228,61 @@ async def test_partial_frame_uses_one_absolute_timeout():
 
 
 @pytest.mark.asyncio
-async def test_wrong_source_ip_is_rejected_and_port_policy_is_explicit():
+async def test_foreign_source_is_ignored_before_valid_response(caplog):
     frame = response(bytes.fromhex("01 03 02 00 01"))
-    wrong_ip, _socket, _sent = prepared((frame, ("10.0.2.99", 40000)))
-    with pytest.raises(ModbusException, match="unexpected IP"):
-        await wrong_ip.read_holding_registers(address=0, count=1, device_id=1)
+    client, udp_socket, _sent = prepared(
+        (frame, ("10.0.2.99", 40000)), peer(frame)
+    )
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.modbus_devices.rtu_over_udp",
+    ):
+        result = await client.read_holding_registers(
+            address=0, count=1, device_id=1
+        )
+    assert result.registers == [1]
+    assert "disposition=rejected reason=unexpected-source" in caplog.text
+    assert client.epoch_tainted is False
+    assert client._socket is udp_socket
 
     compatible, _socket, _sent = prepared(peer(frame, port=41000))
     assert (
         await compatible.read_holding_registers(address=0, count=1, device_id=1)
     ).registers == [1]
 
-    strict, _socket, _sent = prepared(peer(frame, port=41000), strict_source_port=True)
-    with pytest.raises(ModbusException, match="unexpected port"):
+    strict, _socket, _sent = prepared(
+        peer(frame, port=41000), peer(frame), strict_source_port=True
+    )
+    assert (
         await strict.read_holding_registers(address=0, count=1, device_id=1)
+    ).registers == [1]
+
+
+@pytest.mark.asyncio
+async def test_foreign_noise_preserves_absolute_deadline_then_timeout_taints():
+    foreign = peer(
+        response(bytes.fromhex("01 03 02 00 09")), port=40000
+    )[0], ("10.0.2.99", 40000)
+    client, old_socket, _sent = prepared(timeout=0.01)
+    remaining_values = []
+    calls = 0
+
+    async def foreign_then_wait(remaining):
+        nonlocal calls
+        remaining_values.append(remaining)
+        calls += 1
+        if calls <= 3:
+            return foreign
+        await asyncio.sleep(1)
+
+    client._recvfrom = foreign_then_wait
+    with pytest.raises(TimeoutError):
+        await client.read_holding_registers(address=0, count=1, device_id=1)
+
+    assert len(remaining_values) >= 2
+    assert remaining_values == sorted(remaining_values, reverse=True)
+    assert client.epoch_tainted is True
+    assert old_socket.closed is True
 
 
 @pytest.mark.parametrize(
@@ -262,13 +322,38 @@ async def test_persistent_socket_is_reused_and_close_is_idempotent():
 
 
 @pytest.mark.asyncio
-async def test_stale_datagrams_queued_before_send_are_drained_boundedly():
+async def test_normal_success_has_no_quarantine_or_reconnect(monkeypatch):
+    first = response(bytes.fromhex("01 03 02 00 01"))
+    second = response(bytes.fromhex("01 04 02 00 02"))
+    client, udp_socket, sent = prepared(peer(first), peer(second))
+    sleep = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.asyncio.sleep", sleep
+    )
+
+    await client.read_holding_registers(address=0, count=1, device_id=1)
+    await client.read_input_registers(address=0, count=1, device_id=1)
+
+    sleep.assert_not_awaited()
+    assert client.epoch_tainted is False
+    assert client._socket is udp_socket
+    assert len(sent) == 2
+
+
+@pytest.mark.asyncio
+async def test_stale_datagrams_queued_before_send_are_drained_boundedly(caplog):
     frame = response(bytes.fromhex("01 03 02 00 01"))
     client, udp_socket, _sent = prepared(peer(frame))
     udp_socket.stale.append((response(bytes.fromhex("02 03 02 00 09")), ("10.0.2.10", 40000)))
-    result = await client.read_holding_registers(address=0, count=1, device_id=1)
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.modbus_devices.rtu_over_udp",
+    ):
+        result = await client.read_holding_registers(address=0, count=1, device_id=1)
     assert result.registers == [1]
     assert udp_socket.stale == []
+    assert "drain upcoming_seq=1 drained=1" in caplog.text
+    assert "slave=2 function=3 length=7 crc_valid=True" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -286,6 +371,7 @@ async def test_closed_socket_and_send_failures_are_explicit():
     client._sendto = failed_send
     with pytest.raises(ModbusException, match="send"):
         await client.read_holding_registers(address=0, count=1, device_id=1)
+    assert client.epoch_tainted is False
 
 
 @pytest.mark.asyncio
@@ -364,3 +450,434 @@ def test_adapter_has_no_internal_request_lock():
     client = ModbusRtuOverUdpClient("10.0.2.10", 40000)
     assert not hasattr(client, "request_lock")
     assert not hasattr(client, "_request_lock")
+
+
+@pytest.mark.asyncio
+async def test_request_sequences_and_normal_response_diagnostics(caplog):
+    first = peer(response(bytes.fromhex("01 06 B4 63 00 3F")))
+    second = peer(response(bytes.fromhex("01 03 02 00 0A")))
+    client, _socket, _sent = prepared(first, second)
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.modbus_devices.rtu_over_udp",
+    ):
+        await client.write_register(address=46179, value=63, device_id=1)
+        await client.read_holding_registers(address=46328, count=1, device_id=1)
+
+    assert "request start seq=1 epoch=0" in caplog.text
+    assert "expected_function=6 address=46179 count=1 value=63" in caplog.text
+    assert "request start seq=2 epoch=0" in caplog.text
+    assert "expected_function=3 address=46328 count=1 value=None" in caplog.text
+    assert "response seq=1 epoch=0 disposition=accepted" in caplog.text
+    assert "response seq=2 epoch=0 disposition=accepted" in caplog.text
+    assert "RTU-over-UDP drain" not in caplog.text
+    assert all(record.levelno == logging.DEBUG for record in caplog.records)
+    assert client.last_request_diagnostic.seq == 2
+    assert client.last_request_diagnostic.outcome == "success"
+
+
+@pytest.mark.asyncio
+async def test_timeout_and_cancellation_record_diagnostic_history(caplog):
+    timed_out, _socket, _sent = prepared(timeout=0.01)
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.modbus_devices.rtu_over_udp",
+    ):
+        with pytest.raises(asyncio.TimeoutError):
+            await timed_out.read_holding_registers(address=1, count=1, device_id=1)
+    assert timed_out.last_request_diagnostic.outcome == "timeout"
+    assert "seq=1 disposition=timeout" in caplog.text
+    assert timed_out.epoch_tainted is True
+    assert timed_out.connected is False
+
+    cancelled, _socket, _sent = prepared(timeout=1)
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.modbus_devices.rtu_over_udp",
+    ):
+        task = asyncio.create_task(
+            cancelled.read_holding_registers(address=2, count=1, device_id=1)
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert cancelled.last_request_diagnostic.outcome == "cancelled"
+    assert "seq=1 disposition=cancelled" in caplog.text
+    assert cancelled.epoch_tainted is True
+    assert cancelled.connected is False
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_send_attempt_taints_epoch():
+    client, udp_socket, _sent = prepared(timeout=1)
+    entered_send = asyncio.Event()
+
+    async def blocked_send(_data, _endpoint):
+        entered_send.set()
+        await asyncio.Event().wait()
+
+    client._sendto = blocked_send
+    task = asyncio.create_task(
+        client.read_holding_registers(address=2, count=1, device_id=1)
+    )
+    await entered_send.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert client.epoch_tainted is True
+    assert client._socket is None
+    assert udp_socket.closed is True
+
+
+@pytest.mark.asyncio
+async def test_cancellation_before_send_attempt_does_not_taint_epoch(monkeypatch):
+    client, udp_socket, sent = prepared(timeout=1)
+
+    def cancel_before_send(_seq, _started):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(client, "_drain_stale_datagrams", cancel_before_send)
+    with pytest.raises(asyncio.CancelledError):
+        await client.read_holding_registers(address=2, count=1, device_id=1)
+
+    assert sent == []
+    assert client.epoch_tainted is False
+    assert client._socket is udp_socket
+    assert udp_socket.closed is False
+
+
+@pytest.mark.asyncio
+async def test_post_send_programming_error_propagates_without_taint(monkeypatch):
+    frame = response(bytes.fromhex("01 03 02 00 01"))
+    client, udp_socket, _sent = prepared(peer(frame))
+    monkeypatch.setattr(
+        client,
+        "_log_response_candidate",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("local defect")),
+    )
+
+    with pytest.raises(RuntimeError, match="local defect"):
+        await client.read_holding_registers(address=0, count=1, device_id=1)
+
+    assert client.epoch_tainted is False
+    assert client._socket is udp_socket
+    assert udp_socket.closed is False
+
+
+@pytest.mark.asyncio
+async def test_stale_datagram_queued_on_closed_epoch_is_discarded(
+    monkeypatch, caplog
+):
+    stale_fc06 = response(bytes.fromhex("01 06 B4 63 00 05"))
+    proper_fc03 = response(bytes.fromhex("01 03 02 00 0A"))
+    client, udp_socket, _sent = prepared(peer(proper_fc03), timeout=0.01)
+
+    with pytest.raises(asyncio.TimeoutError):
+        client._recvfrom = AsyncMock(side_effect=asyncio.TimeoutError())
+        await client.write_register(address=46179, value=5, device_id=1)
+    assert udp_socket.closed is True
+    udp_socket.stale.append(peer(stale_fc06))
+    fresh_socket = recovery_socket(monkeypatch, client)
+    client._recvfrom = AsyncMock(return_value=peer(proper_fc03))
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.modbus_devices.rtu_over_udp",
+    ):
+        result = await client.read_holding_registers(
+            address=46328, count=1, device_id=1
+        )
+
+    assert result.registers == [10]
+    assert client._socket is fresh_socket
+    assert fresh_socket.bound == ("0.0.0.0", 40000)
+    assert udp_socket.stale == [peer(stale_fc06)]
+    assert client.transport_epoch == 1
+    assert client.epoch_tainted is False
+
+
+@pytest.mark.asyncio
+async def test_closing_tainted_epoch_discards_already_queued_datagram(monkeypatch):
+    stale_fc06 = response(bytes.fromhex("01 06 B4 63 00 05"))
+    proper_fc03 = response(bytes.fromhex("01 03 02 00 0A"))
+    client, old_socket, _sent = prepared(timeout=0.01)
+
+    async def timeout_after_queueing(_remaining):
+        old_socket.stale.append(peer(stale_fc06))
+        raise TimeoutError
+
+    client._recvfrom = timeout_after_queueing
+    with pytest.raises(TimeoutError):
+        await client.write_register(address=46179, value=5, device_id=1)
+
+    assert old_socket.closed is True
+    fresh_socket = recovery_socket(monkeypatch, client)
+    client._recvfrom = AsyncMock(return_value=peer(proper_fc03))
+    result = await client.read_holding_registers(
+        address=46328, count=1, device_id=1
+    )
+
+    assert result.registers == [10]
+    assert client._socket is fresh_socket
+    assert old_socket.stale == [peer(stale_fc06)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "delayed_response",
+    [
+        response(bytes.fromhex("01 03 02 00 6F")),
+        response(bytes((1, 0x83, 3))),
+        response(bytes((1, 0x83, 4))),
+    ],
+    ids=["value", "exception-3", "exception-4"],
+)
+async def test_same_function_stale_fc03_isolated_during_quarantine(
+    monkeypatch, delayed_response
+):
+    proper_fc03 = response(bytes.fromhex("01 03 02 00 0A"))
+    client, old_socket, sent = prepared(timeout=0.01)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await client.read_holding_registers(
+            address=46328, count=1, device_id=1
+        )
+
+    release = asyncio.Event()
+    sleep_started = asyncio.Event()
+
+    async def controlled_sleep(_delay):
+        sleep_started.set()
+        await release.wait()
+
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.asyncio.sleep",
+        controlled_sleep,
+    )
+    client._quarantine_seconds = 5
+    fresh_socket = FakeSocket()
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.socket.socket",
+        lambda *_args: fresh_socket,
+    )
+    client._recvfrom = AsyncMock(return_value=peer(proper_fc03))
+
+    task = asyncio.create_task(
+        client.read_holding_registers(address=46328, count=1, device_id=1)
+    )
+    await sleep_started.wait()
+    assert len(sent) == 1
+    assert old_socket.closed is True
+    assert client.connected is False
+
+    old_socket.stale.append(peer(delayed_response))
+    assert len(sent) == 1
+    release.set()
+    result = await task
+
+    assert result.registers == [10]
+    assert client._socket is fresh_socket
+    assert sent[-1][2] is fresh_socket
+    assert old_socket.stale == [peer(delayed_response)]
+
+
+def test_same_function_stale_frame_is_indistinguishable_from_frame_contents():
+    stale_fc03 = response(bytes.fromhex("01 03 02 00 6F"))
+    result = ModbusRtuOverUdpClient._decode_response(stale_fc03, 1, 3, 1)
+
+    assert result.registers == [111]
+
+
+@pytest.mark.parametrize("exception_code", [3, 4])
+def test_same_function_stale_exception_is_indistinguishable_from_contents(
+    exception_code,
+):
+    stale_exception = response(bytes((1, 0x83, exception_code)))
+    result = ModbusRtuOverUdpClient._decode_response(stale_exception, 1, 3, 1)
+
+    assert result.function_code == 0x83
+    assert result.exception_code == exception_code
+    assert result.isError() is True
+
+
+@pytest.mark.asyncio
+async def test_quarantine_blocks_send_until_fixed_port_recovery(monkeypatch):
+    proper = response(bytes.fromhex("01 03 02 00 2A"))
+    client, old_socket, sent = prepared(timeout=0.01)
+    with pytest.raises(asyncio.TimeoutError):
+        await client.read_holding_registers(address=100, count=1, device_id=1)
+
+    release = asyncio.Event()
+    sleep_started = asyncio.Event()
+
+    async def controlled_sleep(_delay):
+        sleep_started.set()
+        await release.wait()
+
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.asyncio.sleep",
+        controlled_sleep,
+    )
+    client._quarantine_seconds = 5
+    fresh_socket = FakeSocket()
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.socket.socket",
+        lambda *_args: fresh_socket,
+    )
+    client._recvfrom = AsyncMock(return_value=peer(proper))
+
+    task = asyncio.create_task(
+        client.read_holding_registers(address=200, count=1, device_id=1)
+    )
+    await sleep_started.wait()
+    assert len(sent) == 1
+    assert old_socket.closed is True
+    assert client.connected is False
+
+    release.set()
+    result = await task
+    assert result.registers == [42]
+    assert len(sent) == 2
+    assert sent[-1][2] is fresh_socket
+    assert fresh_socket.bound == ("0.0.0.0", 40000)
+
+
+@pytest.mark.asyncio
+async def test_wrong_function_is_fatal_and_taints_next_epoch():
+    wrong = response(bytes.fromhex("01 06 B4 63 00 05"))
+    client, old_socket, _sent = prepared(peer(wrong))
+
+    with pytest.raises(ModbusException, match="Wrong RTU-over-UDP response function"):
+        await client.read_holding_registers(address=46328, count=1, device_id=1)
+
+    assert client.epoch_tainted is True
+    assert old_socket.closed is True
+    assert client.last_request_diagnostic.outcome == "wrong-function"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_frame",
+    [
+        bytes.fromhex("01 03 02 00 01 00 00"),
+        response(bytes.fromhex("01 03 02 00 01")) + b"\x00",
+    ],
+)
+async def test_malformed_or_invalid_crc_taints_epoch(bad_frame):
+    client, old_socket, _sent = prepared(peer(bad_frame))
+
+    with pytest.raises(ModbusException):
+        await client.read_holding_registers(address=0, count=1, device_id=1)
+
+    assert client.epoch_tainted is True
+    assert old_socket.closed is True
+
+
+@pytest.mark.asyncio
+async def test_recovery_bind_failure_starts_new_quarantine(monkeypatch):
+    client, _old_socket, sent = prepared(timeout=0.01)
+    with pytest.raises(asyncio.TimeoutError):
+        await client.read_holding_registers(address=0, count=1, device_id=1)
+    client._quarantine_seconds = 5
+    sleep_entered = [asyncio.Event(), asyncio.Event()]
+    sleep_release = [asyncio.Event(), asyncio.Event()]
+    sleep_calls = []
+
+    async def controlled_sleep(delay):
+        index = len(sleep_calls)
+        sleep_calls.append(delay)
+        sleep_entered[index].set()
+        await sleep_release[index].wait()
+
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.asyncio.sleep",
+        controlled_sleep,
+    )
+    failed_socket = FakeSocket()
+
+    def fail_bind(_endpoint):
+        raise OSError("still in use")
+
+    failed_socket.bind = fail_bind
+    fresh_socket = FakeSocket()
+    sockets = iter((failed_socket, fresh_socket))
+    bind_calls = []
+
+    def socket_factory(*_args):
+        bind_calls.append(len(bind_calls) + 1)
+        return next(sockets)
+
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.socket.socket",
+        socket_factory,
+    )
+
+    first_recovery = asyncio.create_task(
+        client.read_holding_registers(address=1, count=1, device_id=1)
+    )
+    await sleep_entered[0].wait()
+    sleep_release[0].set()
+    with pytest.raises(ModbusException, match="recover"):
+        await first_recovery
+
+    assert client.epoch_tainted is True
+    assert client.connected is False
+    assert len(sent) == 1
+    assert bind_calls == [1]
+
+    proper = response(bytes.fromhex("01 03 02 00 2A"))
+    client._recvfrom = AsyncMock(return_value=peer(proper))
+    second_recovery = asyncio.create_task(
+        client.read_holding_registers(address=2, count=1, device_id=1)
+    )
+    await sleep_entered[1].wait()
+    assert bind_calls == [1]
+    assert len(sent) == 1
+
+    sleep_release[1].set()
+    result = await second_recovery
+    assert result.registers == [42]
+    assert bind_calls == [1, 2]
+    assert client._socket is fresh_socket
+    assert client.epoch_tainted is False
+
+
+@pytest.mark.asyncio
+async def test_close_during_quarantine_prevents_socket_resurrection(monkeypatch):
+    client, _old_socket, sent = prepared(timeout=0.01)
+    with pytest.raises(asyncio.TimeoutError):
+        await client.read_holding_registers(address=0, count=1, device_id=1)
+
+    release = asyncio.Event()
+    sleep_started = asyncio.Event()
+
+    async def controlled_sleep(_delay):
+        sleep_started.set()
+        await release.wait()
+
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.asyncio.sleep",
+        controlled_sleep,
+    )
+    client._quarantine_seconds = 5
+    created = []
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.rtu_over_udp.socket.socket",
+        lambda *_args: created.append(FakeSocket()),
+    )
+
+    task = asyncio.create_task(
+        client.read_holding_registers(address=1, count=1, device_id=1)
+    )
+    await sleep_started.wait()
+    client.close()
+    release.set()
+
+    with pytest.raises(ModbusException, match="closed during recovery"):
+        await task
+    assert created == []
+    assert client.connected is False
+    assert len(sent) == 1
