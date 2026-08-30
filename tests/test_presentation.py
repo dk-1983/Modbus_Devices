@@ -288,6 +288,32 @@ async def test_c2000_vt_card_expands_and_shrinks_with_registry(registry_hass):
 
 
 @pytest.mark.asyncio
+async def test_c2000r_vti_card_orders_one_device_across_all_confirmed_entities(
+    registry_hass,
+):
+    device = Device("rvti", "rvti-stable", model="С2000Р-ВТИ")
+    entities = [
+        entity(device, "humidity"),
+        entity(device, "main_battery_state", category=EntityCategory.DIAGNOSTIC),
+        entity(device, "temperature_state", category=EntityCategory.DIAGNOSTIC),
+        entity(device, "temperature"),
+        entity(device, "humidity_state", category=EntityCategory.DIAGNOSTIC),
+    ]
+
+    result = await build(registry_hass, device, entities, "C2000RVTI")
+
+    assert result.card["type"] == "entities"
+    assert entity_ids(result) == [
+        "sensor.rvti_temperature_state",
+        "sensor.rvti_temperature",
+        "sensor.rvti_humidity_state",
+        "sensor.rvti_humidity",
+        "sensor.rvti_main_battery_state",
+    ]
+    assert result.card.get("type") != "custom:modbus-device-card"
+
+
+@pytest.mark.asyncio
 async def test_mip_card_puts_tamper_first_and_keeps_device_state_diagnostic(
     registry_hass,
 ):

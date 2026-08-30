@@ -64,7 +64,7 @@ Transport support still depends on the selected equipment and its physical inter
 
 ## Supported equipment
 
-The canonical registry in the current source tree contains **31 models: Bolid 28, Dyna Drive 1, and Owen 2**. Model names below are user-facing manufacturer names, not Python class keys.
+The canonical registry in the current source tree contains **32 models: Bolid 29, Dyna Drive 1, and Owen 2**. Model names below are user-facing manufacturer names, not Python class keys.
 
 ### Bolid — direct Modbus and С2000-ПП gateway
 
@@ -117,6 +117,7 @@ Supported С2000-СП4 variants:
 | Bolid | С2000Р-Сирена | С2000-ПП → С2000-КДЛ → DPLS | Independent Light and Sound switches | No combined switch, pattern, duration, or radio-service controls |
 | Bolid | [С2000Р-СТ исп.01](https://bolid.ru/production/s2000r-st_01.html) | С2000-ПП → С2000-КДЛ → DPLS via С2000Р-АРР125 | Operational glass-break multistate state | Battery, tamper, and radio communication remain Orion multistate semantics; no RSSI entity |
 | Bolid | [С2000Р-СМК](https://bolid.ru/production/s2000r_smk.html) | С2000-ПП → С2000-КДЛ → DPLS via С2000Р-АРР125 | Main-battery state, lossless opening state, and optional external-input state | One ER14505M battery; contact-only hardware is validated, while active opening, battery-fault, tamper, radio, and external-input routing remain deferred; no derived opening binary sensor |
+| Bolid | [С2000Р-ВТИ](https://bolid.ru/production/s2r_vti.html) | С2000-ПП → С2000-КДЛ → DPLS via С2000Р-АРР32/125 | Temperature/humidity states and numeric measurements; one main-battery state | Separate two-zone radio product: base DPLS is temperature and base+1 is humidity, both PP type 6; signed Q8.8 numeric acquisition and quiescent battery-restored state were validated on five devices. Active battery/radio/tamper routing and С2000Р-ВТИ исп.01 remain deferred |
 
 ### Dyna Drive — direct Modbus equipment
 

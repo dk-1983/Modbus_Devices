@@ -425,3 +425,58 @@ Active opening/closing, tamper, anti-sabotage, radio-loss, battery-fault/low and
 optional external-input routing remain deferred for a controlled validation
 session. No active-transition fixture or semantic claim is derived from this
 quiescent capture.
+
+# C2000R-VTI five-device quiescent and numeric validation
+
+Official Bolid documentation and a controlled native Modbus RTU capture on
+COM3 confirm that `C2000RVTI` (`С2000Р-ВТИ`) is a separate radio product, not a
+variant or alias of wired `C2000VTI`. One ordinary physical device owns two
+consecutive DPLS zones: the base address is temperature and base+1 is humidity.
+Both capabilities use PP zone type 6 on the validated S2000-PP path. The radio
+product has one ER14505 3.6 V battery; no reserve-battery entity is created.
+
+The FC04 configuration table contained five physical devices:
+
+| Unit | PP temperature/humidity rows | Orion | DPLS pair | Partition | PP type |
+| ---: | --- | ---: | --- | ---: | ---: |
+| 1 | 19 / 20 | 8 | 4 / 5 | 0 | 6 / 6 |
+| 2 | 21 / 22 | 8 | 6 / 7 | 0 | 6 / 6 |
+| 3 | 23 / 24 | 8 | 8 / 9 | 0 | 6 / 6 |
+| 4 | 25 / 26 | 8 | 10 / 11 | 0 | 6 / 6 |
+| 5 | 27 / 28 | 8 | 12 / 13 | 0 | 6 / 6 |
+
+Orion 8 and partition 0 describe this stand only. Runtime reconciliation uses
+the configured Orion address, base/base+1 DPLS identities, and zone type 6;
+partition and PP-row adjacency are not identity.
+
+Temperature rows returned primary `0x4EC8`, while humidity rows returned
+`0x48C8`. Expanded states contained temperature-normal code 78 or level-normal
+code 72, battery-restored code 200, and generic downstream codes 47 and 188.
+Codes 251 and 111 were present where captured; code 251 remains the generic
+device-communication-restored state and is not relabelled as radio quality.
+Reserve-battery-restored code 213 was absent. Code 200 was present on both
+logical rows of all five devices and is aggregated into one physical
+`main_battery_state` entity.
+
+Numeric acquisition used FC06 register 46179 with the actual PP row, followed
+by FC03 register 46328 count 1. Signed Q8.8 values included `0x1A00 = 26.0 °C`,
+`0x2000 = 32.0 %`, `0x17C0 = 23.75 °C`, and `0x2630 = 38.1875 %`. Immediate
+result reads normally returned documented exception 15; result-only retries
+became ready in approximately 0.52-0.70 seconds in the typical cases, with a
+worst successful observation of 1.852 seconds. These observations do not add a
+fixed delay to runtime polling; the shared S2000-PP selector session is used.
+
+Native serial FC03 exception 4 was reproduced after `15 -> 15`; another
+result-only read remained exception 4, while a fresh selector in a later
+transaction recovered to READY. It remains a terminal typed protocol error,
+not PENDING: grouped states and the last-known-good numeric cache are preserved,
+the matching selector owner is released, and a later coordinator cycle can
+start a fresh acquisition. FC03 exception 3 was observed previously in
+production RTU-over-UDP but was not reproduced in this COM3 phase; its root
+cause remains unresolved. The exact device-side cause of exception 4 also
+remains unresolved.
+
+Active battery-low/fault transitions, product-specific radio loss/quality,
+tamper routing, runtime firmware/serial metadata, and `С2000Р-ВТИ исп.01`
+CO/sounder capabilities remain deferred. No active-transition fixture or
+radio-quality entity is inferred from the quiescent generic state codes.

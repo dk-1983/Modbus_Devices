@@ -4242,7 +4242,142 @@ class BolidDPLSNumericDeviceBase:
         }
 
 
-class C2000VT(BolidDPLSNumericDeviceBase):
+class BolidDPLSThermohygrometerBase(BolidDPLSNumericDeviceBase):
+    """Shared two-zone S2000-PP mechanics for distinct thermohygrometers."""
+
+    capability_requirements = (
+        GatewayCapabilitySpec(
+            key="temperature", name="Temperature", object_kind=ObjectKind.ZONE,
+            local_object_number=0, local_object_offset=0,
+            zone_type=6,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+        GatewayCapabilitySpec(
+            key="humidity", name="Humidity", object_kind=ObjectKind.ZONE,
+            local_object_number=0, local_object_offset=1,
+            zone_type=6,
+            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
+        ),
+    )
+    numeric_kinds = {
+        "temperature": NumericParameterKind.TEMPERATURE,
+        "humidity": NumericParameterKind.RELATIVE_HUMIDITY,
+    }
+    numeric_metadata = {
+        "temperature": (SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS, 1),
+        "humidity": (SensorDeviceClass.HUMIDITY, PERCENTAGE, 0),
+    }
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self._numeric_cursor = 0
+
+    @classmethod
+    def reconcile_gateway_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> ResolvedDeviceMapping:
+        """Repair a partial VT mapping only from its exact two-address footprint."""
+        identity = mapping.identity
+        dpls = identity.dpls
+        if dpls is None or dpls.address_count != 2:
+            raise ValueError("Thermohygrometer requires one two-address DPLS identity")
+        rows = configuration.zones_for_device(identity.orion_address)
+        resolved = []
+        for address in (dpls.base_address, dpls.base_address + 1):
+            matches = [
+                row for row in rows
+                if row.local_zone_number == address and row.zone_type == 6
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "Thermohygrometer mapping does not match one unambiguous adjacent "
+                    "temperature/humidity footprint"
+                )
+            row = matches[0]
+            resolved.append(
+                resolve_zone_row(
+                    row,
+                    configuration.partition_id(row.partition_number),
+                )
+            )
+        return ResolvedDeviceMapping(identity, mapping.source, tuple(resolved))
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Require both logical channels of one physical thermohygrometer."""
+        super().apply_gateway_mapping(mapping)
+        if set(self._numeric_mappings) != {"temperature", "humidity"}:
+            raise ValueError(
+                "Thermohygrometer requires both temperature and humidity channels"
+            )
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Poll grouped states and one numeric channel per coordinator refresh."""
+        mapping = self.attr_gateway_mapping
+        if mapping is None:
+            raise ValueError("Equipment requires a validated S2000-PP mapping")
+        zone_states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_zone_states(self._numeric_mappings.values())
+
+        keys = ("temperature", "humidity")
+        key = keys[self._numeric_cursor]
+        item = self._numeric_mappings[key]
+        _LOGGER.debug(
+            "%s numeric poll channel=%s PP-row=%s cursor=%s",
+            self.__class__.__name__,
+            key,
+            item.gateway_object_number,
+            self._numeric_cursor,
+        )
+        result = await S2000PPNumericValueReader(
+            self.attr_client,
+            self.attr_device_id,
+            mapping.identity.gateway.stable_id,
+        ).async_read(item.gateway_object_number, self.numeric_kinds[key])
+        _LOGGER.debug(
+            "%s numeric result channel=%s PP-row=%s status=%s "
+            "exception=%s raw=%s decoded=%s",
+            self.__class__.__name__,
+            key,
+            item.gateway_object_number,
+            result.status.value,
+            result.exception_code,
+            result.raw_register,
+            result.value,
+        )
+        if result.status is NumericResultStatus.READY:
+            self._numeric_values[key] = {
+                "value": result.value,
+                "raw_register": result.raw_register,
+                "parameter_kind": result.parameter_kind.value,
+            }
+            self._numeric_cursor = (self._numeric_cursor + 1) % len(keys)
+            _LOGGER.debug(
+                "%s numeric cursor advanced channel=%s next=%s",
+                self.__class__.__name__,
+                key,
+                keys[self._numeric_cursor],
+            )
+        elif result.status is NumericResultStatus.PROTOCOL_ERROR:
+            _handle_optional_numeric_protocol_error(self, key, item, result)
+
+        return {
+            "numeric_sensors": {
+                sensor_id: dict(value)
+                for sensor_id, value in self._numeric_values.items()
+            },
+            "state_sensors": {
+                f"{sensor_id}_state": self._state_sensor_value(
+                    zone_states[channel.gateway_object_number]
+                )
+                for sensor_id, channel in self._numeric_mappings.items()
+            },
+        }
+
+
+class C2000VT(BolidDPLSThermohygrometerBase):
     """Bolid С2000-ВТ and С2000-ВТ исп.01 DPLS thermohygrometers."""
 
     equipment_manufacturer = "Bolid"
@@ -4276,133 +4411,11 @@ class C2000VT(BolidDPLSNumericDeviceBase):
         Variant.VT_01: VariantMetadata("С2000-ВТ исп.01", "±0.4 °C", "±3 %"),
     }
     variant_dpls_address_counts = {"vt": 2, "vt_01": 2}
-    capability_requirements = (
-        GatewayCapabilitySpec(
-            key="temperature", name="Temperature", object_kind=ObjectKind.ZONE,
-            local_object_number=0, local_object_offset=0,
-            zone_type=6,
-            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
-        ),
-        GatewayCapabilitySpec(
-            key="humidity", name="Humidity", object_kind=ObjectKind.ZONE,
-            local_object_number=0, local_object_offset=1,
-            zone_type=6,
-            requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
-        ),
-    )
-    numeric_kinds = {
-        "temperature": NumericParameterKind.TEMPERATURE,
-        "humidity": NumericParameterKind.RELATIVE_HUMIDITY,
-    }
-    numeric_metadata = {
-        "temperature": (SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS, 1),
-        "humidity": (SensorDeviceClass.HUMIDITY, PERCENTAGE, 0),
-    }
 
     def __init__(self, client, device_id) -> None:
         super().__init__(client, device_id)
         self.attr_model_name = "С2000-ВТ"
         self.attr_description = "Addressable temperature and humidity sensor"
-        self._numeric_cursor = 0
-
-    @classmethod
-    def reconcile_gateway_mapping(
-        cls,
-        mapping: ResolvedDeviceMapping,
-        configuration: S2000PPConfiguration,
-    ) -> ResolvedDeviceMapping:
-        """Repair a partial VT mapping only from its exact two-address footprint."""
-        identity = mapping.identity
-        dpls = identity.dpls
-        if dpls is None or dpls.address_count != 2:
-            raise ValueError("C2000VT requires one two-address DPLS identity")
-        rows = configuration.zones_for_device(identity.orion_address)
-        resolved = []
-        for address in (dpls.base_address, dpls.base_address + 1):
-            matches = [
-                row for row in rows
-                if row.local_zone_number == address and row.zone_type == 6
-            ]
-            if len(matches) != 1:
-                raise ValueError(
-                    "C2000VT mapping does not match one unambiguous adjacent "
-                    "temperature/humidity footprint"
-                )
-            row = matches[0]
-            resolved.append(
-                resolve_zone_row(
-                    row,
-                    configuration.partition_id(row.partition_number),
-                )
-            )
-        return ResolvedDeviceMapping(identity, mapping.source, tuple(resolved))
-
-    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
-        """Require both logical channels of one physical thermohygrometer."""
-        super().apply_gateway_mapping(mapping)
-        if set(self._numeric_mappings) != {"temperature", "humidity"}:
-            raise ValueError("C2000VT requires both temperature and humidity channels")
-
-    async def async_get_snapshot(self) -> dict[str, dict]:
-        """Poll grouped states and one numeric channel per coordinator refresh."""
-        mapping = self.attr_gateway_mapping
-        if mapping is None:
-            raise ValueError("Equipment requires a validated S2000-PP mapping")
-        zone_states = await S2000PPRuntimeReader(
-            self.attr_client, self.attr_device_id
-        ).async_read_zone_states(self._numeric_mappings.values())
-
-        keys = ("temperature", "humidity")
-        key = keys[self._numeric_cursor]
-        item = self._numeric_mappings[key]
-        _LOGGER.debug(
-            "C2000-VT numeric poll channel=%s PP-row=%s cursor=%s",
-            key,
-            item.gateway_object_number,
-            self._numeric_cursor,
-        )
-        result = await S2000PPNumericValueReader(
-            self.attr_client,
-            self.attr_device_id,
-            mapping.identity.gateway.stable_id,
-        ).async_read(item.gateway_object_number, self.numeric_kinds[key])
-        _LOGGER.debug(
-            "C2000-VT numeric result channel=%s PP-row=%s status=%s "
-            "exception=%s raw=%s decoded=%s",
-            key,
-            item.gateway_object_number,
-            result.status.value,
-            result.exception_code,
-            result.raw_register,
-            result.value,
-        )
-        if result.status is NumericResultStatus.READY:
-            self._numeric_values[key] = {
-                "value": result.value,
-                "raw_register": result.raw_register,
-                "parameter_kind": result.parameter_kind.value,
-            }
-            self._numeric_cursor = (self._numeric_cursor + 1) % len(keys)
-            _LOGGER.debug(
-                "C2000-VT numeric cursor advanced channel=%s next=%s",
-                key,
-                keys[self._numeric_cursor],
-            )
-        elif result.status is NumericResultStatus.PROTOCOL_ERROR:
-            _handle_optional_numeric_protocol_error(self, key, item, result)
-
-        return {
-            "numeric_sensors": {
-                sensor_id: dict(value)
-                for sensor_id, value in self._numeric_values.items()
-            },
-            "state_sensors": {
-                f"{sensor_id}_state": self._state_sensor_value(
-                    zone_states[channel.gateway_object_number]
-                )
-                for sensor_id, channel in self._numeric_mappings.items()
-            },
-        }
 
 
 class C2000VTI(C2000VT):
@@ -4484,6 +4497,115 @@ class C2000VTI(C2000VT):
         if mapping.identity.metadata.variant != self.Variant.VTI.value:
             raise ValueError("C2000-VTI isp.01 requires separate CO validation")
         super().apply_gateway_mapping(mapping)
+
+
+class C2000RVTI(BolidDPLSThermohygrometerBase):
+    """Bolid С2000Р-ВТИ two-zone radio thermohygrometer.
+
+    The wired and radio products share only the documented S2000-PP
+    temperature/humidity acquisition mechanics.  Their registry identity,
+    metadata, and radio-only battery capability remain separate.
+    """
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-ВТИ"
+    dpls_address_count = 2
+
+    class Variant(str, Enum):
+        RVTI = "rvti"
+
+    @dataclass(frozen=True, slots=True)
+    class VariantMetadata:
+        display_name: str
+
+        @property
+        def device_metadata(self) -> dict[str, Any]:
+            return {
+                "variant": self.display_name,
+                "temperature_range": "-10…+55 °C",
+                "temperature_resolution": "0.1 °C",
+                "humidity_indication_range": "0…100 %",
+                "humidity_measurement_range": "20…80 %",
+                "humidity_resolution": "0.1 %",
+                "battery_topology": "one_er14505_3_6_v",
+                "radio_supervision": "documented_pp_routing_deferred",
+                "tamper_capability": "pp_routing_not_validated",
+            }
+
+    variants = {
+        Variant.RVTI: VariantMetadata("С2000Р-ВТИ"),
+    }
+    variant_dpls_address_counts = {"rvti": 2}
+    capability_requirements = BolidDPLSThermohygrometerBase.capability_requirements
+    numeric_kinds = BolidDPLSThermohygrometerBase.numeric_kinds
+    numeric_metadata = {
+        "temperature": (
+            SensorDeviceClass.TEMPERATURE,
+            UnitOfTemperature.CELSIUS,
+            1,
+        ),
+        "humidity": (SensorDeviceClass.HUMIDITY, PERCENTAGE, 1),
+    }
+    battery_state_codes = frozenset((200, 202, 211))
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self.attr_model_name = "С2000Р-ВТИ"
+        self.attr_description = "Radio display thermohygrometer"
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Apply the two-zone contract with a product-specific new identity."""
+        super().apply_gateway_mapping(mapping)
+        identity = f"{mapping.identity.stable_id}:model:{self.__class__.__name__}"
+        self.attr_device_identifier = identity
+        self.attr_unique_id_prefix = identity
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Expose two zone states and one physical main-battery state."""
+        return [
+            *super().get_state_sensor_descriptions(),
+            {
+                "sensor_id": "main_battery_state",
+                "name": "Main battery state",
+                "device_class": None,
+                "icon": "mdi:battery-check",
+                "entity_category": EntityCategory.DIAGNOSTIC,
+            },
+        ]
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Aggregate the duplicated radio battery state into one entity."""
+        snapshot = await super().async_get_snapshot()
+        channel_states = snapshot["state_sensors"]
+        expanded_codes = tuple(
+            code
+            for key in ("temperature_state", "humidity_state")
+            for code in channel_states[key]["expanded_codes"]
+            if code != 0
+        )
+        battery_codes = tuple(
+            dict.fromkeys(
+                code for code in expanded_codes if code in self.battery_state_codes
+            )
+        )
+        battery_code = battery_codes[0] if len(battery_codes) == 1 else None
+        expanded_states = tuple(
+            self.STATE_NAMES.get(code, f"unknown_{code}")
+            for code in dict.fromkeys(expanded_codes)
+        )
+        channel_states["main_battery_state"] = {
+            "state": (
+                None
+                if battery_code is None
+                else self.STATE_NAMES.get(
+                    battery_code, f"unknown_{battery_code}"
+                )
+            ),
+            "primary_code": battery_code,
+            "expanded_codes": expanded_codes,
+            "expanded_states": expanded_states,
+        }
+        return snapshot
 
 
 class C2000SP2:
@@ -5041,6 +5163,7 @@ EQUIPMENT_CLASSES = (
     C2000RSMK,
     C2000RST01,
     C2000RSirena,
+    C2000RVTI,
     C2000SMK,
     C2000SP2,
     C2000SP4,

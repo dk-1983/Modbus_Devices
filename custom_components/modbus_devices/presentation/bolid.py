@@ -32,6 +32,17 @@ C2000_VT_PROFILE = PresentationProfile(
     ),
 )
 
+C2000R_VTI_PROFILE = PresentationProfile(
+    profile_id="bolid_c2000r_vti",
+    roles=(
+        PresentationRole("temperature_state"),
+        PresentationRole("temperature"),
+        PresentationRole("humidity_state"),
+        PresentationRole("humidity"),
+        PresentationRole("main_battery_state"),
+    ),
+)
+
 C2000_DZ_PROFILE = PresentationProfile(
     profile_id="bolid_c2000_dz",
     roles=(
@@ -152,6 +163,12 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "C2000VTI",
         C2000_VT_PROFILE,
         models=("С2000-ВТИ",),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000RVTI",
+        C2000R_VTI_PROFILE,
+        models=("С2000Р-ВТИ",),
     )
     registry.register_equipment(
         "Bolid",
