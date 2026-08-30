@@ -52,14 +52,23 @@ C2000R_DZ_PROFILE = PresentationProfile(
 
 C2000_SMK_04_PROFILE = PresentationProfile(
     profile_id="bolid_c2000_smk_04",
-    roles=(PresentationRole("opening_state", PresentationSection.DIAGNOSTIC),),
+    roles=(
+        PresentationRole("opening", entity_domain="binary_sensor"),
+        PresentationRole("opening_state", PresentationSection.DIAGNOSTIC),
+    ),
 )
 
 C2000R_SMK_PROFILE = PresentationProfile(
     profile_id="bolid_c2000r_smk",
     roles=(
+        PresentationRole("opening", entity_domain="binary_sensor"),
         PresentationRole("battery_state"),
         PresentationRole("external_input_state", PresentationSection.DIAGNOSTIC),
+        PresentationRole(
+            "tamper",
+            PresentationSection.DIAGNOSTIC,
+            entity_domain="binary_sensor",
+        ),
         PresentationRole("opening_state", PresentationSection.DIAGNOSTIC),
     ),
 )

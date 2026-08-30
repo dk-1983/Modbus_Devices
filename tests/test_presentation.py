@@ -369,7 +369,9 @@ async def test_wired_smk_card_contains_only_raw_opening_state(registry_hass):
     )
 
     assert result.profile_id == "bolid_c2000_smk_04"
+    assert result.card["type"] == "entities"
     assert entity_ids(result) == ["sensor.smk_opening_state"]
+    assert len(entity_ids(result)) == len(set(entity_ids(result)))
 
 
 @pytest.mark.asyncio
@@ -386,10 +388,12 @@ async def test_radio_smk_card_places_single_battery_before_raw_states(registry_h
     )
 
     assert result.profile_id == "bolid_c2000r_smk"
+    assert result.card["type"] == "entities"
     assert entity_ids(result) == [
         "sensor.rsmk_battery_state",
         "sensor.rsmk_opening_state",
     ]
+    assert len(entity_ids(result)) == len(set(entity_ids(result)))
 
 
 @pytest.mark.asyncio
@@ -413,6 +417,39 @@ async def test_radio_smk_card_includes_configured_external_input_before_raw_open
         "sensor.rsmk_external_input_state",
         "sensor.rsmk_opening_state",
     ]
+
+
+@pytest.mark.asyncio
+async def test_smk_profile_contract_aggregates_future_domains_into_one_native_card(
+    registry_hass,
+):
+    """Prove profile ordering without claiming that future entities exist yet."""
+    device = Device("rsmk", "rsmk-stable", model="С2000Р-СМК")
+    result = await build(
+        registry_hass,
+        device,
+        [
+            entity(device, "opening_state", category=EntityCategory.DIAGNOSTIC),
+            entity(
+                device,
+                "tamper",
+                domain="binary_sensor",
+                category=EntityCategory.DIAGNOSTIC,
+            ),
+            entity(device, "battery_state"),
+            entity(device, "opening", domain="binary_sensor"),
+        ],
+        "C2000RSMK",
+    )
+
+    assert result.card["type"] == "entities"
+    assert entity_ids(result) == [
+        "binary_sensor.rsmk_opening",
+        "sensor.rsmk_battery_state",
+        "binary_sensor.rsmk_tamper",
+        "sensor.rsmk_opening_state",
+    ]
+    assert len(entity_ids(result)) == len(set(entity_ids(result)))
 
 @pytest.mark.asyncio
 async def test_disabled_is_excluded_but_unavailable_is_included(registry_hass):
