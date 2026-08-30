@@ -16,10 +16,12 @@ from homeassistant.const import (
     UnitOfElectricPotential,
 )
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.update_coordinator import UpdateFailed
 from pymodbus.exceptions import ModbusException
 
 import custom_components.modbus_devices as integration
 from custom_components.modbus_devices.const import Config
+from custom_components.modbus_devices.coordinator import ModbusDeviceCoordinator
 from custom_components.modbus_devices.equipment.bolid import MIP24Isp20
 from custom_components.modbus_devices.equipment.equipment import (
     get_equipment_classes_by_manufacturer,
@@ -36,6 +38,7 @@ from custom_components.modbus_devices.mapping import AutomaticDeviceMappingProvi
 from custom_components.modbus_devices.s2000_pp import (
     S2000PPConfiguration,
     S2000PPConfigurationCache,
+    S2000PPNumericValueReader,
     S2000PPRelayRow,
     S2000PPZoneRow,
     manual_relay_mapping,
@@ -95,6 +98,49 @@ class Client:
         for index in range(block_count):
             values.extend([self.expanded[index], *([0] * 15)])
         return Response(values, function_code=4)
+
+
+class NumericOutcomeClient(Client):
+    """Drive exact optional numeric outcomes while preserving grouped reads."""
+
+    def __init__(self, outcomes, *, selector_error=None):
+        super().__init__()
+        self.outcomes = iter(outcomes)
+        self.selector_error = selector_error
+
+    async def write_register(self, *, address, value, device_id):
+        self.writes.append((address, value, device_id))
+        if self.selector_error is not None:
+            return Response(
+                error=True,
+                code=self.selector_error,
+                function_code=0x86,
+            )
+        return Response(function_code=6, address=address, value=value)
+
+    async def read_holding_registers(self, *, address, count, device_id):
+        self.holding_calls.append((address, count, device_id))
+        if address != 46328:
+            return Response(self.primary[:count], function_code=3)
+        outcome = next(self.outcomes)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if outcome == "malformed":
+            return object()
+        if outcome == "wrong_function":
+            return Response([0x0100], function_code=4)
+        if isinstance(outcome, tuple) and outcome[0] == "exception":
+            return Response(error=True, code=outcome[1], function_code=0x83)
+        return Response([outcome], function_code=3)
+
+
+def coordinator_for(device):
+    """Build the coordinator shell used by equipment snapshot regressions."""
+    coordinator = object.__new__(ModbusDeviceCoordinator)
+    coordinator.device = device
+    coordinator._write_generation = 0
+    coordinator._pending_write_patches = {}
+    return coordinator
 
 
 def gateway(name="pp-a", connection="serial:COM1"):
@@ -627,19 +673,113 @@ async def test_pending_numeric_request_retries_result_without_new_selector():
     assert client.writes[-1] == (46181, 22, 1)
 
 
-def test_numeric_protocol_error_remains_fatal_and_does_not_publish_zero():
-    client = Client()
+async def _assert_mip24_contains_fc03_exception(code, caplog):
+    client = NumericOutcomeClient([("exception", code)])
+    device = configured(client)
+    device._numeric_cursor = 4
 
-    async def unavailable(*, address, count, device_id):
-        if address == 46328:
-            return Response(error=True, code=3, function_code=0x83)
-        return await Client.read_holding_registers(
-            client, address=address, count=count, device_id=device_id
-        )
+    snapshot = await coordinator_for(device)._async_update_data()
 
-    client.read_holding_registers = unavailable
-    with pytest.raises(ModbusException):
-        asyncio.run(configured(client).async_get_snapshot())
+    assert snapshot["numeric_sensors"] == {}
+    assert len(snapshot["state_sensors"]) == 6
+    assert snapshot["state_sensors"]["mains_state"]["state"] == "mains_restored"
+    assert snapshot["binary_sensors"]["tamper"]["state"] is True
+    assert client.writes == [(46181, 25, 1)]
+    assert "class=MIP24Isp20" in caplog.text
+    assert "orion=2" in caplog.text
+    assert "channel=mains_voltage" in caplog.text
+    assert "pp_row=25" in caplog.text
+    assert f"exception={code}" in caplog.text
+    assert "operation=read numeric result" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_mip24_contains_fc03_exception_3_and_keeps_grouped_snapshot(caplog):
+    await _assert_mip24_contains_fc03_exception(3, caplog)
+
+
+@pytest.mark.asyncio
+async def test_mip24_contains_fc03_exception_4_and_keeps_grouped_snapshot(caplog):
+    await _assert_mip24_contains_fc03_exception(4, caplog)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [3, 4])
+async def test_mip24_preserves_last_known_good_on_optional_numeric_error(code):
+    client = NumericOutcomeClient([0xE600, ("exception", code)])
+    device = configured(client)
+    device._numeric_cursor = 4
+
+    ready = await device.async_get_snapshot()
+    assert ready["numeric_sensors"]["mains_voltage"]["value"] == 230.0
+    device._numeric_cursor = 4
+    failed = await device.async_get_snapshot()
+
+    assert failed["numeric_sensors"]["mains_voltage"]["value"] == 230.0
+    assert len(failed["state_sensors"]) == 6
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [3, 4])
+async def test_mip24_first_optional_numeric_error_leaves_value_unknown(code):
+    device = configured(NumericOutcomeClient([("exception", code)]))
+    device._numeric_cursor = 4
+    snapshot = await device.async_get_snapshot()
+
+    assert snapshot["numeric_sensors"] == {}
+    assert len(snapshot["state_sensors"]) == 6
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [3, 4])
+async def test_mip24_retries_same_row_with_fresh_selector_after_optional_error(code):
+    client = NumericOutcomeClient([("exception", code), 0xE600])
+    device = configured(client)
+    device._numeric_cursor = 4
+    mapping = device.attr_gateway_mapping
+    session = S2000PPNumericValueReader(
+        client,
+        1,
+        mapping.identity.gateway.stable_id,
+    )._session
+
+    first = await device.async_get_snapshot()
+    assert first["numeric_sensors"] == {}
+    assert session.pending_request is None
+    assert session.generation == 1
+    assert device._numeric_cursor == 4
+
+    recovered = await device.async_get_snapshot()
+    assert recovered["numeric_sensors"]["mains_voltage"]["value"] == 230.0
+    assert session.pending_request is None
+    assert session.generation == 2
+    assert device._numeric_cursor == 0
+    assert client.writes == [(46181, 25, 1), (46181, 25, 1)]
+
+
+@pytest.mark.asyncio
+async def test_mip24_transport_error_remains_fatal():
+    device = configured(NumericOutcomeClient([ModbusException("transport failed")]))
+
+    with pytest.raises(UpdateFailed, match="transport failed"):
+        await coordinator_for(device)._async_update_data()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["malformed", "wrong_function"])
+async def test_mip24_malformed_or_wrong_function_result_remains_fatal(outcome):
+    device = configured(NumericOutcomeClient([outcome]))
+
+    with pytest.raises(UpdateFailed):
+        await coordinator_for(device)._async_update_data()
+
+
+@pytest.mark.asyncio
+async def test_mip24_selector_protocol_error_remains_fatal():
+    device = configured(NumericOutcomeClient([], selector_error=3))
+
+    with pytest.raises(UpdateFailed):
+        await coordinator_for(device)._async_update_data()
 
 
 @pytest.mark.parametrize("code, name", [

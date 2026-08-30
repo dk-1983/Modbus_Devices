@@ -2259,7 +2259,7 @@ class MIP24Isp20:
                 }
                 self._numeric_cursor = (self._numeric_cursor + 1) % len(numeric_items)
             elif result.status is NumericResultStatus.PROTOCOL_ERROR:
-                raise ModbusException(result.message or "numeric protocol error")
+                _handle_optional_numeric_protocol_error(self, key, item, result)
 
         states = await S2000PPRuntimeReader(
             self.attr_client, self.attr_device_id
@@ -4050,7 +4050,12 @@ class C2000RDZ(BolidDPLSWaterDetectorBase):
 
 
 class BolidDPLSNumericDeviceBase:
-    """Shared mechanics for distinct DPLS devices exposing numeric zones."""
+    """Shared mechanics for distinct DPLS devices exposing numeric zones.
+
+    The generic snapshot contract treats numeric protocol errors as fatal. A
+    concrete family may isolate optional numeric result exceptions only in an
+    override that explicitly invokes ``_handle_optional_numeric_protocol_error``.
+    """
 
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True

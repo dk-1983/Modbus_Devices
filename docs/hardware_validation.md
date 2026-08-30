@@ -499,3 +499,17 @@ internal S2000-PP/device-side reason remains unknown. C2000VT row 63 had
 previously produced the same class of FC03/3 warning, but no row-63 terminal 3
 occurred in this specific DEBUG observation window; an identical device-side
 cause is therefore not claimed.
+
+## MIP-24 isp.20 production numeric containment evidence
+
+Production forensic traces identified an equipment-layer containment gap for
+`MIP24Isp20`. On Orion 2, PP rows 21–25, a typed FC03 exception 3 while reading
+the `mains_voltage` numeric result for row 25 escaped to the coordinator at
+04:16:14.283 and again at 04:17:34.284. Each occurrence made the complete
+grouped snapshot unavailable until the same row recovered on the next
+five-second poll. An Orion 21 unit using rows 54–58 had previously correlated
+with the same coordinator-level leakage for a typed FC03 exception 4.
+
+The equipment-layer containment defect is proven. The device-side reason that
+S2000-PP generated exception 3 or 4 remains unknown; these observations do not
+establish a transport root cause.
