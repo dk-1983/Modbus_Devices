@@ -44,6 +44,11 @@ class RoundRobinClient:
             result = next(self.results)
             if result == "pending":
                 return Response(exception_code=15)
+            if result in {"error3", "error4"}:
+                return Response(
+                    exception_code=4 if result == "error4" else 3,
+                    function_code=0x83,
+                )
             return Response(registers=[result], function_code=3)
         return Response(registers=[0x4E2F, 0x482F], function_code=3)
 
@@ -138,4 +143,25 @@ async def test_plain_vti_hardware_numeric_fixture_uses_shared_signed_q8_8_round_
     assert [call for call in client.calls if call[0] == "select"] == [
         ("select", 46179, 9),
         ("select", 46179, 10),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_plain_vti_numeric_protocol_error_keeps_states_and_recovers():
+    client = RoundRobinClient(["error4", 0x1440])
+    device = C2000VTI(client, 2)
+    device.apply_gateway_mapping(mapping())
+
+    failed = await device.async_get_snapshot()
+    recovered = await device.async_get_snapshot()
+
+    assert failed["numeric_sensors"] == {}
+    assert set(failed["state_sensors"]) == {
+        "temperature_state",
+        "humidity_state",
+    }
+    assert recovered["numeric_sensors"]["temperature"]["value"] == 20.25
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 9),
+        ("select", 46179, 9),
     ]

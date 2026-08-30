@@ -46,6 +46,7 @@ from ..modbus_validation import (
 from ..s2000_pp import (
     NumericParameterKind,
     NumericResultStatus,
+    S2000_PP_NUMERIC_RESULT,
     S2000PPConfiguration,
     S2000PPCounterValueReader,
     S2000PPNumericValueReader,
@@ -58,6 +59,45 @@ from .equipment import canonical_equipment_class_name
 _LOGGER = getLogger(__name__)
 
 SVK_COUNTER_POLL_INTERVAL_SECONDS = 60.0
+
+
+def _handle_optional_numeric_protocol_error(
+    device,
+    channel: str,
+    item: ResolvedObjectMapping,
+    result,
+) -> None:
+    """Isolate only a typed exception returned by the numeric result read."""
+    if (
+        getattr(result, "operation", None) != "read numeric result"
+        or getattr(result, "exception_code", None) is None
+    ):
+        raise ModbusException(result.message or "numeric protocol error")
+    mapping = device.attr_gateway_mapping
+    identity = mapping.identity
+    dpls = identity.dpls
+    _LOGGER.warning(
+        "Optional S2000-PP numeric protocol error model=%s class=%s "
+        "orion=%s dpls=%s channel=%s pp_row=%s selector_register=%s "
+        "selector_value=%s result_register=%s result_count=%s owner=%s "
+        "generation=%s response_function=%s exception=%s operation=%s error=%s",
+        device.attr_model_name,
+        device.__class__.__name__,
+        identity.orion_address,
+        None if dpls is None else dpls.base_address,
+        channel,
+        item.gateway_object_number,
+        getattr(result, "selector_register", None),
+        item.gateway_object_number,
+        getattr(result, "result_register", S2000_PP_NUMERIC_RESULT),
+        getattr(result, "result_count", 1),
+        getattr(result, "session_owner", None),
+        getattr(result, "session_generation", None),
+        getattr(result, "response_function_code", None),
+        getattr(result, "exception_code", None),
+        getattr(result, "operation", None),
+        result.message,
+    )
 
 
 class InvalidM3000ClockPayload(ModbusException):
@@ -2950,7 +2990,12 @@ class C2000IP03(BolidDPLSDetectorBase):
                 "parameter_kind": result.parameter_kind.value,
             }
         elif result.status is NumericResultStatus.PROTOCOL_ERROR:
-            raise ModbusException(result.message or "numeric protocol error")
+            _handle_optional_numeric_protocol_error(
+                self,
+                "temperature",
+                self._state_mapping,
+                result,
+            )
         snapshot["numeric_sensors"] = (
             {} if self._temperature_value is None
             else {"temperature": dict(self._temperature_value)}
@@ -4344,7 +4389,7 @@ class C2000VT(BolidDPLSNumericDeviceBase):
                 keys[self._numeric_cursor],
             )
         elif result.status is NumericResultStatus.PROTOCOL_ERROR:
-            raise ModbusException(result.message or "numeric protocol error")
+            _handle_optional_numeric_protocol_error(self, key, item, result)
 
         return {
             "numeric_sensors": {

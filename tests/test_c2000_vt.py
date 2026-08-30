@@ -32,10 +32,10 @@ from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntryError
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.helpers.entity import EntityCategory
-from pymodbus.exceptions import ModbusException
-
+from homeassistant.helpers.update_coordinator import UpdateFailed
 import custom_components.modbus_devices as integration
 from custom_components.modbus_devices.const import Config
+from custom_components.modbus_devices.coordinator import ModbusDeviceCoordinator
 
 
 def make_mapping(*objects, base=20, kdl=10, variant="vt"):
@@ -338,13 +338,28 @@ class RoundRobinResponse:
 
 
 class RoundRobinClient:
-    def __init__(self, results, state_registers=(0x4E00, 0x4800)):
+    def __init__(
+        self,
+        results,
+        state_registers=(0x4E00, 0x4800),
+        *,
+        selector_response="valid",
+    ):
         self.results = iter(results)
         self.state_registers = state_registers
+        self.selector_response = selector_response
         self.calls = []
 
     async def write_register(self, *, address, value, device_id):
         self.calls.append(("select", address, value))
+        if self.selector_response == "invalid":
+            return RoundRobinResponse(
+                address=address,
+                value=value + 1,
+                function_code=6,
+            )
+        if self.selector_response == "exception":
+            return RoundRobinResponse(exception_code=4, function_code=0x86)
         return RoundRobinResponse(address=address, value=value, function_code=6)
 
     async def read_holding_registers(self, *, address, count, device_id):
@@ -353,8 +368,15 @@ class RoundRobinClient:
             result = next(self.results)
             if result == "pending":
                 return RoundRobinResponse(exception_code=15)
-            if result == "error":
-                return RoundRobinResponse(exception_code=3)
+            if result in {"error", "error3", "error4", "error99"}:
+                code = {"error4": 4, "error99": 99}.get(result, 3)
+                return RoundRobinResponse(exception_code=code, function_code=0x83)
+            if result == "transport":
+                raise OSError("numeric transport failed")
+            if result == "wrong_function":
+                return RoundRobinResponse(registers=[0x1480], function_code=4)
+            if result == "malformed":
+                return RoundRobinResponse(registers=[], function_code=3)
             return RoundRobinResponse(registers=[result], function_code=3)
         return RoundRobinResponse(
             registers=list(self.state_registers[:count]), function_code=3
@@ -573,12 +595,133 @@ def test_local_hardware_rtu_frames_have_valid_crc(body, frame):
 
 
 @pytest.mark.asyncio
-async def test_zero_is_real_and_unexpected_numeric_exception_remains_fatal():
+async def test_zero_is_real_numeric_value():
     zero_client = RoundRobinClient([0x1480, 0x0000])
     device = round_robin_device(zero_client)
     await device.async_get_snapshot()
     snapshot = await device.async_get_snapshot()
     assert snapshot["numeric_sensors"]["humidity"]["value"] == 0.0
 
-    with pytest.raises(ModbusException, match="read numeric result"):
-        await round_robin_device(RoundRobinClient(["error"])).async_get_snapshot()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", ["error3", "error4", "error99"])
+async def test_optional_numeric_protocol_error_preserves_states_cache_and_recovers(
+    error,
+    caplog,
+):
+    client = RoundRobinClient([0x1480, error, 0x3780])
+    device = round_robin_device(client)
+
+    first = await device.async_get_snapshot()
+    with caplog.at_level(
+        logging.WARNING,
+        logger="custom_components.modbus_devices.equipment.bolid",
+    ):
+        failed = await device.async_get_snapshot()
+    recovered = await device.async_get_snapshot()
+
+    assert first["numeric_sensors"]["temperature"]["value"] == 20.5
+    assert failed["numeric_sensors"] == first["numeric_sensors"]
+    assert len(failed["state_sensors"]) == 2
+    assert failed["state_sensors"]["temperature_state"]["state"] == (
+        "temperature_normal"
+    )
+    assert recovered["numeric_sensors"]["humidity"]["value"] == 55.5
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 1),
+        ("select", 46179, 2),
+        ("select", 46179, 2),
+    ]
+    expected_code = "99" if error == "error99" else "4" if error == "error4" else "3"
+    assert f"exception={expected_code}" in caplog.text
+    assert "class=C2000VT" in caplog.text
+    assert "orion=10 dpls=20 channel=humidity pp_row=2" in caplog.text
+    assert "selector_register=46179 selector_value=2" in caplog.text
+    assert "result_register=46328 result_count=1" in caplog.text
+    assert "owner=('numeric', 2) generation=" in caplog.text
+    assert "response_function=131" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_first_numeric_protocol_error_keeps_unknown_and_coordinator_successful():
+    client = RoundRobinClient(["error3", 0x1480])
+    device = round_robin_device(client)
+    coordinator = object.__new__(ModbusDeviceCoordinator)
+    coordinator.device = device
+    coordinator._write_generation = 0
+    coordinator._pending_write_patches = {}
+
+    failed = await coordinator._async_update_data()
+    recovered = await coordinator._async_update_data()
+
+    assert failed["numeric_sensors"] == {}
+    assert len(failed["state_sensors"]) == 2
+    assert recovered["numeric_sensors"]["temperature"]["value"] == 20.5
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 1),
+        ("select", 46179, 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_untyped_numeric_transport_failure_still_fails_coordinator():
+    device = round_robin_device(RoundRobinClient(["transport"]))
+    coordinator = object.__new__(ModbusDeviceCoordinator)
+    coordinator.device = device
+    coordinator._write_generation = 0
+    coordinator._pending_write_patches = {}
+
+    with pytest.raises(UpdateFailed, match="numeric transport failed"):
+        await coordinator._async_update_data()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("client", "message"),
+    [
+        (RoundRobinClient(["wrong_function"]), "Wrong Modbus function response"),
+        (RoundRobinClient(["malformed"]), "Short Modbus response"),
+        (
+            RoundRobinClient([0x1480], selector_response="invalid"),
+            "invalid FC06 selector echo",
+        ),
+        (
+            RoundRobinClient([0x1480], selector_response="exception"),
+            "select numeric zone",
+        ),
+    ],
+)
+async def test_non_result_exception_protocol_errors_remain_coordinator_fatal(
+    client,
+    message,
+):
+    coordinator = object.__new__(ModbusDeviceCoordinator)
+    coordinator.device = round_robin_device(client)
+    coordinator._write_generation = 0
+    coordinator._pending_write_patches = {}
+
+    with pytest.raises(UpdateFailed, match=message):
+        await coordinator._async_update_data()
+
+
+@pytest.mark.asyncio
+async def test_protocol_error_releases_shared_owner_for_other_vt():
+    client = RoundRobinClient(["error4", 0x1440])
+    first = round_robin_device(client)
+    second = C2000VT(client, 1)
+    second.apply_gateway_mapping(
+        make_mapping(
+            manual_zone_mapping(30, 3, 6, 0, None),
+            manual_zone_mapping(31, 4, 6, 0, None),
+            base=30,
+        )
+    )
+
+    assert (await first.async_get_snapshot())["numeric_sensors"] == {}
+    second_snapshot = await second.async_get_snapshot()
+
+    assert second_snapshot["numeric_sensors"]["temperature"]["value"] == 20.25
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 1),
+        ("select", 46179, 3),
+    ]

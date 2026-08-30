@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Awaitable, Callable, Iterable
 from weakref import WeakKeyDictionary
@@ -91,6 +91,13 @@ class S2000PPNumericResult:
     raw_register: int | None = None
     exception_code: int | None = None
     message: str | None = None
+    operation: str | None = None
+    response_function_code: int | None = None
+    selector_register: int | None = None
+    result_register: int = S2000_PP_NUMERIC_RESULT
+    result_count: int = 1
+    session_owner: tuple[str, int] | None = None
+    session_generation: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +116,7 @@ class S2000PPCounterResult:
 class _SelectorGatewaySession:
     lock: asyncio.Lock
     pending_request: tuple[str, int] | None = None
+    generation: int = 0
 
 
 _SELECTOR_CLIENT_SESSIONS: WeakKeyDictionary[
@@ -170,26 +178,49 @@ class S2000PPNumericValueReader:
             request = ("numeric", zone_table_number)
             pending = self._session.pending_request
             if pending is not None and pending != request:
-                return S2000PPNumericResult(
+                return self._with_session_context(S2000PPNumericResult(
                     NumericResultStatus.RETRYABLE,
                     parameter_kind,
                     zone_table_number,
                     exception_code=6,
                     message=f"S2000-PP selector is parked for {pending[0]} zone {pending[1]}",
-                )
+                ), parameter_kind, pending)
             if pending is None:
+                self._session.generation += 1
                 selected = await self._select(zone_table_number, parameter_kind)
                 if selected is not None:
-                    return selected
+                    return self._with_session_context(
+                        selected, parameter_kind, request
+                    )
                 self._session.pending_request = request
 
             result = await self._read_result(zone_table_number, parameter_kind)
+            result = self._with_session_context(result, parameter_kind, request)
             if result.status not in {
                 NumericResultStatus.PENDING,
                 NumericResultStatus.RETRYABLE,
             }:
                 self._session.pending_request = None
             return result
+
+    def _with_session_context(
+        self,
+        result: S2000PPNumericResult,
+        kind: NumericParameterKind,
+        owner: tuple[str, int],
+    ) -> S2000PPNumericResult:
+        """Attach diagnostics without changing protocol status semantics."""
+        selector = (
+            S2000_PP_POWER_NUMERIC_SELECTOR
+            if kind in _POWER_NUMERIC_KINDS
+            else S2000_PP_NUMERIC_SELECTOR
+        )
+        return replace(
+            result,
+            selector_register=selector,
+            session_owner=owner,
+            session_generation=self._session.generation,
+        )
 
     async def _select(self, zone: int, kind: NumericParameterKind):
         selector = (
@@ -219,6 +250,8 @@ class S2000PPNumericValueReader:
                 kind,
                 zone,
                 message="invalid FC06 selector echo",
+                operation="select numeric zone",
+                response_function_code=getattr(response, "function_code", None),
             )
         return None
 
@@ -246,6 +279,8 @@ class S2000PPNumericValueReader:
                 kind,
                 zone,
                 message=str(exc),
+                operation="read numeric result",
+                response_function_code=getattr(response, "function_code", None),
             )
         raw = registers[0]
         try:
@@ -267,6 +302,8 @@ class S2000PPNumericValueReader:
             zone,
             value=value,
             raw_register=raw,
+            operation="read numeric result",
+            response_function_code=getattr(response, "function_code", None),
         )
 
 
@@ -408,12 +445,14 @@ def _numeric_error_result(response, kind, zone, operation):
         return S2000PPNumericResult(
             NumericResultStatus.PROTOCOL_ERROR, kind, zone,
             message=f"empty response for {operation}",
+            operation=operation,
         )
     is_error = getattr(response, "isError", None)
     if not callable(is_error):
         return S2000PPNumericResult(
             NumericResultStatus.PROTOCOL_ERROR, kind, zone,
             message=f"invalid response for {operation}",
+            operation=operation,
         )
     if not is_error():
         return None
@@ -428,6 +467,8 @@ def _numeric_error_result(response, kind, zone, operation):
     return S2000PPNumericResult(
         status, kind, zone, exception_code=code,
         message=f"Modbus exception during {operation}: {response}",
+        operation=operation,
+        response_function_code=getattr(response, "function_code", None),
     )
 
 

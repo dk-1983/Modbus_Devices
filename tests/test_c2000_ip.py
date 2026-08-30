@@ -135,3 +135,53 @@ async def test_pending_preserves_last_confirmed_temperature(monkeypatch):
     snapshot = await device.async_get_snapshot()
     assert snapshot["numeric_sensors"]["temperature"]["value"] == 21.25
     assert snapshot["state_sensors"]["detector_state"]["state"] == "equipment_fault"
+
+
+@pytest.mark.asyncio
+async def test_optional_numeric_protocol_error_preserves_state_and_cached_temperature(
+    monkeypatch,
+):
+    class NumericReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read(self, zone, kind):
+            return SimpleNamespace(
+                status=NumericResultStatus.PROTOCOL_ERROR,
+                value=None,
+                raw_register=None,
+                parameter_kind=kind,
+                message="Modbus exception during read numeric result",
+                exception_code=4,
+                selector_register=46179,
+                result_register=46328,
+                result_count=1,
+                session_owner=("numeric", zone),
+                session_generation=3,
+                response_function_code=0x83,
+                operation="read numeric result",
+            )
+
+    class RuntimeReader:
+        def __init__(self, *args):
+            pass
+
+        async def async_read_zone_states(self, objects):
+            return {7: SimpleNamespace(primary_state=39, expanded_states=(39, 0))}
+
+    monkeypatch.setattr(bolid, "S2000PPNumericValueReader", NumericReader)
+    monkeypatch.setattr(bolid, "S2000PPRuntimeReader", RuntimeReader)
+    device = C2000IP03(None, 1)
+    device.apply_gateway_mapping(mapping(6))
+    device._temperature_value = {
+        "value": 21.25,
+        "raw_register": 5440,
+        "parameter_kind": "temperature",
+    }
+
+    snapshot = await device.async_get_snapshot()
+
+    assert snapshot["numeric_sensors"]["temperature"]["value"] == 21.25
+    assert snapshot["state_sensors"]["detector_state"]["state"] == (
+        "equipment_normal"
+    )

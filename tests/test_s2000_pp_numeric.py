@@ -104,6 +104,41 @@ async def test_protocol_and_short_response_are_not_zero():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("code", [3, 4])
+async def test_terminal_result_exception_keeps_protocol_error_and_releases_session(code):
+    class SequenceClient(Client):
+        def __init__(self):
+            super().__init__(None)
+            self.results = iter(
+                (
+                    Response(error=True, code=code, function_code=0x83),
+                    Response(registers=[0x1480], function_code=3),
+                )
+            )
+
+        async def read_holding_registers(self, **kwargs):
+            return next(self.results)
+
+    client = SequenceClient()
+    reader = S2000PPNumericValueReader(client, 1, "terminal-error")
+
+    failed = await reader.async_read(12, NumericParameterKind.TEMPERATURE)
+    recovered = await reader.async_read(12, NumericParameterKind.TEMPERATURE)
+
+    assert failed.status is NumericResultStatus.PROTOCOL_ERROR
+    assert failed.exception_code == code
+    assert failed.response_function_code == 0x83
+    assert failed.selector_register == 46179
+    assert failed.result_register == 46328
+    assert failed.result_count == 1
+    assert failed.session_owner == ("numeric", 12)
+    assert failed.session_generation == 1
+    assert recovered.status is NumericResultStatus.READY
+    assert recovered.session_generation == 2
+    assert [write["value"] for write in client.writes] == [12, 12]
+
+
+@pytest.mark.asyncio
 async def test_invalid_selector_echo_is_protocol_error():
     client = Client(Response(registers=[0]))
 
