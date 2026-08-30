@@ -50,6 +50,20 @@ C2000R_DZ_PROFILE = PresentationProfile(
     ),
 )
 
+C2000_SMK_04_PROFILE = PresentationProfile(
+    profile_id="bolid_c2000_smk_04",
+    roles=(PresentationRole("opening_state", PresentationSection.DIAGNOSTIC),),
+)
+
+C2000R_SMK_PROFILE = PresentationProfile(
+    profile_id="bolid_c2000r_smk",
+    roles=(
+        PresentationRole("battery_state"),
+        PresentationRole("external_input_state", PresentationSection.DIAGNOSTIC),
+        PresentationRole("opening_state", PresentationSection.DIAGNOSTIC),
+    ),
+)
+
 MIP24_ISP20_PROFILE = PresentationProfile(
     profile_id="bolid_mip24_isp20",
     roles=(
@@ -105,6 +119,18 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "C2000RDZ",
         C2000R_DZ_PROFILE,
         models=("С2000Р-ДЗ",),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000SMK",
+        C2000_SMK_04_PROFILE,
+        models=("С2000-СМК", "С2000-СМК исп.04"),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000RSMK",
+        C2000R_SMK_PROFILE,
+        models=("С2000Р-СМК",),
     )
     registry.register_equipment(
         "Bolid",

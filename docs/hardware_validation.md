@@ -378,3 +378,50 @@ active-validation session. Earlier attempts made with the wrong physical
 detectors are permanently excluded from hardware evidence and regression
 fixtures. The later quiescent reading of the correct rows is not evidence of
 active flood behavior.
+
+# C2000-SMK isp.04 / C2000R-SMK quiescent validation
+
+Official Bolid documentation and a controlled read-only local S2000-PP capture
+confirm that wired `C2000SMK` (`С2000-СМК исп.04`) and radio `C2000RSMK`
+(`С2000Р-СМК`) are separate physical products. The wired execution uses one
+DPLS address and has no battery, reserve battery, radio, or documented tamper
+capability. The radio detector is represented through an ARR/KDL chain, has one
+ER14505M 3.6 V battery, and supports additional physical capabilities whose
+S2000-PP routing has not yet been actively validated. Neither documented
+firmware family is published as runtime `sw_version` because the downstream
+firmware is not read through this path.
+
+The FC04 configuration table confirmed these rows:
+
+| PP row | Product | Orion | DPLS | Partition | PP zone type |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 15 | C2000-SMK isp.04 | 3 | 33 | 8 | 1 |
+| 16 | C2000-SMK isp.04 | 3 | 34 | 8 | 1 |
+| 17 | C2000R-SMK | 3 | 35 | 11 | 1 |
+| 18 | C2000R-SMK | 3 | 36 | 12 | 1 |
+
+Partition is configuration grouping only and is not product identity. All four
+observed contact rows use PP zone type 1. Persisted mappings are reconciled at
+setup by exact Orion and DPLS identity plus zone type, using the shared cached
+configuration snapshot; no request is added to the five-second polling loop.
+
+Both wired units returned primary `0x6D2F` (codes 109 and 47) and expanded
+states `109, 47, 188, 251, 111`. Both radio units returned primary `0x6DC8`
+(codes 109 and 200) and expanded states `109, 200, 47, 188, 251, 111`. Code 200
+(`battery_restored`) is therefore hardware-confirmed in the quiescent state for
+both radio detectors; reserve-battery code 213 was absent, consistently with
+the documented single-battery product. Codes 47, 188, and 251 remain generic
+downstream communication states and are not presented as radio-quality data.
+
+All four configured inputs were disarmed during the capture. Consequently code
+109 is preserved losslessly but is not treated as hardware evidence of the
+physical magnet/contact position. Phase 1 exposes no derived opening binary
+sensor. The radio product adds one unknown-preserving battery-state sensor;
+codes 202 and 211 are documentation-derived candidates and have not been
+hardware-confirmed in active fault transitions. There is no reserve-battery
+entity.
+
+Active opening/closing, tamper, anti-sabotage, radio-loss, battery-fault/low and
+optional external-input routing remain deferred for a controlled validation
+session. No active-transition fixture or semantic claim is derived from this
+quiescent capture.

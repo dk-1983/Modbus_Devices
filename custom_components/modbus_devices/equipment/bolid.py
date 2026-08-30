@@ -2647,6 +2647,7 @@ class BolidDPLSDetectorBase:
     topology_dpls_address_counts: dict[str, int] = {}
     capability_requirements: tuple[GatewayCapabilitySpec, ...] = ()
     state_sensor_definitions: dict[str, tuple[str, str, str]] = {}
+    state_entity_category: EntityCategory | None = None
     STATE_NAMES = C2000KPB.STATE_NAMES
     detector_model = ""
     detector_description = "Addressable fire detector"
@@ -2798,12 +2799,15 @@ class BolidDPLSDetectorBase:
                 capability_key,
                 ("detector_state", "Detector state", "mdi:smoke-detector"),
             )
-            descriptions.append({
+            description = {
                 "sensor_id": sensor_id,
                 "name": name,
                 "device_class": None,
                 "icon": icon,
-            })
+            }
+            if self.state_entity_category is not None:
+                description["entity_category"] = self.state_entity_category
+            descriptions.append(description)
         return descriptions
 
     async def async_get_snapshot(self) -> dict[str, dict]:
@@ -3028,6 +3032,45 @@ class C2000ST04(BolidDPLSDetectorBase):
     state_sensor_definitions = C2000RST01.state_sensor_definitions
 
 
+def _reconcile_smk_gateway_mapping(
+    detector_class,
+    mapping: ResolvedDeviceMapping,
+    configuration: S2000PPConfiguration,
+) -> ResolvedDeviceMapping:
+    """Resolve the exact SMK type-1 footprint without using partition identity."""
+    identity = mapping.identity
+    dpls = identity.dpls
+    if dpls is None:
+        raise ValueError("SMK mapping requires a DPLS identity")
+    capabilities = detector_class.get_gateway_capabilities_for_metadata(
+        identity.metadata
+    )
+    expected_count = detector_class.topology_dpls_address_counts.get(
+        identity.metadata.topology, detector_class.dpls_address_count
+    )
+    if dpls.address_count != expected_count:
+        raise ValueError("SMK DPLS footprint does not match its topology")
+
+    resolved = []
+    for capability in capabilities:
+        local_address = capability.resolved_local_object_number(dpls.base_address)
+        matches = [
+            row
+            for row in configuration.zones_for_device(identity.orion_address)
+            if row.local_zone_number == local_address and row.zone_type == 1
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "SMK mapping does not match one unambiguous zone-type-1 row "
+                f"for DPLS address {local_address}"
+            )
+        row = matches[0]
+        resolved.append(
+            resolve_zone_row(row, configuration.partition_id(row.partition_number))
+        )
+    return ResolvedDeviceMapping(identity, mapping.source, tuple(resolved))
+
+
 class C2000RSMK(BolidDPLSDetectorBase):
     """Radio magnetic-contact detector with an optional external circuit."""
 
@@ -3035,6 +3078,7 @@ class C2000RSMK(BolidDPLSDetectorBase):
     equipment_model = "С2000Р-СМК"
     detector_model = "С2000Р-СМК"
     detector_description = "Radio magnetic-contact detector"
+    state_entity_category = EntityCategory.DIAGNOSTIC
     dpls_address_count = 1
     variants = {
         "hardware_1_0": "Hardware 1.0",
@@ -3048,7 +3092,10 @@ class C2000RSMK(BolidDPLSDetectorBase):
         "contact_only": 1,
         "contact_and_external_input": 2,
     }
-    documented_target_firmware = "1.29"
+    documented_target_firmware = None
+    documented_firmware_family = (
+        "1.04", "1.05", "1.06", "1.07", "1.12", "1.13"
+    )
     supported_kdl_input_types = (4, 5, 6, 7, 11)
     external_input_kdl_types = (4, 5, 6, 7, 11, 17, 22)
     physical_capabilities = (
@@ -3080,6 +3127,16 @@ class C2000RSMK(BolidDPLSDetectorBase):
             "external_input_state", "External input state", "mdi:electric-switch"
         ),
     }
+    battery_state_codes = (200, 202, 211)
+
+    @classmethod
+    def reconcile_gateway_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> ResolvedDeviceMapping:
+        """Reconcile the configured radio-contact footprint with current PP rows."""
+        return _reconcile_smk_gateway_mapping(cls, mapping, configuration)
 
     @classmethod
     def get_gateway_capabilities_for_metadata(
@@ -3099,17 +3156,49 @@ class C2000RSMK(BolidDPLSDetectorBase):
         self.attr_device_metadata["external_input_kdl_types"] = (
             self.external_input_kdl_types
         )
+        self.attr_device_metadata["documented_firmware_family"] = (
+            self.documented_firmware_family
+        )
+        self.attr_device_metadata["battery_topology"] = "single_er14505m"
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe raw contact rows plus the confirmed battery state."""
+        descriptions = super().get_state_sensor_descriptions()
+        if self._state_mappings:
+            descriptions.append({
+                "sensor_id": "battery_state",
+                "name": "Battery state",
+                "device_class": None,
+                "icon": "mdi:battery",
+            })
+        return descriptions
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Add a single-battery semantic without inventing terminal behavior."""
+        snapshot = await super().async_get_snapshot()
+        opening = snapshot["state_sensors"]["opening_state"]
+        active = tuple(code for code in opening["expanded_codes"] if code != 0)
+        code = next((item for item in active if item in self.battery_state_codes), None)
+        snapshot["state_sensors"]["battery_state"] = {
+            "state": None if code is None else self._state_name(code),
+            "primary_code": opening["primary_code"],
+            "expanded_codes": opening["expanded_codes"],
+            "expanded_states": opening["expanded_states"],
+        }
+        return snapshot
 
 
 class C2000SMK(BolidDPLSDetectorBase):
-    """Wired one-address magnetic-contact detector С2000-СМК."""
+    """Wired one-address magnetic-contact detector С2000-СМК исп.04."""
 
     equipment_manufacturer = "Bolid"
-    equipment_model = "С2000-СМК"
-    detector_model = "С2000-СМК"
+    equipment_model = "С2000-СМК исп.04"
+    detector_model = "С2000-СМК исп.04"
     detector_description = "DPLS magnetic-contact detector"
-    documented_target_firmware = "1.04"
-    supported_kdl_input_types = (4, 5, 6, 7, 11, 22)
+    documented_target_firmware = None
+    documented_firmware_family = ("1.10", "1.11")
+    supported_kdl_input_types = (4, 5, 6, 7, 11)
+    state_entity_category = EntityCategory.DIAGNOSTIC
     physical_capabilities = (
         "magnetic_contact", "magnetic_test", "dpls_service_voltage",
     )
@@ -3122,6 +3211,22 @@ class C2000SMK(BolidDPLSDetectorBase):
     state_sensor_definitions = {
         "opening_state": ("opening_state", "Opening state", "mdi:door"),
     }
+
+    @classmethod
+    def reconcile_gateway_mapping(
+        cls,
+        mapping: ResolvedDeviceMapping,
+        configuration: S2000PPConfiguration,
+    ) -> ResolvedDeviceMapping:
+        """Reconcile the configured wired-contact row with current PP data."""
+        return _reconcile_smk_gateway_mapping(cls, mapping, configuration)
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Attach execution-specific documentation without runtime version claims."""
+        super().apply_gateway_mapping(mapping)
+        self.attr_device_metadata["documented_firmware_family"] = (
+            self.documented_firmware_family
+        )
 
 
 class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):

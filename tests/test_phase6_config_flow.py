@@ -293,6 +293,24 @@ def test_wired_and_radio_water_models_cannot_claim_the_same_dpls_row():
     assert has_overlapping_dpls_mapping(radio, (wired.to_dict(),))
 
 
+def test_wired_and_radio_smk_models_cannot_claim_the_same_dpls_row():
+    gateway_context = GatewayContext(
+        GatewayType.S2000_PP, "Main PP", "tcp:host:502", 1
+    )
+    wired = ResolvedDeviceMapping(
+        identity=DownstreamDeviceIdentity(
+            gateway_context, "C2000SMK", 3, DPLSSubIdentity(33, 1)
+        ),
+        source=MappingSource.MANUAL,
+        objects=(manual_zone_mapping(33, 15, 1, 8, None),),
+    )
+    radio = DownstreamDeviceIdentity(
+        gateway_context, "C2000RSMK", 3, DPLSSubIdentity(33, 1)
+    )
+
+    assert has_overlapping_dpls_mapping(radio, (wired.to_dict(),))
+
+
 def test_extracted_services_do_not_depend_on_home_assistant_flow_apis():
     assert "homeassistant" not in inspect.getsource(gateway)
     assert "homeassistant" not in inspect.getsource(mapping)
