@@ -9,6 +9,7 @@ from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.modbus_devices.const import Config
+from custom_components.modbus_devices.coordinator import ModbusDeviceCoordinator
 from custom_components.modbus_devices.device_info import device_info_for_entry
 from custom_components.modbus_devices.equipment.bolid import (
     BolidDPLSThermohygrometerBase,
@@ -27,7 +28,9 @@ from custom_components.modbus_devices.gateway import (
     dpls_ranges_overlap,
 )
 from custom_components.modbus_devices.s2000_pp import (
+    NumericParameterKind,
     S2000PPConfiguration,
+    S2000PPNumericValueReader,
     S2000PPZoneRow,
     manual_zone_mapping,
 )
@@ -77,8 +80,11 @@ class HardwareClient:
             result = next(self.results)
             if result == "pending":
                 return Response(exception_code=15, function_code=0x83)
-            if result == "error4":
-                return Response(exception_code=4, function_code=0x83)
+            if result in {"error3", "error4"}:
+                return Response(
+                    exception_code=3 if result == "error3" else 4,
+                    function_code=0x83,
+                )
             if isinstance(result, BaseException):
                 raise result
             return Response(registers=[result], function_code=3)
@@ -426,6 +432,68 @@ async def test_native_serial_exception4_sequence_releases_session_and_recovers()
     assert [call for call in client.calls if call[0] == "select"] == [
         ("select", 46179, 19),
         ("select", 46179, 19),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_production_row77_pending_then_exception3_recovers_fresh_selector():
+    """Reproduce the production-observed 15 -> 3 lifecycle without blaming transport."""
+    client = HardwareClient(
+        ["pending", "error3", "pending", 0x1860], first_row=77
+    )
+    device = C2000RVTI(client, 2)
+    row77_mapping = mapping(base=10, first_row=77)
+    device.apply_gateway_mapping(row77_mapping)
+    device._numeric_values["temperature"] = {
+        "value": 24.0,
+        "raw_register": 0x1800,
+        "parameter_kind": NumericParameterKind.TEMPERATURE.value,
+    }
+    coordinator = object.__new__(ModbusDeviceCoordinator)
+    coordinator.device = device
+    coordinator._write_generation = 0
+    coordinator._pending_write_patches = {}
+    session = S2000PPNumericValueReader(
+        client,
+        2,
+        row77_mapping.identity.gateway.stable_id,
+    )._session
+
+    pending = await coordinator._async_update_data()
+    assert pending["numeric_sensors"]["temperature"]["value"] == 24.0
+    assert session.pending_request == ("numeric", 77)
+    assert session.generation == 1
+    assert device._numeric_cursor == 0
+
+    terminal = await coordinator._async_update_data()
+    assert terminal["numeric_sensors"]["temperature"]["value"] == 24.0
+    assert terminal["state_sensors"]["temperature_state"]["state"] == (
+        "temperature_normal"
+    )
+    assert terminal["state_sensors"]["humidity_state"]["state"] == "level_normal"
+    assert session.pending_request is None
+    assert session.generation == 1
+    assert device._numeric_cursor == 0
+
+    retry_pending = await coordinator._async_update_data()
+    assert retry_pending["numeric_sensors"]["temperature"]["value"] == 24.0
+    assert session.pending_request == ("numeric", 77)
+    assert session.generation == 2
+
+    recovered = await coordinator._async_update_data()
+    assert recovered["numeric_sensors"]["temperature"]["value"] == 24.375
+    assert session.pending_request is None
+    assert session.generation == 2
+    assert device._numeric_cursor == 1
+    assert [call for call in client.calls if call[0] == "select"] == [
+        ("select", 46179, 77),
+        ("select", 46179, 77),
+    ]
+    assert [call for call in client.calls if call[:2] == ("holding", 46328)] == [
+        ("holding", 46328, 1),
+        ("holding", 46328, 1),
+        ("holding", 46328, 1),
+        ("holding", 46328, 1),
     ]
 
 

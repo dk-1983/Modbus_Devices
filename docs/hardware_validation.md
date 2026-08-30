@@ -480,3 +480,22 @@ Active battery-low/fault transitions, product-specific radio loss/quality,
 tamper routing, runtime firmware/serial metadata, and `С2000Р-ВТИ исп.01`
 CO/sounder capabilities remain deferred. No active-transition fixture or
 radio-quality entity is inferred from the quiescent generic state codes.
+
+## C2000R-VTI production FC03 exception 3 evidence
+
+On 2026-08-31 at 03:06:24 production DEBUG captured `C2000RVTI`, Orion 8,
+base DPLS 10, temperature PP row 77 completing an accepted FC06 selector with
+an immediate valid FC03 exception 15 and a result-only FC03 exception 3 about
+5.006 seconds after selection. Source endpoint, slave 1, CRC, and transport
+epoch were valid. There was no timeout, cancellation, quarantine/rebind, stale
+drain, competing selector, or owner change; the owner remained
+`('numeric', 77)`.
+
+The same device/channel/row subsequently completed FC06, exception 15, and a
+result-only READY response at 03:07:24.185, approximately 5.007 seconds after
+selection. Raw `0x1860` decoded as `24.375 °C`. This strongly supports exception
+3 as a legitimate S2000-PP response rather than transport corruption, but the
+internal S2000-PP/device-side reason remains unknown. C2000VT row 63 had
+previously produced the same class of FC03/3 warning, but no row-63 terminal 3
+occurred in this specific DEBUG observation window; an identical device-side
+cause is therefore not claimed.
