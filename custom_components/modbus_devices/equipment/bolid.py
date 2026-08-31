@@ -3217,23 +3217,9 @@ class C2000RIP(BolidRadioFireDetectorBase):
         return snapshot
 
 
-class C2000RST01(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
-    """Radio glass-break detector С2000Р-СТ исп.01."""
+class BolidGlassBreakDetectorMixin:
+    """Shared explicit glass-break lifecycle without radio assumptions."""
 
-    equipment_manufacturer = "Bolid"
-    equipment_model = "С2000Р-СТ исп.01"
-    detector_model = "С2000Р-СТ исп.01"
-    detector_description = "Radio glass-break detector"
-    documented_target_firmware = "1.03"
-    supported_kdl_input_types = (5,)
-    physical_capabilities = (
-        "glass_break_detection", "tamper", "radio_supervision", "battery", "test",
-    )
-    gateway_transport_limitation = (
-        BolidDPLSDetectorBase.gateway_transport_limitation
-        + "; RSSI, channel, repeater route, radio identifier, battery voltage, "
-        "sensitivity, acoustic level, and detector-local commands are not exposed"
-    )
     capability_requirements = (
         GatewayCapabilitySpec(
             key="glass_break_state", name="Glass break detector state",
@@ -3247,13 +3233,6 @@ class C2000RST01(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
             "glass_break_state", "Glass break detector state", "mdi:glass-fragile"
         ),
     }
-    battery_state_channels = (
-        (
-            "main_battery_state",
-            "Battery state",
-            BolidRadioDetectorDiagnosticsMixin._MAIN_BATTERY_CODES,
-        ),
-    )
     detector_state_icons = {
         "armed": "mdi:glass-fragile",
         "control_restored": "mdi:glass-fragile",
@@ -3268,9 +3247,19 @@ class C2000RST01(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
         super().__init__(client, device_id)
         self._glass_break_state: bool | None = None
 
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Add semantic icons to the lossless glass-break state."""
+        descriptions = super().get_state_sensor_descriptions()
+        descriptions[0]["state_icons"] = dict(self.detector_state_icons)
+        descriptions[0]["unknown_state_icon"] = "mdi:help-circle-outline"
+        return descriptions
+
     def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
-        """Expose alarm and the shared explicit enclosure lifecycle."""
-        descriptions = super().get_binary_sensor_descriptions()
+        """Expose the explicit intrusion-alarm lifecycle."""
+        parent_descriptions = getattr(
+            super(), "get_binary_sensor_descriptions", None
+        )
+        descriptions = [] if parent_descriptions is None else parent_descriptions()
         if self._state_mapping is not None:
             descriptions.insert(0, {
                 "sensor_id": "glass_break",
@@ -3294,7 +3283,7 @@ class C2000RST01(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
             self._glass_break_state = True
         elif primary in {24, 110} or (active & {24, 110} and 3 not in active):
             self._glass_break_state = False
-        snapshot["binary_sensors"]["glass_break"] = {
+        snapshot.setdefault("binary_sensors", {})["glass_break"] = {
             "state": self._glass_break_state,
             "primary_code": primary,
             "expanded_codes": detector["expanded_codes"],
@@ -3302,15 +3291,45 @@ class C2000RST01(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
         return snapshot
 
 
-class C2000ST04(BolidDPLSDetectorBase):
+class C2000RST01(
+    BolidGlassBreakDetectorMixin,
+    BolidRadioDetectorDiagnosticsMixin,
+    BolidDPLSDetectorBase,
+):
+    """Radio glass-break detector С2000Р-СТ исп.01."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-СТ исп.01"
+    detector_model = "С2000Р-СТ исп.01"
+    detector_description = "Radio glass-break detector"
+    documented_target_firmware = "1.03"
+    supported_kdl_input_types = (5,)
+    physical_capabilities = (
+        "glass_break_detection", "tamper", "radio_supervision", "battery", "test",
+    )
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; RSSI, channel, repeater route, radio identifier, battery voltage, "
+        "sensitivity, acoustic level, and detector-local commands are not exposed"
+    )
+    battery_state_channels = (
+        (
+            "main_battery_state",
+            "Battery state",
+            BolidRadioDetectorDiagnosticsMixin._MAIN_BATTERY_CODES,
+        ),
+    )
+
+
+class C2000ST04(BolidGlassBreakDetectorMixin, BolidDPLSDetectorBase):
     """Wired DPLS glass-break detector С2000-СТ исп.04."""
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-СТ исп.04"
     detector_model = "С2000-СТ исп.04"
     detector_description = "DPLS glass-break detector"
-    documented_target_firmware = "1.22"
-    supported_kdl_input_types = (5,)
+    documented_target_firmware = "1.24"
+    supported_kdl_input_types = (4, 5, 6, 7, 11)
     physical_capabilities = (
         "glass_break_detection", "tamper", "anti_masking", "test",
         "dpls_service_voltage",
@@ -3320,8 +3339,79 @@ class C2000ST04(BolidDPLSDetectorBase):
         + "; DPLS service voltage, sensitivity, acoustic level, and detector-local "
         "commands are not exposed through S2000-PP"
     )
-    capability_requirements = C2000RST01.capability_requirements
-    state_sensor_definitions = C2000RST01.state_sensor_definitions
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self._enclosure_tamper_state: bool | None = None
+        self._equipment_fault_state: bool | None = None
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Keep the single wired row and enable semantic binary projections."""
+        super().apply_gateway_mapping(mapping)
+        self.attr_platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+    def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Expose documented enclosure and combined equipment fault lifecycles."""
+        descriptions = super().get_binary_sensor_descriptions()
+        if self._state_mapping is None:
+            return descriptions
+        descriptions.extend((
+            {
+                "sensor_id": "enclosure_tamper",
+                "name": "Enclosure tamper",
+                "device_class": BinarySensorDeviceClass.TAMPER,
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "enabled_default": True,
+                "icon": "mdi:shield-question",
+                "icon_on": "mdi:shield-lock-open",
+                "icon_off": "mdi:shield-check",
+                "unknown_icon": "mdi:shield-question",
+            },
+            {
+                "sensor_id": "equipment_fault",
+                "name": "Equipment fault",
+                "device_class": BinarySensorDeviceClass.PROBLEM,
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "enabled_default": True,
+                "icon": "mdi:help-circle-outline",
+                "icon_on": "mdi:alert-circle",
+                "icon_off": "mdi:check-circle",
+                "unknown_icon": "mdi:help-circle-outline",
+            },
+        ))
+        return descriptions
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Project only explicit tamper and equipment-normal/fault evidence."""
+        snapshot = await super().async_get_snapshot()
+        detector = snapshot["state_sensors"]["glass_break_state"]
+        active = {code for code in detector["expanded_codes"] if code != 0}
+        evidence = active | {detector["primary_code"]}
+
+        tamper_codes = evidence & {149, 152}
+        if tamper_codes == {149}:
+            self._enclosure_tamper_state = True
+        elif tamper_codes == {152}:
+            self._enclosure_tamper_state = False
+
+        fault_codes = evidence & {39, 41}
+        if fault_codes == {41}:
+            self._equipment_fault_state = True
+        elif fault_codes == {39}:
+            self._equipment_fault_state = False
+
+        snapshot["binary_sensors"].update({
+            "enclosure_tamper": {
+                "state": self._enclosure_tamper_state,
+                "primary_code": detector["primary_code"],
+                "expanded_codes": detector["expanded_codes"],
+            },
+            "equipment_fault": {
+                "state": self._equipment_fault_state,
+                "primary_code": detector["primary_code"],
+                "expanded_codes": detector["expanded_codes"],
+            },
+        })
+        return snapshot
 
 
 def _reconcile_smk_gateway_mapping(

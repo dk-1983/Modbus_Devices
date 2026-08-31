@@ -118,10 +118,11 @@ Only primary Bolid material is used for protocol and product facts below.
 ### 3.4 С2000-СТ исп.04
 
 - [Product page](https://bolid.ru/production/s2_st_04.html).
-- [Operation manual](https://bolid.ru/files/373/566/s2000_st_04_ret_mar_25.pdf),
-  **АЦДР.425132.001-04 РЭ, 2025**. Relevant parts: purpose/functions,
-  setup/self-test/anti-masking, and §10 firmware history. Version 1.22 dated
-  02.2025 fixes unstable operation with `С2000-КДЛ-2И`.
+- [Current operation manual](https://bolid.ru/files/373/566/s2000_st_04_ret_apr_26.pdf),
+  **АЦДР.425132.001-04 РЭ, April 2026**. Relevant parts: §§1.1, 2.2.5–2.2.7,
+  3.4 and §10. Version 1.24 dated 03.2026 improves DPLS stability; version
+  1.23 changed entry to test mode and added the product-cipher query; version
+  1.22 fixed unstable operation with `С2000-КДЛ-2И`.
 
 ### 3.5 Common transport and topology documents
 
@@ -164,7 +165,7 @@ Only primary Bolid material is used for protocol and product facts below.
 | ДИП-34А-05 | `DIP34A05` | `BolidDPLSDetectorBase` | base DPLS, PP zone type 1 | `sensor.detector_state` |
 | С2000Р-ДИП | `C2000RDIP` | `BolidDPLSDetectorBase` | base DPLS, PP zone type 1 | `sensor.detector_state` |
 | С2000Р-СТ исп.01 | `C2000RST01` | `BolidDPLSDetectorBase` | base DPLS, PP zone type 1 | `sensor.glass_break_state` |
-| С2000-СТ исп.04 | `C2000ST04` | `BolidDPLSDetectorBase` | base DPLS, PP zone type 1 | `sensor.glass_break_state` |
+| С2000-СТ исп.04 | `C2000ST04` | `BolidGlassBreakDetectorMixin` + `BolidDPLSDetectorBase` | base DPLS, PP zone type 1 | lossless state + glass-break/tamper/equipment-fault binaries |
 
 `C2000DIP` is a load-time legacy alias for `DIP34A05`; it is not a separately
 selectable model.
@@ -522,9 +523,9 @@ ARR 1.25+, KDL 2.30+ (or corresponding KDL-2I 1.30+). No runtime firmware is rea
 
 ### С2000-СТ исп.04
 
-Official §10: 1.00 (11.2020), 1.10/1.11/1.12, 1.20, 1.21, and 1.22
-(02.2025). Version 1.22 fixes instability with KDL-2I. Current target 1.22 matches
-that record.
+Official current §10: 1.00 (11.2020), 1.10/1.11/1.12, 1.20, 1.21, 1.22,
+1.23 and 1.24 (03.2026). Version 1.24 improves DPLS stability; 1.22 fixed
+instability with KDL-2I. The documented reference target is now 1.24.
 
 ## 16. Presentation / Card Generator Audit
 
@@ -1010,8 +1011,8 @@ with `BolidDPLSDetectorBase` and is not a fire-detector subtype.
 
 Unlike S2000R-DIP/IP, С2000Р-СТ has one documented battery rather than main and
 reserve channels. Unlike wired С2000-СТ исп.04, it has radio power/supervision
-conditions but no documented anti-masking capability. The wired model remains
-unchanged pending its separate audit.
+conditions but no documented anti-masking capability. Their explicit intrusion
+alarm lifecycle is shared without making the wired detector a radio subtype.
 
 The entity matrix is `sensor.glass_break_state`,
 `binary_sensor.glass_break`, `binary_sensor.enclosure_tamper`, and
@@ -1034,3 +1035,104 @@ unexposed because no supported runtime S2000-PP read path is documented.
 24/110 lifecycle would strengthen fixture provenance, but no mapping ambiguity
 blocks the canonical documented implementation. No COM3 experiment is required
 for this change.
+
+## 28. S2000-ST isp.04 implementation audit
+
+### 28.1 Official contract, topology and firmware
+
+**DOCUMENTED FACT:** the current [product page](https://bolid.ru/production/s2_st_04.html)
+and *С2000-СТ исп.04. Руководство по эксплуатации*,
+АЦДР.425132.001-04 РЭ, April 2026
+([official PDF](https://bolid.ru/files/373/566/s2000_st_04_ret_apr_26.pdf)),
+describe one wired addressable acoustic glass-break detector powered and polled
+through DPLS. Sections 1.1 and 2.2.3–2.2.4 establish one physical detector,
+one DPLS address and one KDL input. There is no battery, second address or
+measurement channel. One S2000-PP zone-type-1 row remains one equipment object
+and one HA Device.
+
+Section 2.2.5 permits KDL input types 4 (`Охранный`), 5 (`Охранный с контролем
+взлома корпуса извещателя`), 6 (`Технологический`), 7 (`Входной`) and 11
+(`Тревожный`). These KDL choices are not S2000-PP zone types; the integration's
+gateway projection still requires PP zone type 1. The KDL-2I compatibility
+floor is firmware 1.30 and the KDL floor is 2.30.
+
+Section 10 lists firmware 1.24 (03.2026) as the current documented reference,
+with improved DPLS stability. This is descriptive metadata only: S2000-PP does
+not supply runtime firmware, hardware revision or serial to DeviceInfo through
+the implemented polling path.
+
+### 28.2 Wired versus radio glass-break architecture
+
+| Capability | С2000-СТ исп.04 | С2000Р-СТ исп.01 |
+|---|---|---|
+| Transport | wired DPLS | radio via ARR, projected to DPLS |
+| Physical / DPLS / PP rows | 1 / 1 / 1 | 1 / 1 / 1 |
+| Required PP zone type | 1 | 1 |
+| KDL input types | 4, 5, 6, 7, 11 | 5 |
+| Alarm semantics | code 3; explicit 24/110 restore | same canonical lifecycle |
+| Tamper | one cover tamper, 149/152 | cover + wall removal share 149/152 |
+| Power | DPLS 8–11 V | one CR123A battery |
+| Anti-masking | ultrasonic, configurable | not documented |
+| Self-test fault | receiver/amplifier path | no equivalent documented entity |
+| Radio diagnostics | not applicable | battery and generic radio projection |
+
+**PROPOSED CHANGE IMPLEMENTED:** `BolidGlassBreakDetectorMixin` contains only
+the shared explicit alarm reducer and glass/security icon contract. It has no
+radio-power or ARR assumptions. `BolidRadioDetectorDiagnosticsMixin` remains
+radio-specific; the wired detector does not inherit it. Existing S2000R-ST
+alarm behavior is preserved by regression tests.
+
+### 28.3 State and entity contract
+
+**DOCUMENTED CAPABILITY / CANONICAL BOLID SEMANTICS:** glass-break produces
+`Тревога`; the Orion intrusion-alarm code is 3. Explicit armed/reset evidence
+24/110 clears the semantic binary alarm. Unrelated and conflicting states do
+not fabricate a transition. The lossless `sensor.glass_break_state` retains
+ordered primary/expanded codes and `unknown_<code>` values.
+
+The manual's §§1.1.5 and 3.4 document one cover tamper and messages `Взлом
+корпуса` / `Восстановление корпуса`; canonical 149/152 drive one stateful
+`binary_sensor.enclosure_tamper`. No separate wall-removal mechanism is
+documented.
+
+Sections 2.2.6–2.2.9 document both failed acoustic self-test and active
+ultrasonic masking as the same Orion message, `Неисправность оборудования`.
+They cannot truthfully be split at the S2000-PP projection. One diagnostic
+`binary_sensor.equipment_fault` therefore uses explicit canonical 41/39
+fault/normal evidence. It intentionally does not claim whether an active 41 was
+caused by microphone/emitter failure or masking.
+
+The final matrix is:
+
+1. `sensor.glass_break_state` — lossless primary/expanded state;
+2. `binary_sensor.glass_break` — explicit intrusion alarm lifecycle;
+3. `binary_sensor.enclosure_tamper` — explicit 149/152 lifecycle;
+4. `binary_sensor.equipment_fault` — combined documented self-test/masking
+   fault, explicit 41/39 lifecycle.
+
+All binary projections start Unknown unless their explicit evidence is already
+present. Dynamic icons distinguish armed, intrusion alarm, fault, tamper and
+unknown. The dedicated `bolid_c2000_st_04` profile generates a native entities
+card in the order above. No battery, voltage, sensitivity or acoustic-level
+entity is fabricated.
+
+### 28.4 Communication, test and configuration boundary
+
+Canonical generic test codes 19/20/21, input-control codes 111/112, DPLS/input
+communication 47 and 187/188, and device communication 250/251 remain visible
+in the lossless state. They are not relabelled as radio conditions. Test mode
+is entered via KDL/UProg and does not justify a second independent entity.
+
+**INSTALLATION-CONFIGURATION DEPENDENT:** enclosure events require a KDL input
+type that controls tamper (normally type 5). Anti-masking must be enabled in
+UProg. Visibility through a particular S2000-PP installation also depends on
+correct PP row/zone mapping, S2000M/PProg event retransmission where used, and
+a compatible operating/projection mode. A missing event in one installation
+does not negate the documented device capability.
+
+**UNRESOLVED / not exposed:** DPLS service voltage, sensitivity, acoustic
+level, test commands, runtime product cipher, serial, firmware and hardware
+revision have no established read path through the current S2000-PP polling
+contract. No COM3 experiment is required for this implementation; a future
+read-only capture of alarm, 149/152 and 41/39 would strengthen fixture
+provenance without changing the documented semantics.

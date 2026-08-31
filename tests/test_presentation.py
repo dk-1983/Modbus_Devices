@@ -286,6 +286,40 @@ async def test_c2000r_st_uses_dedicated_native_glass_break_card(registry_hass):
 
 
 @pytest.mark.asyncio
+async def test_c2000_st_04_uses_dedicated_wired_glass_break_card(registry_hass):
+    device = Device("st04", "st04-stable", model="С2000-СТ исп.04")
+    result = await build(
+        registry_hass,
+        device,
+        [
+            entity(
+                device,
+                "equipment_fault",
+                domain="binary_sensor",
+                category=EntityCategory.DIAGNOSTIC,
+            ),
+            entity(device, "glass_break", domain="binary_sensor"),
+            entity(
+                device,
+                "enclosure_tamper",
+                domain="binary_sensor",
+                category=EntityCategory.DIAGNOSTIC,
+            ),
+            entity(device, "glass_break_state"),
+        ],
+        "C2000ST04",
+    )
+    assert result.profile_id == "bolid_c2000_st_04"
+    assert result.card["type"] == "entities"
+    assert entity_ids(result) == [
+        "sensor.st04_glass_break_state",
+        "binary_sensor.st04_glass_break",
+        "binary_sensor.st04_enclosure_tamper",
+        "binary_sensor.st04_equipment_fault",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_future_manufacturer_can_register_without_changing_builder(registry_hass):
     device = Device(
         "future",
