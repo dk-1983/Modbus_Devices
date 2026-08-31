@@ -27,6 +27,20 @@ DIP34A05_PROFILE = PresentationProfile(
     roles=(PresentationRole("detector_state"),),
 )
 
+C2000R_DIP_PROFILE = PresentationProfile(
+    profile_id="bolid_c2000r_dip",
+    roles=(
+        PresentationRole("detector_state"),
+        PresentationRole(
+            "enclosure_tamper",
+            PresentationSection.DIAGNOSTIC,
+            entity_domain="binary_sensor",
+        ),
+        PresentationRole("main_battery_state", PresentationSection.DIAGNOSTIC),
+        PresentationRole("reserve_battery_state", PresentationSection.DIAGNOSTIC),
+    ),
+)
+
 C2000_VT_PROFILE = PresentationProfile(
     profile_id="bolid_c2000_vt",
     roles=(
@@ -138,6 +152,12 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "DIP34A05",
         DIP34A05_PROFILE,
         models=("ДИП-34А-05",),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000RDIP",
+        C2000R_DIP_PROFILE,
+        models=("С2000Р-ДИП",),
     )
     registry.register_equipment(
         "Bolid",

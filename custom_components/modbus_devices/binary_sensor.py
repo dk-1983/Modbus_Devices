@@ -160,6 +160,12 @@ class ModBusDescribedBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
         self._attr_device_class = description["device_class"]
         self._attr_entity_category = description.get("entity_category")
         self._attr_icon = description.get("icon")
+        self._icon_on = description.get("icon_on")
+        self._icon_off = description.get("icon_off")
+        self._unknown_icon = description.get("unknown_icon")
+        self._attr_entity_registry_enabled_default = description.get(
+            "enabled_default", True
+        )
         identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
         self._attr_unique_id = f"{identity}_{self._sensor_id}"
         self._attr_device_info = device_info_for_entry(device, entry)
@@ -174,7 +180,13 @@ class ModBusDescribedBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def icon(self) -> str | None:
-        """Return a state-aware icon for semantic moisture sensors."""
+        """Return an opt-in semantic icon, including an explicit unknown state."""
+        if self._icon_on or self._icon_off or self._unknown_icon:
+            if not self.available or self.is_on is None:
+                return self._unknown_icon or self._attr_icon
+            return (
+                self._icon_on if self.is_on else self._icon_off
+            ) or self._attr_icon
         if self.device_class is not BinarySensorDeviceClass.MOISTURE:
             return self._attr_icon
         if not self.available or self.is_on is None:

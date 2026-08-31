@@ -192,6 +192,30 @@ async def test_dip34a05_uses_dedicated_native_detector_card(registry_hass):
 
 
 @pytest.mark.asyncio
+async def test_c2000r_dip_uses_dedicated_native_radio_detector_card(registry_hass):
+    device = Device("rdip", "rdip-stable", model="С2000Р-ДИП")
+    result = await build(
+        registry_hass,
+        device,
+        [
+            entity(device, "reserve_battery_state", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "enclosure_tamper", domain="binary_sensor", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "detector_state"),
+            entity(device, "main_battery_state", category=EntityCategory.DIAGNOSTIC),
+        ],
+        "C2000RDIP",
+    )
+    assert result.profile_id == "bolid_c2000r_dip"
+    assert result.card["type"] == "entities"
+    assert entity_ids(result) == [
+        "sensor.rdip_detector_state",
+        "binary_sensor.rdip_enclosure_tamper",
+        "sensor.rdip_main_battery_state",
+        "sensor.rdip_reserve_battery_state",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_future_manufacturer_can_register_without_changing_builder(registry_hass):
     device = Device(
         "future",

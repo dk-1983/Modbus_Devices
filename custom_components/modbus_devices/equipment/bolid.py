@@ -2936,6 +2936,123 @@ class C2000RDIP(BolidDPLSDetectorBase):
     )
     capability_requirements = DIP34A05.capability_requirements
 
+    _MAIN_BATTERY_CODES = frozenset((200, 202, 211))
+    _RESERVE_BATTERY_CODES = frozenset((212, 213))
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        # Absence of a transient tamper code is not evidence of a closed case:
+        # the validated ARR/KDL/PP projection did not forward either code.
+        self._enclosure_tamper_state: bool | None = None
+
+    def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
+        """Keep one projected DPLS row and enable its semantic diagnostics."""
+        super().apply_gateway_mapping(mapping)
+        self.attr_platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Describe the lossless detector state and two proven battery channels."""
+        descriptions = super().get_state_sensor_descriptions()
+        descriptions[0]["state_icons"] = {
+            "armed": "mdi:smoke-detector",
+            "equipment_normal": "mdi:smoke-detector",
+            "fire": "mdi:smoke-detector-alert",
+            "warning": "mdi:smoke-detector-alert",
+            "attention": "mdi:smoke-detector-alert",
+            "equipment_fault": "mdi:alert-circle",
+            "maintenance_required": "mdi:alert-circle",
+            "input_communication_lost": "mdi:alert-circle",
+            "device_communication_lost": "mdi:alert-circle",
+        }
+        descriptions[0]["unknown_state_icon"] = "mdi:help-circle-outline"
+        descriptions.extend((
+            {
+                "sensor_id": "main_battery_state",
+                "name": "Main battery state",
+                "device_class": None,
+                "icon": "mdi:battery",
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "state_icons": {
+                    "battery_restored": "mdi:battery-check",
+                    "battery_low": "mdi:battery-alert",
+                    "battery_fault": "mdi:battery-alert",
+                },
+                "unknown_state_icon": "mdi:help-circle-outline",
+            },
+            {
+                "sensor_id": "reserve_battery_state",
+                "name": "Reserve battery state",
+                "device_class": None,
+                "icon": "mdi:battery",
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "state_icons": {
+                    "reserve_battery_restored": "mdi:battery-check",
+                    "reserve_battery_low": "mdi:battery-alert",
+                },
+                "unknown_state_icon": "mdi:help-circle-outline",
+            },
+        ))
+        return descriptions
+
+    def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Expose documented tamper without treating code absence as restored."""
+        return [] if self._state_mapping is None else [{
+            "sensor_id": "enclosure_tamper",
+            "name": "Enclosure tamper",
+            "device_class": BinarySensorDeviceClass.TAMPER,
+            "entity_category": EntityCategory.DIAGNOSTIC,
+            "enabled_default": False,
+            "icon": "mdi:shield-question",
+            "icon_on": "mdi:shield-lock-open",
+            "icon_off": "mdi:shield-check",
+            "unknown_icon": "mdi:shield-question",
+        }]
+
+    @classmethod
+    def _battery_state(
+        cls, active: tuple[int, ...], codes: frozenset[int]
+    ) -> tuple[int | None, str | None]:
+        """Decode one channel only when its expanded evidence is unambiguous."""
+        matched = {code for code in active if code in codes}
+        if len(matched) != 1:
+            return None, None
+        code = matched.pop()
+        return code, cls._state_name(code)
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Add conservative radio diagnostics to the lossless row snapshot."""
+        snapshot = await super().async_get_snapshot()
+        detector = snapshot["state_sensors"]["detector_state"]
+        expanded_codes = detector["expanded_codes"]
+        active = tuple(code for code in expanded_codes if code != 0)
+
+        tamper_codes = {code for code in active if code in {149, 152}}
+        if tamper_codes == {149}:
+            self._enclosure_tamper_state = True
+        elif tamper_codes == {152}:
+            self._enclosure_tamper_state = False
+
+        for sensor_id, codes in (
+            ("main_battery_state", self._MAIN_BATTERY_CODES),
+            ("reserve_battery_state", self._RESERVE_BATTERY_CODES),
+        ):
+            code, state = self._battery_state(active, codes)
+            snapshot["state_sensors"][sensor_id] = {
+                "sensor_id": sensor_id,
+                "state": state,
+                "primary_code": detector["primary_code"],
+                "expanded_codes": expanded_codes,
+                "expanded_states": detector["expanded_states"],
+                "battery_code": code,
+            }
+
+        snapshot["binary_sensors"] = {"enclosure_tamper": {
+            "state": self._enclosure_tamper_state,
+            "primary_code": detector["primary_code"],
+            "expanded_codes": expanded_codes,
+        }}
+        return snapshot
+
 
 class C2000IP03(BolidDPLSDetectorBase):
     """Wired temperature detector С2000-ИП-03 with two PP mapping modes."""
