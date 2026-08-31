@@ -1136,3 +1136,109 @@ revision have no established read path through the current S2000-PP polling
 contract. No COM3 experiment is required for this implementation; a future
 read-only capture of alarm, 149/152 and 41/39 would strengthen fixture
 provenance without changing the documented semantics.
+
+## 29. S2000R-SMK implementation audit
+
+### 29.1 Official contract and source revisions
+
+**DOCUMENTED FACT:** the current official [product page](https://bolid.ru/production/s2000r_smk.html)
+and *С2000Р-СМК. Руководство по эксплуатации полное*, АЦДР.425112.003 РЭп,
+Изм.7 от 25.12.2025
+([official PDF](https://bolid.ru/files/373/566/s2000r_smk_rep_jan_2026.pdf))
+supersede the earlier Изм.6 named at the start of this audit. Manual §§1.1,
+1.4, 2.3.2–2.3.5 and table 2.5 establish the magnetic contact, optional
+external controlled circuit (КЦ), two physical tamper causes, anti-sabotage,
+one battery and local radio-quality test.
+
+The applicable *С2000-КДЛ-2И исп.01* manual, АЦДР.426469.054 РЭп, Изм.12 от
+25.12.2025, lists KDL input types 4, 5, 6, 7 and 11 for the internal contact,
+and 4, 5, 6, 7, 11, 17 and 22 for the КЦ. The current *С2000Р-АРР125* manual,
+АЦДР.426461.016 РЭп, Изм.11 от 02.02.2026, documents enabling the КЦ and its
+radio-controller projection. These KDL input types are configuration semantics;
+they are not S2000-PP zone types.
+
+The current *С2000-ПП* manual, АЦДР.426469.020 РЭп, Изм.18 от 29.05.2026
+([official PDF](https://bolid.ru/files/373/566/s2_pp_rep_v3_01_jule_2026.pdf)),
+requires PP zone type 1 for the state rows used by this model. Its §§1.1.5.3,
+1.1.5.10 and address map restrict numeric registers 30000–30511 to zone type 6
+and temperature, humidity or CO. The selector paths cover temperature/humidity,
+counters, voltage and current; none identifies S2000R-SMK КЦ ADC data.
+
+### 29.2 Physical topology and firmware
+
+**DOCUMENTED FACT / CURRENT CODE BEHAVIOR:** one physical detector always uses
+one DPLS address and one PP type-1 row for the internal contact. When КЦ is
+enabled, it occupies the immediately following DPLS address and a second PP
+type-1 row. Both rows remain capabilities of one equipment object and one HA
+Device; ARR is infrastructure, not part of DeviceInfo. The explicit
+`contact_only` and `contact_and_external_input` topologies preserve this
+one-or-two-row contract and reconciliation by Orion address + DPLS address.
+
+Manual §10 identifies hardware 1.0 and 2.0 and firmware 1.04, 1.05, 1.06, 1.07,
+1.12 and 1.13. Firmware 1.13 (07.2024) is the current documented reference and
+adds radio-channel groups and changes the ADC algorithm for both hardware
+generations. It remains reference metadata only: current S2000-PP polling does
+not reveal runtime firmware or hardware revision.
+
+### 29.3 Capability and state matrix
+
+| Capability | Projection and implementation | Evidence |
+|---|---|---|
+| Internal magnetic contact | Lossless `opening_state`; stateful `opening` projection from canonical alarm/violation 3/36/58/118/119 and explicit restore/reset 22/24/35/110/117, covering the documented selectable KDL input types | documented + canonical |
+| Enclosure opening / removal | Both physical causes share the device tamper channel; one stateful `enclosure_tamper`, 149 active / 152 restored | documented + canonical; installation dependent |
+| Battery | One ER14505/ER14505M 3.6 V; one `battery_state`, 200 restored / 202 fault / 211 low | documented + canonical |
+| External КЦ | Separate lossless `external_input_state` when configured; short, violation 1, normal, violation 2 and open retain the Orion state selected by configured KDL input type | documented; configuration dependent |
+| Anti-sabotage | Manual says a strong external magnet sends an alarm, but names no distinct S2000-PP state | merged with alarm; no fabricated entity |
+| Communication/test | Canonical 47, 187/188, 250/251, 19/20/21 and 111/112 remain losslessly visible | canonical generic semantics |
+| КЦ ADC/resistance | Device firmware 1.13 documents raw ADC 0–255 and 0.2 kΩ per unit (0–51 kΩ equivalent), but S2000-PP has no documented type-1 numeric path | unresolved transport; not exposed |
+
+The contact binary starts Unknown. Alarm evidence without explicit restore sets
+ON; explicit restore without alarm sets OFF; unrelated or conflicting snapshots
+preserve the previous state. Disarmed code 109 does not prove the magnet is
+present and therefore does not fabricate OFF. Tamper uses the same conservative
+149/152 lifecycle. Battery conflict is Unknown rather than first-match wins.
+All original ordered primary/expanded codes and `unknown_<code>` values remain
+in the state sensors.
+
+### 29.4 Presentation, identity and unsupported data
+
+**PROPOSED CHANGE IMPLEMENTED:** `C2000RSMK` composes the narrow
+`BolidRadioDetectorDiagnosticsMixin` with `BolidDPLSDetectorBase`; it does not
+inherit fire or glass-break semantics. The final entity matrix is:
+
+1. `sensor.opening_state` — primary lossless internal-contact state;
+2. `binary_sensor.opening` — explicit contact/intrusion lifecycle;
+3. `binary_sensor.enclosure_tamper` — diagnostic 149/152 lifecycle;
+4. `sensor.battery_state` — one diagnostic battery channel;
+5. `sensor.external_input_state` — optional diagnostic lossless КЦ row.
+
+The dedicated `bolid_c2000r_smk` profile generates one native entities card in
+that semantic order (primary entities before diagnostics). Dynamic icons use
+door/contact, tamper, battery, fault and unknown semantics. Stable equipment,
+entity and HA Device identifiers are unchanged.
+
+No RSSI, LQI, RF channel, route, radio address, battery voltage/percentage,
+runtime serial/firmware/hardware revision, or detector-local command is exposed.
+ARR configurator visibility is not a supported S2000-PP runtime read path.
+
+### 29.5 Installation boundary and wired-family comparison
+
+**INSTALLATION-CONFIGURATION DEPENDENT:** event visibility can require matching
+ARR/KDL settings, S2000M/PProg retransmission, correct zones/partitions, PP
+operating/projection mode, tamper supervision, enabled КЦ and enabled
+anti-sabotage. Removal supervision additionally requires the rear-cover spring
+stop preparation described in §2.3.2. A semantic entity remaining Unknown on
+one installation is not proof that the documented capability is absent.
+
+The wired S2000-SMK family shares the physical reed-contact concept but not the
+radio battery, ARR projection, optional second radio DPLS address or firmware
+1.13 ADC behavior. No wired class is changed and no broad magnetic-contact base
+is extracted yet. The only genuine reuse here is the already narrow radio
+battery/tamper diagnostics capability.
+
+**NEEDS HARDWARE VERIFICATION:** a future read-only COM3 experiment is useful
+only for the unresolved КЦ numeric boundary: configure the documented second
+row without changing its type-1 projection, capture its grouped state across
+the five resistance bands, and separately test whether any documented PP
+numeric register returns an ADC value. Without a vendor-documented type-1 path,
+no selector/write experiment or numeric entity is justified.

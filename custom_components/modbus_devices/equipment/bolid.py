@@ -3453,14 +3453,13 @@ def _reconcile_smk_gateway_mapping(
     return ResolvedDeviceMapping(identity, mapping.source, tuple(resolved))
 
 
-class C2000RSMK(BolidDPLSDetectorBase):
+class C2000RSMK(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
     """Radio magnetic-contact detector with an optional external circuit."""
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-СМК"
     detector_model = "С2000Р-СМК"
     detector_description = "Radio magnetic-contact detector"
-    state_entity_category = EntityCategory.DIAGNOSTIC
     dpls_address_count = 1
     variants = {
         "hardware_1_0": "Hardware 1.0",
@@ -3474,7 +3473,7 @@ class C2000RSMK(BolidDPLSDetectorBase):
         "contact_only": 1,
         "contact_and_external_input": 2,
     }
-    documented_target_firmware = None
+    documented_target_firmware = "1.13"
     documented_firmware_family = (
         "1.04", "1.05", "1.06", "1.07", "1.12", "1.13"
     )
@@ -3509,7 +3508,34 @@ class C2000RSMK(BolidDPLSDetectorBase):
             "external_input_state", "External input state", "mdi:electric-switch"
         ),
     }
-    battery_state_codes = (200, 202, 211)
+    detector_state_icons = {
+        "armed": "mdi:door-closed",
+        "alarm_reset": "mdi:door-closed",
+        "control_restored": "mdi:door-closed",
+        "technological_input_restored": "mdi:door-closed",
+        "disarmed_input_restored": "mdi:door-closed",
+        "intrusion_alarm": "mdi:door-open",
+        "technological_input_violated": "mdi:door-open",
+        "silent_alarm": "mdi:door-open",
+        "input_alarm": "mdi:door-open",
+        "disarmed_input_violated": "mdi:door-open",
+        "equipment_fault": "mdi:alert-circle",
+        "input_communication_lost": "mdi:alert-circle",
+        "device_communication_lost": "mdi:alert-circle",
+    }
+    battery_state_channels = (
+        (
+            "battery_state",
+            "Battery state",
+            BolidRadioDetectorDiagnosticsMixin._MAIN_BATTERY_CODES,
+        ),
+    )
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        # The magnet position is not derivable from unrelated or disarmed states.
+        # Only explicit canonical alarm/reset evidence changes this projection.
+        self._opening_state: bool | None = None
 
     @classmethod
     def reconcile_gateway_mapping(
@@ -3543,29 +3569,47 @@ class C2000RSMK(BolidDPLSDetectorBase):
         )
         self.attr_device_metadata["battery_topology"] = "single_er14505m"
 
-    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
-        """Describe raw contact rows plus the confirmed battery state."""
-        descriptions = super().get_state_sensor_descriptions()
-        if self._state_mappings:
-            descriptions.append({
-                "sensor_id": "battery_state",
-                "name": "Battery state",
-                "device_class": None,
-                "icon": "mdi:battery",
+    def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Expose contact alarm and the shared explicit tamper lifecycle."""
+        descriptions = super().get_binary_sensor_descriptions()
+        if self._state_mapping is not None:
+            descriptions.insert(0, {
+                "sensor_id": "opening",
+                "name": "Opening",
+                "device_class": BinarySensorDeviceClass.OPENING,
+                "enabled_default": True,
+                "icon": "mdi:help-circle-outline",
+                "icon_on": "mdi:door-open",
+                "icon_off": "mdi:door-closed",
+                "unknown_icon": "mdi:help-circle-outline",
             })
         return descriptions
 
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Keep contact state primary and the optional external row diagnostic."""
+        descriptions = super().get_state_sensor_descriptions()
+        for description in descriptions:
+            if description["sensor_id"] == "external_input_state":
+                description["entity_category"] = EntityCategory.DIAGNOSTIC
+        return descriptions
+
     async def async_get_snapshot(self) -> dict[str, dict]:
-        """Add a single-battery semantic without inventing terminal behavior."""
+        """Project explicit contact alarm/reset evidence conservatively."""
         snapshot = await super().async_get_snapshot()
         opening = snapshot["state_sensors"]["opening_state"]
-        active = tuple(code for code in opening["expanded_codes"] if code != 0)
-        code = next((item for item in active if item in self.battery_state_codes), None)
-        snapshot["state_sensors"]["battery_state"] = {
-            "state": None if code is None else self._state_name(code),
+        active = {code for code in opening["expanded_codes"] if code != 0}
+        primary = opening["primary_code"]
+        evidence = active | {primary}
+        alarm_codes = evidence & {3, 36, 58, 118, 119}
+        restore_codes = evidence & {22, 24, 35, 110, 117}
+        if alarm_codes and not restore_codes:
+            self._opening_state = True
+        elif restore_codes and not alarm_codes:
+            self._opening_state = False
+        snapshot["binary_sensors"]["opening"] = {
+            "state": self._opening_state,
             "primary_code": opening["primary_code"],
             "expanded_codes": opening["expanded_codes"],
-            "expanded_states": opening["expanded_states"],
         }
         return snapshot
 

@@ -540,14 +540,21 @@ async def test_wired_smk_card_contains_only_raw_opening_state(registry_hass):
 
 
 @pytest.mark.asyncio
-async def test_radio_smk_card_places_single_battery_before_raw_states(registry_hass):
+async def test_radio_smk_card_uses_semantic_order(registry_hass):
     device = Device("rsmk", "rsmk-stable", model="С2000Р-СМК")
     result = await build(
         registry_hass,
         device,
         [
-            entity(device, "opening_state", category=EntityCategory.DIAGNOSTIC),
-            entity(device, "battery_state"),
+            entity(device, "opening_state"),
+            entity(device, "battery_state", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "opening", domain="binary_sensor"),
+            entity(
+                device,
+                "enclosure_tamper",
+                domain="binary_sensor",
+                category=EntityCategory.DIAGNOSTIC,
+            ),
         ],
         "C2000RSMK",
     )
@@ -555,8 +562,10 @@ async def test_radio_smk_card_places_single_battery_before_raw_states(registry_h
     assert result.profile_id == "bolid_c2000r_smk"
     assert result.card["type"] == "entities"
     assert entity_ids(result) == [
-        "sensor.rsmk_battery_state",
         "sensor.rsmk_opening_state",
+        "binary_sensor.rsmk_opening",
+        "binary_sensor.rsmk_enclosure_tamper",
+        "sensor.rsmk_battery_state",
     ]
     assert len(entity_ids(result)) == len(set(entity_ids(result)))
 
@@ -570,38 +579,38 @@ async def test_radio_smk_card_includes_configured_external_input_before_raw_open
         registry_hass,
         device,
         [
-            entity(device, "opening_state", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "opening_state"),
             entity(device, "external_input_state", category=EntityCategory.DIAGNOSTIC),
-            entity(device, "battery_state"),
+            entity(device, "battery_state", category=EntityCategory.DIAGNOSTIC),
         ],
         "C2000RSMK",
     )
 
     assert entity_ids(result) == [
+        "sensor.rsmk_opening_state",
         "sensor.rsmk_battery_state",
         "sensor.rsmk_external_input_state",
-        "sensor.rsmk_opening_state",
     ]
 
 
 @pytest.mark.asyncio
-async def test_smk_profile_contract_aggregates_future_domains_into_one_native_card(
+async def test_smk_profile_contract_aggregates_current_domains_into_one_native_card(
     registry_hass,
 ):
-    """Prove profile ordering without claiming that future entities exist yet."""
+    """Prove current semantic profile ordering in one native card."""
     device = Device("rsmk", "rsmk-stable", model="С2000Р-СМК")
     result = await build(
         registry_hass,
         device,
         [
-            entity(device, "opening_state", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "opening_state"),
             entity(
                 device,
-                "tamper",
+                "enclosure_tamper",
                 domain="binary_sensor",
                 category=EntityCategory.DIAGNOSTIC,
             ),
-            entity(device, "battery_state"),
+            entity(device, "battery_state", category=EntityCategory.DIAGNOSTIC),
             entity(device, "opening", domain="binary_sensor"),
         ],
         "C2000RSMK",
@@ -609,10 +618,10 @@ async def test_smk_profile_contract_aggregates_future_domains_into_one_native_ca
 
     assert result.card["type"] == "entities"
     assert entity_ids(result) == [
-        "binary_sensor.rsmk_opening",
-        "sensor.rsmk_battery_state",
-        "binary_sensor.rsmk_tamper",
         "sensor.rsmk_opening_state",
+        "binary_sensor.rsmk_opening",
+        "binary_sensor.rsmk_enclosure_tamper",
+        "sensor.rsmk_battery_state",
     ]
     assert len(entity_ids(result)) == len(set(entity_ids(result)))
 
