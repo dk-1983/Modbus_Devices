@@ -95,7 +95,7 @@ The canonical registry in the current source tree contains **32 models: Bolid 29
 | Bolid | [С2000-СП4/24(220)](https://bolid.ru/production/s2000-sp4.html) | С2000-ПП → С2000-КДЛ → DPLS | Configured actuator switch and multistate position/circuit sensors | Supported variants are listed below; entities follow the configured mapping subset |
 | Bolid | С2000-СП2 | С2000-ПП → С2000-КДЛ → DPLS | Read-only relay-state representation | One- or two-output topology; no control entities. This class does not claim исп.02 or исп.03 |
 | Bolid | СВК15-3-2-Б | С2000-ПП → С2000-КДЛ → DPLS | Water-meter state/count data exposed by the implemented mapping | Exact registered model only |
-| Bolid | СВК15-3-8-1-Б3 | С2000-ПП → С2000-КДЛ → DPLS | Water-meter state/count data exposed by the implemented mapping | Exact registered model only |
+| Bolid | СВК15-3-8-1-Б3 | С2000-ПП → С2000-КДЛ → DPLS | Water-meter state; the counter entity remains unknown because automatic counter polling is safety-disabled | Exact registered model only |
 
 Supported С2000-СП4 variants:
 

@@ -9,8 +9,11 @@ from custom_components.modbus_devices.s2000_pp import (
     NumericResultStatus,
     S2000PPCounterValueReader,
     S2000PPNumericValueReader,
+    S2000PPRuntimeReader,
     decode_s2000_pp_counter,
+    manual_zone_mapping,
 )
+from custom_components.modbus_devices.modbus_client import SerializedModbusClient
 
 
 class Response:
@@ -211,7 +214,8 @@ async def test_pending_counter_repeats_only_result_until_completion():
 
 
 @pytest.mark.asyncio
-async def test_four_counter_transactions_remain_selector_session_serialized():
+async def test_historical_aligned_four_svk_attempts_remain_session_serialized():
+    """Characterize the former four-entry cadence without enabling B3 polling."""
     class TraceClient(Client):
         def __init__(self):
             super().__init__()
@@ -239,4 +243,75 @@ async def test_four_counter_transactions_remain_selector_session_serialized():
         ("selector", 2), ("result", None),
         ("selector", 3), ("result", None),
         ("selector", 4), ("result", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_two_svk_counters_cannot_both_own_pending_selector_state():
+    client = Client(Response(error=True, code=15))
+    first, second = await asyncio.gather(
+        S2000PPCounterValueReader(client, 1, "two-pending-svk").async_read(10),
+        S2000PPCounterValueReader(client, 1, "two-pending-svk").async_read(11),
+    )
+
+    assert first.status is NumericResultStatus.PENDING
+    assert second.status is NumericResultStatus.RETRYABLE
+    assert client.writes == [{"address": 46180, "value": 10, "device_id": 1}]
+    assert client.reads == [{"address": 46332, "count": 3, "device_id": 1}]
+
+
+@pytest.mark.asyncio
+async def test_grouped_state_request_can_interleave_counter_selector_and_result():
+    """Characterize request locking without claiming vendor transaction semantics."""
+
+    class InterleavingClient:
+        def __init__(self):
+            self.trace = []
+            self.selector_started = asyncio.Event()
+            self.release_selector = asyncio.Event()
+
+        async def write_register(self, **kwargs):
+            self.trace.append(("counter_selector", kwargs["value"]))
+            self.selector_started.set()
+            await self.release_selector.wait()
+            return Response(
+                address=kwargs["address"],
+                value=kwargs["value"],
+                function_code=6,
+            )
+
+        async def read_holding_registers(self, **kwargs):
+            if kwargs["address"] == 46332:
+                self.trace.append(("counter_result", kwargs["count"]))
+                return Response(registers=[0, 0, 1], function_code=3)
+            self.trace.append(("grouped_primary", kwargs["address"]))
+            return Response(registers=[0x50C8], function_code=3)
+
+        async def read_input_registers(self, **kwargs):
+            self.trace.append(("grouped_expanded", kwargs["address"]))
+            return Response(registers=[80, *([0] * 15)], function_code=4)
+
+    physical = InterleavingClient()
+    client = SerializedModbusClient(physical)
+    counter_task = asyncio.create_task(
+        S2000PPCounterValueReader(client, 1, "grouped-interleave").async_read(10)
+    )
+    await physical.selector_started.wait()
+    grouped_task = asyncio.create_task(
+        S2000PPRuntimeReader(client, 1).async_read_zone_states(
+            [manual_zone_mapping(0, 1, 1, 0, None)]
+        )
+    )
+    await asyncio.sleep(0)
+    physical.release_selector.set()
+
+    counter, grouped = await asyncio.gather(counter_task, grouped_task)
+
+    assert counter.status is NumericResultStatus.READY
+    assert grouped[1].primary_state == 80
+    assert physical.trace == [
+        ("counter_selector", 10),
+        ("grouped_primary", 40000),
+        ("counter_result", 3),
+        ("grouped_expanded", 4096),
     ]

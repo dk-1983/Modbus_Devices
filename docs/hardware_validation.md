@@ -247,15 +247,39 @@ counter selector transaction on every five-second coordinator refresh. With
 four SVK devices this could produce up to 48 new counter selectors, or 96
 physical counter-path Modbus requests, per minute.
 
-As a DEVELOPMENT mitigation for the next hardware-validation stage, primary
-and expanded state remain on the five-second cadence while each SVK starts a
-new optional counter transaction no more than once per 60 seconds. This reduces
-the expected steady-state maximum for four SVK devices to approximately four
-new selectors per minute. Pending transactions may still retry only their
-result read on the normal coordinator cadence. The 60-second interval is a
-validation policy, not an official Bolid timing requirement. The final interval
-will be reconsidered after numeric measurements work and hardware stability is
-confirmed.
+Commits `e3b6450` (preserve SVK state when counter data is unavailable) and
+`13c61e1` (throttle optional SVK counter polling) were intermediate containment
+steps. Later controlled COM3 evidence showed that throttling is insufficient:
+a single automatic acquisition can trigger the downstream side effect.
+
+On the DEVELOPMENT COM3 stand (115200 8N1, S2000-PP unit 2), rows 11-14
+(Orion 20, DPLS 53-56, type 1) remained at primary state 80 for six baseline
+cycles without counter polling. One normal acquisition for SVK row 1
+(Orion 20, DPLS 2, type 7) then performed FC06 register 46180 value 1 followed
+by FC03 register 46332 count 3. The result was a valid-CRC exception response
+code 3. About 5.08 seconds later all four unrelated detector rows changed to
+primary raw `0xFA00`, code 250, with expanded state 250.
+
+This hardware reproduction used no burst, competing selector, grouped read
+between selector and result, malformed request, or transport corruption.
+Automatic counter polling for `SVK15_3_8_1_B3` is therefore disabled as a
+safety containment. Grouped primary/expanded state polling remains enabled and
+the existing water-counter entity remains present but unknown after a fresh
+start. An in-memory last-known-good value is not deliberately erased. The
+generic `S2000PPCounterValueReader` protocol implementation is retained for
+controlled future vendor research and for other models; it is not entered by a
+normal `SVK15_3_8_1_B3` snapshot.
+
+The production A/B observation was separate: all SVK Config Entries were
+disabled without restarting Home Assistant. C2000DZ/C2000RDZ then recovered and
+remained stable without new primary-250 transitions during the observed window.
+
+On the COM3 stand, counter activity stopped immediately after the first 250;
+no restart, reset, or configuration change was performed. No recovery to 79/80
+was observed during ten minutes of grouped-state-only observation. The exact
+internal S2000-PP/device-side reason for unrelated rows entering state 250, and
+the reason for the different production and COM3 recovery observations, remain
+unknown.
 # С2000-ВТ development audit
 
 Official Bolid documentation identifies one physical С2000-ВТ (or
