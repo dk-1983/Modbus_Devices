@@ -2885,7 +2885,7 @@ class DIP34A05(BolidDPLSDetectorBase):
     equipment_model = "ДИП-34А-05"
     detector_model = "ДИП-34А-05"
     documented_variant = "dip_34a_05"
-    documented_target_firmware = "1.24"
+    documented_target_firmware = "1.22"
     supported_kdl_input_types = (6, 21)
     physical_capabilities = ("smoke_detection", "dust_compensation", "test")
     capability_requirements = (
@@ -2896,6 +2896,25 @@ class DIP34A05(BolidDPLSDetectorBase):
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
+
+    def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Return the one lossless state entity with DIP-specific icon semantics."""
+        descriptions = super().get_state_sensor_descriptions()
+        for description in descriptions:
+            if description["sensor_id"] != "detector_state":
+                continue
+            description["state_icons"] = {
+                "equipment_normal": "mdi:smoke-detector",
+                "fire": "mdi:smoke-detector-alert",
+                "warning": "mdi:smoke-detector-alert",
+                "attention": "mdi:smoke-detector-alert",
+                "equipment_fault": "mdi:alert-circle",
+                "maintenance_required": "mdi:alert-circle",
+                "input_communication_lost": "mdi:alert-circle",
+                "device_communication_lost": "mdi:alert-circle",
+            }
+            description["unknown_state_icon"] = "mdi:help-circle-outline"
+        return descriptions
 
 
 class C2000RDIP(BolidDPLSDetectorBase):

@@ -22,6 +22,11 @@ M3000_BB_1020_PROFILE = PresentationProfile(
     ),
 )
 
+DIP34A05_PROFILE = PresentationProfile(
+    profile_id="bolid_dip34a05",
+    roles=(PresentationRole("detector_state"),),
+)
+
 C2000_VT_PROFILE = PresentationProfile(
     profile_id="bolid_c2000_vt",
     roles=(
@@ -127,6 +132,12 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "M3000BB1020",
         M3000_BB_1020_PROFILE,
         models=("M3000-BB-1020",),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "DIP34A05",
+        DIP34A05_PROFILE,
+        models=("ДИП-34А-05",),
     )
     registry.register_equipment(
         "Bolid",

@@ -216,6 +216,8 @@ class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
         self._attr_name = description["name"]
         self._attr_device_class = description.get("device_class")
         self._attr_icon = description.get("icon")
+        self._state_icons = dict(description.get("state_icons", {}))
+        self._unknown_state_icon = description.get("unknown_state_icon")
         self._attr_entity_category = description.get("entity_category")
         identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
         self._attr_unique_id = f"{identity}_{self._sensor_id}"
@@ -230,6 +232,14 @@ class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         current = self._current
         return None if current is None else current["state"]
+
+    @property
+    def icon(self) -> str | None:
+        """Return an optional semantic icon without interpreting raw codes."""
+        state = self.native_value
+        if state is None or not self._state_icons:
+            return self._attr_icon
+        return self._state_icons.get(state, self._unknown_state_icon or self._attr_icon)
 
     @property
     def extra_state_attributes(self) -> dict:

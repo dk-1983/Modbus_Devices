@@ -177,6 +177,21 @@ async def test_unknown_manufacturer_and_model_use_generic_fallback(registry_hass
 
 
 @pytest.mark.asyncio
+async def test_dip34a05_uses_dedicated_native_detector_card(registry_hass):
+    device = Device("dip", "dip-stable", model="ДИП-34А-05")
+    result = await build(
+        registry_hass,
+        device,
+        [entity(device, "detector_state")],
+        "DIP34A05",
+    )
+
+    assert result.profile_id == "bolid_dip34a05"
+    assert result.card["type"] == "entities"
+    assert entity_ids(result) == ["sensor.dip_detector_state"]
+
+
+@pytest.mark.asyncio
 async def test_future_manufacturer_can_register_without_changing_builder(registry_hass):
     device = Device(
         "future",
