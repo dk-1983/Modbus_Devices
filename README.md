@@ -4,7 +4,7 @@
 
 Modbus Devices is a custom Home Assistant integration for explicitly supported industrial and building-automation equipment. Each equipment model defines its own Modbus-visible capabilities, entities, validation rules, and, where required, gateway mapping.
 
-The integration is a local-polling hub for Modbus-compatible equipment from multiple manufacturers, using direct connections or supported gateway/topology mappings. The canonical registry currently contains Bolid, Dyna Drive, and Owen equipment.
+The integration is a local-polling hub for Modbus-compatible equipment from multiple manufacturers, using direct connections or supported gateway/topology mappings. The canonical registry currently contains Bolid, Dyna Drive, Owen, and Zuked equipment.
 
 ## Key features
 
@@ -64,7 +64,7 @@ Transport support still depends on the selected equipment and its physical inter
 
 ## Supported equipment
 
-The canonical registry in the current source tree contains **32 models: Bolid 29, Dyna Drive 1, and Owen 2**. Model names below are user-facing manufacturer names, not Python class keys.
+The canonical registry in the current source tree contains **33 models: Bolid 29, Dyna Drive 1, Owen 2, and Zuked 1**. Model names below are user-facing manufacturer names, not Python class keys.
 
 ### Bolid — direct Modbus and С2000-ПП gateway
 
@@ -133,6 +133,12 @@ The DN310 implementation is registered and covered by repository tests, but comp
 |---|---|---|---|---|
 | Owen | [TRM-138](https://owen.ru/product/trm138) | Direct Modbus | 8 read-only measurement channels | One coherent FC04 snapshot covers all channels; signed and scaled values and channel status are validated. The `T` suffix denotes a transistor-output family variant, not a different measurement register map; output, regulator, and configuration writes are not exposed |
 | Owen | [ПЛК110-24.60.К-М](https://files.owen.ru/catalog/product.php?cat=plc&prod=plk110_m02&sub=programmiruemie_logicheskie_kontrolleri) | Direct Modbus | 36 binary inputs and 24 output switches | User-defined CODESYS Modbus bit layout; configurable DI area, base/stride, and DO base/stride |
+
+### Zuked — direct Modbus equipment
+
+| Manufacturer | Model | Connection | Implemented model | Important limitation |
+|---|---|---|---|---|
+| Zuked | 310-4.0S1 | Direct Modbus | Hardware-verified FC03 U0 monitoring, engineering scaling, fault decoding, DeviceInfo, and native presentation profile | Manual addresses are direct PDU offsets; no motor-control or persistent-configuration writes are implemented |
 
 ## Equipment examples
 

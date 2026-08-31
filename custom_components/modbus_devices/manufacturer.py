@@ -20,6 +20,7 @@ MANUFACTURERS: tuple[Manufacturer, ...] = (
     Manufacturer("Bolid", "bolid"),
     Manufacturer("Dyna Drive", "dyna_drive"),
     Manufacturer("Owen", "owen"),
+    Manufacturer("Zuked", "zuked"),
 )
 
 _BY_NAME = {manufacturer.canonical_name: manufacturer for manufacturer in MANUFACTURERS}

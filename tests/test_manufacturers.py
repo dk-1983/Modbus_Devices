@@ -18,6 +18,7 @@ from custom_components.modbus_devices.equipment.equipment import (
     get_equipment_display_name,
 )
 from custom_components.modbus_devices.equipment.dyna_drive import DN310
+from custom_components.modbus_devices.equipment.zuked import Zuked3104S1
 from custom_components.modbus_devices.manufacturer import (
     MANUFACTURERS,
     canonical_manufacturer_name,
@@ -30,7 +31,7 @@ from custom_components.modbus_devices.const import Config
 def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
     manufacturers = get_equipment_classes_by_manufacturer()
 
-    assert list(manufacturers) == ["Bolid", "Dyna Drive", "Owen"]
+    assert list(manufacturers) == ["Bolid", "Dyna Drive", "Owen", "Zuked"]
 
 
 def test_registry_contains_only_canonical_manufacturers_and_modules():
@@ -40,6 +41,7 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
         ("Bolid", "bolid"),
         ("Dyna Drive", "dyna_drive"),
         ("Owen", "owen"),
+        ("Zuked", "zuked"),
     ]
     assert manufacturer_module_name("Bolid") == "bolid"
     assert manufacturer_module_name("Owen") == "owen"
@@ -47,9 +49,11 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
     assert manufacturer_module_name("bolid") == "bolid"
     assert manufacturer_module_name("owen") == "owen"
     assert manufacturer_module_name("dyna_drive") == "dyna_drive"
+    assert manufacturer_module_name("Zuked") == "zuked"
+    assert manufacturer_module_name("zuked") == "zuked"
 
 
-@pytest.mark.parametrize("stored_name", ["Bolid", "Owen", "Dyna Drive"])
+@pytest.mark.parametrize("stored_name", ["Bolid", "Owen", "Dyna Drive", "Zuked"])
 def test_canonical_entry_options_remain_stable(stored_name):
     options = {
         Config.CONF_MANUFACTURER: stored_name,
@@ -140,6 +144,12 @@ def test_dyna_drive_dn310_is_canonical_and_discoverable():
     assert canonical_manufacturer_name("Dyna Drive") == "Dyna Drive"
     assert get_class("Dyna Drive", "DN310") is DN310
     assert get_equipment_classes_by_manufacturer()["Dyna Drive"] == ["DN310"]
+
+
+def test_zuked_310_4_0s1_is_canonical_and_discoverable():
+    assert canonical_manufacturer_name("Zuked") == "Zuked"
+    assert get_class("Zuked", "Zuked3104S1") is Zuked3104S1
+    assert get_equipment_classes_by_manufacturer()["Zuked"] == ["Zuked3104S1"]
 
 
 def test_dn310_is_the_only_canonical_equipment_loading_button_platform():

@@ -39,6 +39,6 @@ def test_config_flow_keeps_module_level_serial_discovery_surface():
 def test_registry_counts_and_order_remain_unchanged():
     equipment = get_equipment_classes_by_manufacturer()
 
-    assert list(equipment) == ["Bolid", "Dyna Drive", "Owen"]
-    assert [len(equipment[name]) for name in equipment] == [29, 1, 2]
-    assert sum(map(len, equipment.values())) == 32
+    assert list(equipment) == ["Bolid", "Dyna Drive", "Owen", "Zuked"]
+    assert [len(equipment[name]) for name in equipment] == [29, 1, 2, 1]
+    assert sum(map(len, equipment.values())) == 33

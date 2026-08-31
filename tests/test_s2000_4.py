@@ -109,7 +109,7 @@ def test_registry_metadata_and_config_flow_visibility():
     registry = get_equipment_classes_by_manufacturer()
     assert registry["Bolid"].count("C20004") == 1
     assert len(registry["Bolid"]) == 29
-    assert sum(map(len, registry.values())) == 32
+    assert sum(map(len, registry.values())) == 33
     assert C20004.equipment_manufacturer == "Bolid"
     assert C20004.equipment_model == "С2000-4"
     assert C20004(None, 1).attr_model_name == "С2000-4"

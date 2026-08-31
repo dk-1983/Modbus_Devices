@@ -114,7 +114,12 @@ async def test_config_flow_transport_manufacturer_and_real_model_steps(monkeypat
     flow.hass = FakeHass()
     monkeypatch.setattr(
         "custom_components.modbus_devices.config_flow.get_equipment_classes_by_manufacturer",
-        lambda: {"Bolid": ["C2000KDL"], "Dyna Drive": ["DN310"], "Owen": ["TRM138"]},
+        lambda: {
+            "Bolid": ["C2000KDL"],
+            "Dyna Drive": ["DN310"],
+            "Owen": ["TRM138"],
+            "Zuked": ["Zuked3104S1"],
+        },
     )
     monkeypatch.setattr(
         "custom_components.modbus_devices.config_flow.get_serial_ports",
@@ -128,12 +133,25 @@ async def test_config_flow_transport_manufacturer_and_real_model_steps(monkeypat
     result = await flow.async_step_user({Config.CONF_MODBUS_MODE: Config.MODBUS_TCP})
     assert result["step_id"] == "manufacturer"
     manufacturer_schema = next(iter(result["data_schema"].schema.values()))
-    assert manufacturer_schema.config["options"] == ["Bolid", "Dyna Drive", "Owen"]
+    assert manufacturer_schema.config["options"] == [
+        "Bolid",
+        "Dyna Drive",
+        "Owen",
+        "Zuked",
+    ]
 
     result = await flow.async_step_manufacturer({Config.CONF_MANUFACTURER: "Dyna Drive"})
     assert result["step_id"] == "device"
     model_schema = next(iter(result["data_schema"].schema.values()))
     assert model_schema.config["options"] == [{"value": "DN310", "label": "DN310"}]
+
+    flow._selected_manufacturer = None
+    result = await flow.async_step_manufacturer({Config.CONF_MANUFACTURER: "Zuked"})
+    assert result["step_id"] == "device"
+    model_schema = next(iter(result["data_schema"].schema.values()))
+    assert model_schema.config["options"] == [
+        {"value": "Zuked3104S1", "label": "310-4.0S1"}
+    ]
 
 
 @pytest.mark.asyncio

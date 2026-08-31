@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.modbus_devices.equipment import bolid, dyna_drive, owen
+from custom_components.modbus_devices.equipment import bolid, dyna_drive, owen, zuked
 from custom_components.modbus_devices.equipment.dyna_drive import DN310, DN310Command
 from custom_components.modbus_devices.equipment.equipment import (
     _get_equipment_classes,
@@ -50,6 +50,7 @@ EXPECTED_CLASSES = {
     ],
     "Dyna Drive": ["DN310"],
     "Owen": ["PLC110_24_60_K_M", "TRM138"],
+    "Zuked": ["Zuked3104S1"],
 }
 
 EXPECTED_MODELS = {
@@ -86,18 +87,20 @@ EXPECTED_MODELS = {
     ],
     "Dyna Drive": ["DN310"],
     "Owen": ["ПЛК110-24.60.К-М", "TRM-138"],
+    "Zuked": ["310-4.0S1"],
 }
 
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 32
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 33
 
 
 def test_module_exports_are_the_single_registry_source():
     assert bolid.EQUIPMENT_CLASSES == _get_equipment_classes("Bolid")
     assert dyna_drive.EQUIPMENT_CLASSES == _get_equipment_classes("Dyna Drive")
     assert owen.EQUIPMENT_CLASSES == _get_equipment_classes("Owen")
+    assert zuked.EQUIPMENT_CLASSES == _get_equipment_classes("Zuked")
 
     for manufacturer, class_names in EXPECTED_CLASSES.items():
         assert [
