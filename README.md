@@ -39,44 +39,46 @@ Support is model-specific; a listed manufacturer does not imply support for ever
 | Model | Connection | Main capabilities |
 |---|---|---|
 | M3000-BB-1020 | Direct Modbus | Binary inputs, relay outputs, device time, and diagnostics |
-| S2000-PP | Direct Modbus gateway | Gateway state and downstream equipment mapping |
-| S2000-KPB | S2000-PP / Orion | Configured output and circuit states with supported control |
-| S2000-2 | S2000-PP / Orion | Device, input, and access states |
-| S2000-4 | S2000-PP / Orion | Device and configured input states |
-| Signal-20M | S2000-PP / Orion | Device and configured input states |
-| S2000-BKI | S2000-PP / Orion | Device diagnostic state |
-| MIP-24 isp.20 | S2000-PP / Orion | Power-system multistate diagnostics |
+| С2000-ПП | Direct Modbus gateway | Orion mode/communication, tamper, power diagnostics, and downstream mapping |
+| С2000-КПБ | S2000-PP / Orion | Configured output and circuit states with supported control |
+| С2000-2 | S2000-PP / Orion | Read-only device, input, and access states |
+| С2000-4 | S2000-PP / Orion | Read-only device and configured input states |
+| Сигнал-20М | S2000-PP / Orion | Read-only device and configured input states |
+| С2000-БКИ | S2000-PP / Orion | Read-only device diagnostic state |
+| МИП-24 исп.20 | S2000-PP / Orion | Power states, electrical measurements, battery charge, and tamper |
 
 ### Bolid — wired KDL/DPLS equipment through S2000-PP
 
 | Model | Connection | Main capabilities |
 |---|---|---|
-| S2000-KDL | S2000-PP / Orion | Controller state and DPLS topology |
-| DIP-34A-05 | S2000-PP / DPLS | Smoke-detector state and dynamic status |
-| S2000-IP-03 | S2000-PP / DPLS | Heat-detector state and supported measurements |
-| S2000-DZ | S2000-PP / DPLS | Smoke-zone state and diagnostics |
-| S2000-ST isp.04 | S2000-PP / DPLS | Glass-break state, alarm, tamper, and fault diagnostics |
-| S2000-SMK isp.04 | S2000-PP / DPLS | Opening state and intrusion indication |
-| S2000-VT | S2000-PP / DPLS | Temperature measurement and state |
-| S2000-VTI | S2000-PP / DPLS | Temperature, humidity, and state |
-| S2000-SP4/24(220) | S2000-PP / DPLS | Actuator state and supported control |
-| S2000-SP2 | S2000-PP / DPLS | Read-only relay/output state |
-| SVK15-3-2-B | S2000-PP / DPLS | Water-meter state and supported count data |
-| SVK15-3-8-1-B3 | S2000-PP / DPLS | Water-meter state; automatic counter polling is safety-disabled |
+| С2000-КДЛ | S2000-PP / Orion | Controller state and DPLS topology |
+| ДИП-34А-05 | S2000-PP / DPLS | Smoke-detector state |
+| С2000-ИП-03 | S2000-PP / DPLS | Heat-detector state and optional temperature measurement |
+| С2000-ДЗ | S2000-PP / DPLS | Water-leak state and moisture detection |
+| С2000-СТ исп.04 | S2000-PP / DPLS | Glass-break state, alarm, tamper, and fault diagnostics |
+| С2000-СМК исп.04 | S2000-PP / DPLS | Opening state and intrusion indication |
+| С2000-ВТ | S2000-PP / DPLS | Temperature, relative humidity, and both channel states |
+| С2000-ВТИ | S2000-PP / DPLS | Temperature, relative humidity, and both channel states; isp.01 is not supported |
+| С2000-СП4/24(220) | S2000-PP / DPLS | Actuator state and supported control |
+| С2000-СП2 | S2000-PP / DPLS | Read-only relay/output state |
+| СВК15-3-2-Б | S2000-PP / DPLS | Water-meter state and cumulative water consumption |
+| СВК15-3-8-1-Б3 | S2000-PP / DPLS | Water-meter state; automatic counter polling is safety-disabled |
+
+Supported S2000-SP4 variants are `/24`, `/24 isp.01`, `/220`, and `/220 isp.01`; `/220 isp.02` is not supported.
 
 ### Bolid — radio equipment represented through KDL/DPLS
 
 | Model | Connection | Main capabilities |
 |---|---|---|
-| S2000R-ARR125 | S2000-PP / KDL | Radio-controller state |
-| S2000R-DIP | S2000-PP / ARR/KDL | Smoke state, enclosure tamper, main/reserve battery diagnostics |
-| S2000R-IP | S2000-PP / ARR/KDL | Heat state, tamper, main/reserve batteries, measurement fault |
-| S2000R-RM | S2000-PP / ARR/KDL | Relay/output state and supported control |
-| S2000R-Sirena | S2000-PP / ARR/KDL | Sounder state and diagnostics |
-| S2000R-ST isp.01 | S2000-PP / ARR/KDL | Glass-break state/alarm, tamper, and battery diagnostics |
-| S2000R-SMK | S2000-PP / ARR/KDL | Contact state/alarm, tamper, battery, and external-input state |
-| S2000R-DZ | S2000-PP / ARR/KDL | Smoke-zone state and diagnostics |
-| S2000R-VTI | S2000-PP / ARR/KDL | Temperature, humidity, and diagnostics |
+| С2000Р-АРР125 | S2000-PP / KDL | Radio-controller state |
+| С2000Р-ДИП | S2000-PP / ARR/KDL | Smoke state, enclosure tamper, main/reserve battery diagnostics |
+| С2000Р-ИП | S2000-PP / ARR/KDL | Heat state, tamper, main/reserve batteries, measurement fault |
+| С2000Р-РМ | S2000-PP / ARR/KDL | Two independent relay controls; optional controlled-circuit state on the standard variant |
+| С2000Р-Сирена | S2000-PP / ARR/KDL | Independent light and sound controls |
+| С2000Р-СТ исп.01 | S2000-PP / ARR/KDL | Glass-break state/alarm, tamper, and battery diagnostics |
+| С2000Р-СМК | S2000-PP / ARR/KDL | Contact state/alarm, tamper, one battery, and optional external-input state |
+| С2000Р-ДЗ | S2000-PP / ARR/KDL | Water-leak state, moisture detection, and main/reserve battery diagnostics |
+| С2000Р-ВТИ | S2000-PP / ARR/KDL | Temperature, relative humidity, both channel states, and main battery diagnostics |
 
 Some documented Bolid events require matching ARR/KDL/S2000M/PProg/S2000-PP configuration and retransmission. If an entity does not change, first verify that the event is configured to reach S2000-PP; this alone does not prove a device or integration defect.
 
@@ -84,8 +86,8 @@ Some documented Bolid events require matching ARR/KDL/S2000M/PProg/S2000-PP conf
 
 | Model | Connection | Main capabilities |
 |---|---|---|
-| PLC110-24.60.K-M | Direct Modbus | User-mapped binary inputs and output switches |
-| TRM-138 | Direct Modbus | Eight-channel temperature monitoring and diagnostics |
+| ПЛК110-24.60.К-М | Direct Modbus | 36 user-mapped binary inputs and 24 output switches |
+| TRM-138 | Direct Modbus | Read-only eight-channel temperature monitoring and diagnostics |
 
 ### Zuked
 
