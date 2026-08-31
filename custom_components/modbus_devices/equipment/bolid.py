@@ -2941,8 +2941,8 @@ class C2000RDIP(BolidDPLSDetectorBase):
 
     def __init__(self, client, device_id) -> None:
         super().__init__(client, device_id)
-        # Absence of a transient tamper code is not evidence of a closed case:
-        # the validated ARR/KDL/PP projection did not forward either code.
+        # Absence of a transient tamper code is not evidence of a closed case.
+        # Only the hardware-verified 149/152 lifecycle establishes state.
         self._enclosure_tamper_state: bool | None = None
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
@@ -3001,7 +3001,7 @@ class C2000RDIP(BolidDPLSDetectorBase):
             "name": "Enclosure tamper",
             "device_class": BinarySensorDeviceClass.TAMPER,
             "entity_category": EntityCategory.DIAGNOSTIC,
-            "enabled_default": False,
+            "enabled_default": True,
             "icon": "mdi:shield-question",
             "icon_on": "mdi:shield-lock-open",
             "icon_off": "mdi:shield-check",

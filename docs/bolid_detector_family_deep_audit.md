@@ -757,14 +757,14 @@ Codes 188 and 251 also occurred on the wired control. They therefore remain
 generic input/device communication states and are not renamed as radio-link
 quality or radio-hop supervision.
 
-### 25.2 Enclosure supervision boundary
+### 25.2 Enclosure supervision hardware validation
 
 **DOCUMENTED FACT:** С2000Р-ДИП officially supports configurable enclosure
 supervision through the PCB tamper button, with messages `Взлом корпуса` and
 `Восстановление корпуса`. Generic Orion meanings remain 149
 `enclosure_tamper` and 152 `enclosure_tamper_restored`.
 
-**HARDWARE VERIFIED negative observations:**
+**HARDWARE VERIFIED historical negative observations:**
 
 - removing the detector from its mounting base produced no PP change during
   approximately 22.4 seconds; this is a `REMOVED_FROM_MOUNTING_BASE` fixture,
@@ -773,13 +773,57 @@ supervision through the PCB tamper button, with messages `Взлом корпу�
   produced no PP change: 585 row-29 housing-open samples, 591 stable row-30
   control samples, 1182 records total, one distinct raw state and zero
   non-baseline records over a confirmed-open interval longer than 90 seconds;
-- 149, 152 and substitute codes were not observed.
+- 149, 152 and substitute codes were not observed under that older
+  configuration.
 
-**UNRESOLVED:** no simultaneous ARR/Orion observation was available, and the
-read-only state of the enclosure-supervision setting was not established.
-Consequently the disappearance boundary may be detector/configuration,
-ARR-to-KDL, or KDL/Orion-to-S2000-PP. The experiment does not prove that
-S2000-PP itself suppresses tamper.
+**HARDWARE VERIFIED current projection:** after the suspect S2000M/PProg
+setting was removed and the user independently changed Zone Modbus from 28 to
+3, the same row-29 detector exposed the complete enclosure-tamper lifecycle.
+The frozen mapping was Orion/KDL 3, DPLS input 4, Zone Modbus 3, PP type 1;
+row 30 (Orion/KDL 3, DPLS input 5) was the untouched control.
+
+Normal:
+
+```text
+FC03 0x18C8 (24,200)
+FC04 24,200,213,47,188,251,111,0,0,0,0,0,0,0,0,0
+```
+
+Housing open, first observed at `00:51:02.306+07:00`:
+
+```text
+FC03 0x9518 (149,24)
+RX 02 03 02 95 18 93 1E
+FC04 149,24,200,213,47,188,251,111,0,0,0,0,0,0,0,0
+RX 02 04 20 00 95 00 18 00 C8 00 D5 00 2F 00 BC 00 FB 00 6F
+   00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 50 CA
+```
+
+Housing restored, first observed at `00:54:50.730+07:00`:
+
+```text
+FC03 0x18C8 (24,200)
+RX 02 03 02 18 C8 F7 D2
+FC04 24,200,213,47,152,188,251,111,0,0,0,0,0,0,0,0
+RX 02 04 20 00 18 00 C8 00 D5 00 2F 00 98 00 BC 00 FB 00 6F
+   00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5F A4
+```
+
+Code 149 became primary and remained in expanded state for approximately
+227.4 seconds. Code 152 was an expanded restore state while primary had
+already returned to 24. All battery and generic communication/restoration
+codes coexisted with both tamper states. Row 30 remained byte-identical for
+413 complete control samples; no Modbus exception occurred.
+
+Therefore 149 `enclosure_tamper` and 152
+`enclosure_tamper_restored` are **DOCUMENTED + HARDWARE VERIFIED** for this
+validated S2000R-DIP/S2000-PP projection.
+
+**UNRESOLVED configuration causality:** two variables changed between the
+negative and successful experiments: the suspect S2000M/PProg setting was
+removed, and Zone Modbus was manually changed from 28 to 3. The successful
+projection cannot be attributed to either individual change. In particular,
+Zone Modbus 3 alone is not established as the cause.
 
 ### 25.3 Implemented conservative semantic boundary
 
@@ -789,12 +833,12 @@ Two diagnostic multistate battery entities use the hardware-observed restore
 states and documented active states without inventing a priority when multiple
 different codes coexist.
 
-The enclosure-tamper binary sensor is disabled by default and begins Unknown.
+The enclosure-tamper binary sensor is enabled by default and begins Unknown.
 Only explicit 149 changes it to active and explicit 152 changes it to restored;
 absence of both codes never fabricates a normal state. The last explicit state
 is retained across unrelated snapshots for the lifetime of the equipment
-object. This is future-compatible documented decoding, not a claim that the
-current hardware projection emitted 149/152.
+object. Repeated 149/152 states are idempotent. This now reflects documented
+and hardware-verified behavior rather than future-only decoding.
 
 RSSI, LQI, radio channel, route, radio address, serial, actual firmware and
 hardware revision remain unexposed because no runtime S2000-PP read path has

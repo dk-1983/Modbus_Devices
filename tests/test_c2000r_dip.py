@@ -23,6 +23,12 @@ from custom_components.modbus_devices.sensor import ModBusStateSensorEntity
 HARDWARE_NORMAL_EXPANDED = (
     24, 200, 213, 47, 188, 251, 111, 0, 0, 0, 0, 0, 0, 0, 0, 0
 )
+HARDWARE_TAMPER_ACTIVE_EXPANDED = (
+    149, 24, 200, 213, 47, 188, 251, 111, 0, 0, 0, 0, 0, 0, 0, 0
+)
+HARDWARE_TAMPER_RESTORED_EXPANDED = (
+    24, 200, 213, 47, 152, 188, 251, 111, 0, 0, 0, 0, 0, 0, 0, 0
+)
 
 
 class Response:
@@ -70,7 +76,7 @@ def mapping(*objects, base=4, orion=3, connection="serial:com3"):
 
 def configured(client=None):
     device = C2000RDIP(client, 2)
-    device.apply_gateway_mapping(mapping(manual_zone_mapping(4, 29, 1, 28, None)))
+    device.apply_gateway_mapping(mapping(manual_zone_mapping(4, 29, 1, 3, None)))
     return device
 
 
@@ -126,7 +132,7 @@ async def test_two_unit_hardware_normal_fixture_is_lossless_and_exposes_batterie
                     DownstreamDeviceMetadata(),
                 ),
                 MappingSource.MANUAL,
-                (manual_zone_mapping(dpls, row, 1, 28, None),),
+                (manual_zone_mapping(dpls, row, 1, 3, None),),
             )
         )
         snapshot = await device.async_get_snapshot()
@@ -185,30 +191,59 @@ async def test_documented_battery_states_are_conservative_and_lossless(expanded,
 
 
 @pytest.mark.asyncio
-async def test_documented_future_tamper_codes_have_stateful_unknown_lifecycle():
-    """DOCUMENTED fixture: 149/152 were not observed in current PP hardware."""
+async def test_hardware_tamper_lifecycle_is_explicit_stateful_and_idempotent():
+    """HARDWARE FIXTURE: row 29 emitted exact active and restored tuples."""
     device = configured(Client())
     baseline = await device.async_get_snapshot()
     assert baseline["binary_sensors"]["enclosure_tamper"]["state"] is None
 
-    device.attr_client = Client(expanded=(24, 149, 200, 213, 999))
+    device.attr_client = Client(
+        primary=0x9518, expanded=HARDWARE_TAMPER_ACTIVE_EXPANDED
+    )
     opened = await device.async_get_snapshot()
     assert opened["binary_sensors"]["enclosure_tamper"]["state"] is True
-    assert "unknown_999" in opened["state_sensors"]["detector_state"]["expanded_states"]
+    assert opened["state_sensors"]["detector_state"]["primary_code"] == 149
+    assert opened["state_sensors"]["detector_state"]["expanded_codes"] == (
+        HARDWARE_TAMPER_ACTIVE_EXPANDED
+    )
+    assert opened["state_sensors"]["main_battery_state"]["state"] == "battery_restored"
+    assert opened["state_sensors"]["reserve_battery_state"]["state"] == "reserve_battery_restored"
 
-    device.attr_client = Client()
+    # Repeated 149 is idempotent; a later normal primary without 152 does not
+    # fabricate a restored state.
+    assert (await device.async_get_snapshot())["binary_sensors"]["enclosure_tamper"]["state"] is True
+    device.attr_client = Client(primary=0x18C8, expanded=HARDWARE_NORMAL_EXPANDED)
     assert (await device.async_get_snapshot())["binary_sensors"]["enclosure_tamper"]["state"] is True
 
-    device.attr_client = Client(expanded=(24, 149, 152, 200, 213))
-    conflicting = await device.async_get_snapshot()
-    assert conflicting["binary_sensors"]["enclosure_tamper"]["state"] is True
-
-    device.attr_client = Client(expanded=(24, 152, 200, 213))
+    device.attr_client = Client(
+        primary=0x18C8, expanded=HARDWARE_TAMPER_RESTORED_EXPANDED
+    )
     restored = await device.async_get_snapshot()
     assert restored["binary_sensors"]["enclosure_tamper"]["state"] is False
+    assert restored["state_sensors"]["detector_state"]["primary_code"] == 24
+    assert restored["state_sensors"]["detector_state"]["expanded_codes"] == (
+        HARDWARE_TAMPER_RESTORED_EXPANDED
+    )
+    assert restored["state_sensors"]["main_battery_state"]["state"] == "battery_restored"
+    assert restored["state_sensors"]["reserve_battery_state"]["state"] == "reserve_battery_restored"
 
-    device.attr_client = Client()
+    # Repeated 152 is idempotent, and unrelated snapshots preserve explicit OFF.
     assert (await device.async_get_snapshot())["binary_sensors"]["enclosure_tamper"]["state"] is False
+    device.attr_client = Client(expanded=(24, 47, 188, 251, 111, 999))
+    unrelated = await device.async_get_snapshot()
+    assert unrelated["binary_sensors"]["enclosure_tamper"]["state"] is False
+    assert "unknown_999" in unrelated["state_sensors"]["detector_state"]["expanded_states"]
+
+
+@pytest.mark.asyncio
+async def test_hardware_tamper_fixture_does_not_affect_control_device():
+    """HARDWARE FIXTURE: row 30 stayed byte-identical across 413 samples."""
+    experiment = configured(Client(0x9518, HARDWARE_TAMPER_ACTIVE_EXPANDED))
+    control = configured(Client(0x18C8, HARDWARE_NORMAL_EXPANDED))
+    assert (await experiment.async_get_snapshot())["binary_sensors"]["enclosure_tamper"]["state"] is True
+    control_snapshot = await control.async_get_snapshot()
+    assert control_snapshot["binary_sensors"]["enclosure_tamper"]["state"] is None
+    assert control_snapshot["state_sensors"]["detector_state"]["expanded_codes"] == HARDWARE_NORMAL_EXPANDED
 
 
 def test_entity_matrix_identity_device_grouping_and_tamper_defaults():
@@ -229,7 +264,7 @@ def test_entity_matrix_identity_device_grouping_and_tamper_defaults():
     ]
     assert tamper_description["device_class"] is BinarySensorDeviceClass.TAMPER
     assert tamper_description["entity_category"] is EntityCategory.DIAGNOSTIC
-    assert tamper.entity_registry_enabled_default is False
+    assert tamper.entity_registry_enabled_default is True
     assert tamper.is_on is None
     assert {entity.unique_id for entity in entities} == {
         f"{device.attr_unique_id_prefix}_{key}"
