@@ -948,3 +948,89 @@ RSSI/LQI, RF channel, route, radio address, serial, actual firmware/hardware
 revision and battery voltage/percentage remain deliberately absent: the official
 device/ARR tooling may display them, but no supported runtime S2000-PP Modbus read
 path was established.
+
+## 27. S2000R-ST isp.01 implementation audit
+
+### 27.1 Official sources, topology and firmware
+
+**DOCUMENTED FACT:** the current manual is *С2000Р-СТ исп.01. Руководство по
+эксплуатации полное*, АЦДР.425132.003-01 РЭп, Изм.8 от 25.12.2025
+([official PDF](https://bolid.ru/files/373/566/s2000r_st_01_rep_jan_2026.pdf)).
+Sections 1.1 and 1.4 define one radio surface acoustic glass-break detector.
+Table 1.2 specifies one CR123A 3 V cell. Sections 2.2.2.2 and 3.4.3 describe
+separate PCB buttons for enclosure opening (`Корпус`) and removal from the
+mounting surface (`Отрыв`), but both physical actions produce the same
+`Вскрытие корпуса` message and the same `Восстановление корпуса` restore.
+Section 3.4.2 documents detector test mode; section 2.2.5 documents arming and
+energy-saving behavior. The history table records firmware 1.03 (July 2024,
+radio-channel groups); the current product page dates its public release to
+10.01.2025. The target remains 1.03; these dates describe different milestones.
+
+**DOCUMENTED FACT:** *С2000Р-АРР125*, АЦДР.426461.016 РЭп, Изм.9 от
+13.11.2025 ([official PDF](https://bolid.ru/files/373/566/s2000r_arr125_rep_nov_25.pdf)),
+table 2.5 assigns С2000Р-СТ исп.01 exactly KDL input type 5, `Охранный с
+контролем вскрытия корпуса`. Its compatibility table requires detector hardware
+1.0+, ARR 1.25+, KDL 2.30+ or KDL-2I family 1.30+. The current
+*С2000-КДЛ-2И исп.01*, АЦДР.426469.054 РЭп, Изм.12 от 25.12.2025,
+Appendix B confirms the same single-input projection.
+
+**CURRENT CODE BEHAVIOR:** one physical detector occupies one DPLS address,
+one S2000-PP row of PP zone type 1, one equipment object and one HA Device.
+KDL input type 5 and PP zone type 1 are distinct configuration domains. ARR is
+infrastructure, not part of detector DeviceInfo. No second logical alarm,
+service or tamper row is documented.
+
+### 27.2 Capability and state boundary
+
+| Capability | Evidence | Implemented projection |
+|---|---|---|
+| Glass-break alarm | device manual + Orion code 3 `Тревога проникновения` | lossless state + `binary_sensor.glass_break` |
+| Armed/reset | canonical codes 24 and 110 | explicit binary-alarm restore evidence |
+| Enclosure and wall-removal supervision | device manual; both share one message | one stateful enclosure-tamper entity, 149/152 |
+| Battery | exactly one CR123A; canonical 200/202/211 | one conservative diagnostic battery sensor |
+| Test | manual; canonical 19/20/21 | preserved in lossless detector state |
+| Communication | canonical 187/188 and 250/251 | lossless generic names only |
+| Acoustic interference | canonical 4/6, but no independent product channel contract | lossless state only |
+| Sensitivity/acoustic level | local/controller configuration | no runtime entity |
+| Anti-masking / separate acoustic fault | not documented for this model | not invented |
+
+The alarm reducer turns on for explicit code 3 and turns off for explicit armed
+or alarm-reset evidence (24/110). Unrelated higher-priority conditions preserve
+the last alarm result. Unknown primary and expanded codes remain visible in
+`sensor.glass_break_state`. The two physical tamper switches are intentionally
+not split because Orion does not distinguish their messages.
+
+### 27.3 Shared architecture and model comparison
+
+**PROPOSED CHANGE IMPLEMENTED:** common radio diagnostics were extracted into
+the narrow `BolidRadioDetectorDiagnosticsMixin`. It owns only the stateful
+149/152 reducer and declarative battery-channel projection. Fire products keep
+their existing `BolidRadioFireDetectorBase`; С2000Р-СТ uses the mixin directly
+with `BolidDPLSDetectorBase` and is not a fire-detector subtype.
+
+Unlike S2000R-DIP/IP, С2000Р-СТ has one documented battery rather than main and
+reserve channels. Unlike wired С2000-СТ исп.04, it has radio power/supervision
+conditions but no documented anti-masking capability. The wired model remains
+unchanged pending its separate audit.
+
+The entity matrix is `sensor.glass_break_state`,
+`binary_sensor.glass_break`, `binary_sensor.enclosure_tamper`, and
+`sensor.main_battery_state`. The dedicated `bolid_c2000r_st_01` native entities
+card follows that semantic order. Dynamic icons use glass/security imagery and
+retain an explicit unknown icon.
+
+### 27.4 Configuration and metadata boundary
+
+**INSTALLATION-CONFIGURATION DEPENDENT:** event visibility can require enabled
+detector supervision, correct ARR/KDL settings, S2000M/PProg retransmission,
+correct zones/partitions and a compatible S2000-PP projection mode. A missing
+transition at one installation does not remove the documented capability.
+
+RSSI/LQI, RF channel, route, radio identifier, serial, actual firmware/hardware
+revision, battery voltage/percentage, sensitivity and acoustic level remain
+unexposed because no supported runtime S2000-PP read path is documented.
+
+**NEEDS HARDWARE VERIFICATION:** exact PP snapshots for code 3 and the following
+24/110 lifecycle would strengthen fixture provenance, but no mapping ambiguity
+blocks the canonical documented implementation. No COM3 experiment is required
+for this change.

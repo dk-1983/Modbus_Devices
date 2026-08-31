@@ -2917,19 +2917,16 @@ class DIP34A05(BolidDPLSDetectorBase):
         return descriptions
 
 
-class BolidRadioFireDetectorBase(BolidDPLSDetectorBase):
-    """Shared truthful diagnostics for one-row radio fire detectors."""
+class BolidRadioDetectorDiagnosticsMixin:
+    """Shared truthful diagnostics for one-row radio detectors."""
 
     detector_state_icons: dict[str, str] = {}
-    gateway_transport_limitation = (
-        BolidDPLSDetectorBase.gateway_transport_limitation
-        + "; RSSI, channel, repeater route, radio identifier, and battery voltage "
-        "are not exposed"
-    )
-    capability_requirements = DIP34A05.capability_requirements
-
     _MAIN_BATTERY_CODES = frozenset((200, 202, 211))
     _RESERVE_BATTERY_CODES = frozenset((212, 213))
+    battery_state_channels: tuple[tuple[str, str, frozenset[int]], ...] = (
+        ("main_battery_state", "Main battery state", _MAIN_BATTERY_CODES),
+        ("reserve_battery_state", "Reserve battery state", _RESERVE_BATTERY_CODES),
+    )
 
     def __init__(self, client, device_id) -> None:
         super().__init__(client, device_id)
@@ -2943,14 +2940,14 @@ class BolidRadioFireDetectorBase(BolidDPLSDetectorBase):
         self.attr_platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
-        """Describe the lossless detector state and two documented battery channels."""
+        """Describe the lossless detector state and documented battery channels."""
         descriptions = super().get_state_sensor_descriptions()
         descriptions[0]["state_icons"] = dict(self.detector_state_icons)
         descriptions[0]["unknown_state_icon"] = "mdi:help-circle-outline"
-        descriptions.extend((
-            {
-                "sensor_id": "main_battery_state",
-                "name": "Main battery state",
+        for sensor_id, name, _ in self.battery_state_channels:
+            descriptions.append({
+                "sensor_id": sensor_id,
+                "name": name,
                 "device_class": None,
                 "icon": "mdi:battery",
                 "entity_category": EntityCategory.DIAGNOSTIC,
@@ -2958,22 +2955,11 @@ class BolidRadioFireDetectorBase(BolidDPLSDetectorBase):
                     "battery_restored": "mdi:battery-check",
                     "battery_low": "mdi:battery-alert",
                     "battery_fault": "mdi:battery-alert",
-                },
-                "unknown_state_icon": "mdi:help-circle-outline",
-            },
-            {
-                "sensor_id": "reserve_battery_state",
-                "name": "Reserve battery state",
-                "device_class": None,
-                "icon": "mdi:battery",
-                "entity_category": EntityCategory.DIAGNOSTIC,
-                "state_icons": {
                     "reserve_battery_restored": "mdi:battery-check",
                     "reserve_battery_low": "mdi:battery-alert",
                 },
                 "unknown_state_icon": "mdi:help-circle-outline",
-            },
-        ))
+            })
         return descriptions
 
     def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
@@ -3004,7 +2990,11 @@ class BolidRadioFireDetectorBase(BolidDPLSDetectorBase):
     async def async_get_snapshot(self) -> dict[str, dict]:
         """Add conservative radio diagnostics to the lossless row snapshot."""
         snapshot = await super().async_get_snapshot()
-        detector = snapshot["state_sensors"]["detector_state"]
+        capability_key = next(iter(self._state_mappings))
+        sensor_id = self.state_sensor_definitions.get(
+            capability_key, ("detector_state", "", "")
+        )[0]
+        detector = snapshot["state_sensors"][sensor_id]
         expanded_codes = detector["expanded_codes"]
         active = tuple(code for code in expanded_codes if code != 0)
 
@@ -3014,10 +3004,7 @@ class BolidRadioFireDetectorBase(BolidDPLSDetectorBase):
         elif tamper_codes == {152}:
             self._enclosure_tamper_state = False
 
-        for sensor_id, codes in (
-            ("main_battery_state", self._MAIN_BATTERY_CODES),
-            ("reserve_battery_state", self._RESERVE_BATTERY_CODES),
-        ):
+        for sensor_id, _, codes in self.battery_state_channels:
             code, state = self._battery_state(active, codes)
             snapshot["state_sensors"][sensor_id] = {
                 "sensor_id": sensor_id,
@@ -3034,6 +3021,19 @@ class BolidRadioFireDetectorBase(BolidDPLSDetectorBase):
             "expanded_codes": expanded_codes,
         }}
         return snapshot
+
+
+class BolidRadioFireDetectorBase(
+    BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase
+):
+    """Shared physical contract for one-row radio fire detectors."""
+
+    gateway_transport_limitation = (
+        BolidDPLSDetectorBase.gateway_transport_limitation
+        + "; RSSI, channel, repeater route, radio identifier, and battery voltage "
+        "are not exposed"
+    )
+    capability_requirements = DIP34A05.capability_requirements
 
 
 class C2000RDIP(BolidRadioFireDetectorBase):
@@ -3217,7 +3217,7 @@ class C2000RIP(BolidRadioFireDetectorBase):
         return snapshot
 
 
-class C2000RST01(BolidDPLSDetectorBase):
+class C2000RST01(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
     """Radio glass-break detector С2000Р-СТ исп.01."""
 
     equipment_manufacturer = "Bolid"
@@ -3247,6 +3247,59 @@ class C2000RST01(BolidDPLSDetectorBase):
             "glass_break_state", "Glass break detector state", "mdi:glass-fragile"
         ),
     }
+    battery_state_channels = (
+        (
+            "main_battery_state",
+            "Battery state",
+            BolidRadioDetectorDiagnosticsMixin._MAIN_BATTERY_CODES,
+        ),
+    )
+    detector_state_icons = {
+        "armed": "mdi:glass-fragile",
+        "control_restored": "mdi:glass-fragile",
+        "intrusion_alarm": "mdi:alarm-light",
+        "interference": "mdi:alert-circle",
+        "equipment_fault": "mdi:alert-circle",
+        "input_communication_lost": "mdi:alert-circle",
+        "device_communication_lost": "mdi:alert-circle",
+    }
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self._glass_break_state: bool | None = None
+
+    def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Expose alarm and the shared explicit enclosure lifecycle."""
+        descriptions = super().get_binary_sensor_descriptions()
+        if self._state_mapping is not None:
+            descriptions.insert(0, {
+                "sensor_id": "glass_break",
+                "name": "Glass break",
+                "device_class": BinarySensorDeviceClass.SOUND,
+                "enabled_default": True,
+                "icon": "mdi:help-circle-outline",
+                "icon_on": "mdi:alarm-light",
+                "icon_off": "mdi:glass-fragile",
+                "unknown_icon": "mdi:help-circle-outline",
+            })
+        return descriptions
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Project explicit alarm/restore evidence without hiding raw states."""
+        snapshot = await super().async_get_snapshot()
+        detector = snapshot["state_sensors"]["glass_break_state"]
+        active = {code for code in detector["expanded_codes"] if code != 0}
+        primary = detector["primary_code"]
+        if primary == 3 or (3 in active and not active & {24, 110}):
+            self._glass_break_state = True
+        elif primary in {24, 110} or (active & {24, 110} and 3 not in active):
+            self._glass_break_state = False
+        snapshot["binary_sensors"]["glass_break"] = {
+            "state": self._glass_break_state,
+            "primary_code": primary,
+            "expanded_codes": detector["expanded_codes"],
+        }
+        return snapshot
 
 
 class C2000ST04(BolidDPLSDetectorBase):

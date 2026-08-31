@@ -60,6 +60,20 @@ C2000R_IP_PROFILE = PresentationProfile(
     ),
 )
 
+C2000R_ST_01_PROFILE = PresentationProfile(
+    profile_id="bolid_c2000r_st_01",
+    roles=(
+        PresentationRole("glass_break_state"),
+        PresentationRole("glass_break", entity_domain="binary_sensor"),
+        PresentationRole(
+            "enclosure_tamper",
+            PresentationSection.DIAGNOSTIC,
+            entity_domain="binary_sensor",
+        ),
+        PresentationRole("main_battery_state", PresentationSection.DIAGNOSTIC),
+    ),
+)
+
 C2000_VT_PROFILE = PresentationProfile(
     profile_id="bolid_c2000_vt",
     roles=(
@@ -183,6 +197,12 @@ def register_profiles(registry: DevicePresentationRegistry) -> None:
         "C2000RIP",
         C2000R_IP_PROFILE,
         models=("С2000Р-ИП",),
+    )
+    registry.register_equipment(
+        "Bolid",
+        "C2000RST01",
+        C2000R_ST_01_PROFILE,
+        models=("С2000Р-СТ исп.01",),
     )
     registry.register_equipment(
         "Bolid",
