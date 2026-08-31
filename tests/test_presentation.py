@@ -199,7 +199,12 @@ async def test_c2000r_dip_uses_dedicated_native_radio_detector_card(registry_has
         device,
         [
             entity(device, "reserve_battery_state", category=EntityCategory.DIAGNOSTIC),
-            entity(device, "enclosure_tamper", domain="binary_sensor", category=EntityCategory.DIAGNOSTIC),
+            entity(
+                device,
+                "enclosure_tamper",
+                domain="binary_sensor",
+                category=EntityCategory.DIAGNOSTIC,
+            ),
             entity(device, "detector_state"),
             entity(device, "main_battery_state", category=EntityCategory.DIAGNOSTIC),
         ],
@@ -216,6 +221,42 @@ async def test_c2000r_dip_uses_dedicated_native_radio_detector_card(registry_has
 
 
 @pytest.mark.asyncio
+async def test_c2000r_ip_uses_dedicated_native_heat_detector_card(registry_hass):
+    device = Device("rip", "rip-stable", model="С2000Р-ИП")
+    result = await build(
+        registry_hass,
+        device,
+        [
+            entity(
+                device,
+                "measurement_fault",
+                domain="binary_sensor",
+                category=EntityCategory.DIAGNOSTIC,
+            ),
+            entity(device, "reserve_battery_state", category=EntityCategory.DIAGNOSTIC),
+            entity(device, "detector_state"),
+            entity(
+                device,
+                "enclosure_tamper",
+                domain="binary_sensor",
+                category=EntityCategory.DIAGNOSTIC,
+            ),
+            entity(device, "main_battery_state", category=EntityCategory.DIAGNOSTIC),
+        ],
+        "C2000RIP",
+    )
+    assert result.profile_id == "bolid_c2000r_ip"
+    assert result.card["type"] == "entities"
+    assert entity_ids(result) == [
+        "sensor.rip_detector_state",
+        "binary_sensor.rip_enclosure_tamper",
+        "sensor.rip_main_battery_state",
+        "sensor.rip_reserve_battery_state",
+        "binary_sensor.rip_measurement_fault",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_future_manufacturer_can_register_without_changing_builder(registry_hass):
     device = Device(
         "future",
@@ -226,11 +267,7 @@ async def test_future_manufacturer_can_register_without_changing_builder(registr
     hass = registry_hass(
         [device],
         [entity(device, "second"), entity(device, "first")],
-        {
-            device.config_entry_id: config_entry(
-                "Example Manufacturer", "FutureDevice"
-            )
-        },
+        {device.config_entry_id: config_entry("Example Manufacturer", "FutureDevice")},
     )
     profiles = DevicePresentationRegistry()
     profiles.register_equipment(
@@ -516,6 +553,7 @@ async def test_smk_profile_contract_aggregates_future_domains_into_one_native_ca
     ]
     assert len(entity_ids(result)) == len(set(entity_ids(result)))
 
+
 @pytest.mark.asyncio
 async def test_disabled_is_excluded_but_unavailable_is_included(registry_hass):
     device = Device("vt", "vt-stable")
@@ -556,9 +594,7 @@ async def test_entity_and_device_user_renames_are_respected(registry_hass):
         "type": "entities",
         "title": "C2000-VT Balcony",
         "show_header_toggle": False,
-        "entities": [
-            {"entity": "sensor.balcony_temperature", "name": "Temperature"}
-        ],
+        "entities": [{"entity": "sensor.balcony_temperature", "name": "Temperature"}],
     }
 
 
@@ -655,9 +691,7 @@ async def test_m3000_entities_follow_device_time_controls_inputs_order(registry_
             ),
             domain="binary_sensor",
             original_name=(
-                f"24 volts {number}"
-                if number <= 6
-                else f"220 volts {number - 6}"
+                f"24 volts {number}" if number <= 6 else f"220 volts {number - 6}"
             ),
             unique_id=f"m3000-serial_input_{number}",
         )

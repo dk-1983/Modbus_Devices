@@ -2917,18 +2917,10 @@ class DIP34A05(BolidDPLSDetectorBase):
         return descriptions
 
 
-class C2000RDIP(BolidDPLSDetectorBase):
-    """Radio optical smoke detector represented as its own DPLS object."""
+class BolidRadioFireDetectorBase(BolidDPLSDetectorBase):
+    """Shared truthful diagnostics for one-row radio fire detectors."""
 
-    equipment_manufacturer = "Bolid"
-    equipment_model = "С2000Р-ДИП"
-    detector_model = "С2000Р-ДИП"
-    documented_target_firmware = "1.29"
-    supported_kdl_input_types = (1, 6, 8, 21)
-    physical_capabilities = (
-        "smoke_detection", "dust_compensation", "radio_supervision",
-        "main_and_reserve_battery", "tamper", "test",
-    )
+    detector_state_icons: dict[str, str] = {}
     gateway_transport_limitation = (
         BolidDPLSDetectorBase.gateway_transport_limitation
         + "; RSSI, channel, repeater route, radio identifier, and battery voltage "
@@ -2941,8 +2933,8 @@ class C2000RDIP(BolidDPLSDetectorBase):
 
     def __init__(self, client, device_id) -> None:
         super().__init__(client, device_id)
-        # Absence of a transient tamper code is not evidence of a closed case.
-        # Only the hardware-verified 149/152 lifecycle establishes state.
+        # Absence of transient event codes is not evidence of a closed case.
+        # Only the explicit canonical 149/152 lifecycle establishes state.
         self._enclosure_tamper_state: bool | None = None
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
@@ -2951,19 +2943,9 @@ class C2000RDIP(BolidDPLSDetectorBase):
         self.attr_platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
-        """Describe the lossless detector state and two proven battery channels."""
+        """Describe the lossless detector state and two documented battery channels."""
         descriptions = super().get_state_sensor_descriptions()
-        descriptions[0]["state_icons"] = {
-            "armed": "mdi:smoke-detector",
-            "equipment_normal": "mdi:smoke-detector",
-            "fire": "mdi:smoke-detector-alert",
-            "warning": "mdi:smoke-detector-alert",
-            "attention": "mdi:smoke-detector-alert",
-            "equipment_fault": "mdi:alert-circle",
-            "maintenance_required": "mdi:alert-circle",
-            "input_communication_lost": "mdi:alert-circle",
-            "device_communication_lost": "mdi:alert-circle",
-        }
+        descriptions[0]["state_icons"] = dict(self.detector_state_icons)
         descriptions[0]["unknown_state_icon"] = "mdi:help-circle-outline"
         descriptions.extend((
             {
@@ -3054,6 +3036,32 @@ class C2000RDIP(BolidDPLSDetectorBase):
         return snapshot
 
 
+class C2000RDIP(BolidRadioFireDetectorBase):
+    """Radio optical smoke detector represented as its own DPLS object."""
+
+    equipment_manufacturer = "Bolid"
+    equipment_model = "С2000Р-ДИП"
+    detector_model = "С2000Р-ДИП"
+    documented_target_firmware = "1.29"
+    supported_kdl_input_types = (1, 6, 8, 21)
+    physical_capabilities = (
+        "smoke_detection", "dust_compensation", "radio_supervision",
+        "main_and_reserve_battery", "tamper", "test",
+    )
+    capability_requirements = DIP34A05.capability_requirements
+    detector_state_icons = {
+        "armed": "mdi:smoke-detector",
+        "equipment_normal": "mdi:smoke-detector",
+        "fire": "mdi:smoke-detector-alert",
+        "warning": "mdi:smoke-detector-alert",
+        "attention": "mdi:smoke-detector-alert",
+        "equipment_fault": "mdi:alert-circle",
+        "maintenance_required": "mdi:alert-circle",
+        "input_communication_lost": "mdi:alert-circle",
+        "device_communication_lost": "mdi:alert-circle",
+    }
+
+
 class C2000IP03(BolidDPLSDetectorBase):
     """Wired temperature detector С2000-ИП-03 with two PP mapping modes."""
 
@@ -3138,13 +3146,13 @@ class C2000IP03(BolidDPLSDetectorBase):
         return snapshot
 
 
-class C2000RIP(BolidDPLSDetectorBase):
-    """Radio temperature detector; PP numeric transport is not confirmed."""
+class C2000RIP(BolidRadioFireDetectorBase):
+    """Radio heat detector with one lossless S2000-PP state projection."""
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-ИП"
     detector_model = "С2000Р-ИП"
-    documented_target_firmware = "1.29"
+    documented_target_firmware = "1.30"
     supported_kdl_input_types = (3, 6, 9, 10, 21)
     physical_capabilities = (
         "temperature_measurement", "fire_detection", "radio_supervision",
@@ -3156,6 +3164,57 @@ class C2000RIP(BolidDPLSDetectorBase):
         "repeater route, radio identifier, and battery voltage are not exposed"
     )
     capability_requirements = DIP34A05.capability_requirements
+    detector_state_icons = {
+        "armed": "mdi:thermometer",
+        "equipment_normal": "mdi:thermometer",
+        "temperature_normal": "mdi:thermometer",
+        "fire": "mdi:fire-alert",
+        "warning": "mdi:fire-alert",
+        "attention": "mdi:fire-alert",
+        "temperature_high": "mdi:fire-alert",
+        "equipment_fault": "mdi:alert-circle",
+        "temperature_sensor_fault": "mdi:alert-circle",
+        "input_communication_lost": "mdi:alert-circle",
+        "device_communication_lost": "mdi:alert-circle",
+    }
+
+    def __init__(self, client, device_id) -> None:
+        super().__init__(client, device_id)
+        self._measurement_fault_state: bool | None = None
+
+    def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
+        """Expose independently restored enclosure and measuring-part faults."""
+        descriptions = super().get_binary_sensor_descriptions()
+        if self._state_mapping is not None:
+            descriptions.append({
+                "sensor_id": "measurement_fault",
+                "name": "Temperature measurement fault",
+                "device_class": BinarySensorDeviceClass.PROBLEM,
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "enabled_default": True,
+                "icon": "mdi:thermometer-question",
+                "icon_on": "mdi:thermometer-alert",
+                "icon_off": "mdi:thermometer-check",
+                "unknown_icon": "mdi:thermometer-question",
+            })
+        return descriptions
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Project the canonical 82/83 measuring-part lifecycle losslessly."""
+        snapshot = await super().async_get_snapshot()
+        detector = snapshot["state_sensors"]["detector_state"]
+        active = {code for code in detector["expanded_codes"] if code != 0}
+        measurement_codes = active & {82, 83}
+        if measurement_codes == {82}:
+            self._measurement_fault_state = True
+        elif measurement_codes == {83}:
+            self._measurement_fault_state = False
+        snapshot["binary_sensors"]["measurement_fault"] = {
+            "state": self._measurement_fault_state,
+            "primary_code": detector["primary_code"],
+            "expanded_codes": detector["expanded_codes"],
+        }
+        return snapshot
 
 
 class C2000RST01(BolidDPLSDetectorBase):

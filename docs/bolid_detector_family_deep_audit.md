@@ -843,3 +843,108 @@ and hardware-verified behavior rather than future-only decoding.
 RSSI, LQI, radio channel, route, radio address, serial, actual firmware and
 hardware revision remain unexposed because no runtime S2000-PP read path has
 been established.
+
+## 26. S2000R-IP implementation audit
+
+### 26.1 Official sources and topology
+
+**DOCUMENTED FACT:** the current product manual is *С2000Р-ИП. Руководство по
+эксплуатации полное*, АЦДР.425214.004 РЭп, Изм.7 от 23.12.2025.
+[Official PDF](https://bolid.ru/files/373/566/s2000r_ip_rept_jan_2026.pdf).
+Sections 1.1 and 1.4 describe one A1R maximum/differential radio heat detector
+which reports `Норма`, `Пожар`, `Внимание`, current ambient temperature,
+measuring-part failure, two battery supplies, enclosure opening, radio quality
+and test mode to its radio controller. Section 2.2.5 documents configurable
+enclosure supervision. The current official product page lists firmware 1.30
+(released 27.08.2026); the runtime metadata remains a documented reference, not
+a hardware-read firmware value.
+
+**DOCUMENTED FACT:** [*С2000Р-АРР125*](https://bolid.ru/files/373/566/s2000r_arr125_rep_nov_25.pdf),
+АЦДР.426461.016 РЭп, Изм.9 от
+13.11.2025, documents the radio-controller-to-DPLS projection. The compatibility
+table requires S2000R-IP hardware 1.0 or later, ARR firmware 1.25 or later and
+KDL 2.20 / KDL-2I 1.20 or later. The current [*С2000-КДЛ-2И исп.01*](https://bolid.ru/files/373/566/s2000_kdl_2i_01_rep_v.1.36_jan_26.pdf),
+АЦДР.426469.054 РЭп, Изм.12 от 25.12.2025, Appendix B, lists
+S2000R-IP as one input occupying one DPLS address and supports KDL input types
+3, 6, 9, 10 and 21.
+
+**CURRENT CODE BEHAVIOR:** one physical S2000R-IP is one equipment object, one
+DPLS identity (`address_count=1`), one required S2000-PP row of PP zone type 1,
+one HA Device and five entities. KDL input type is device/controller
+configuration metadata and is deliberately not equated with PP zone type.
+ARR remains upstream infrastructure and is not folded into DeviceInfo.
+
+### 26.2 S2000R-DIP comparison and shared abstraction
+
+| Capability | S2000R-DIP | S2000R-IP |
+|---|---|---|
+| Physical detector / PP rows | one / one | one / one |
+| Required PP zone type | 1 | 1 |
+| KDL input types | 1, 6, 8, 21 | 3, 6, 9, 10, 21 |
+| Primary process | optical smoke | A1R maximum/differential heat |
+| Two batteries | documented, PP verified on test units | documented |
+| Enclosure 149/152 | documented and PP verified | documented canonical semantics |
+| Measuring-part 82/83 | not applicable | documented/canonical thermometer fault |
+| Current temperature | not applicable | physical capability; PP path unresolved |
+
+**PROPOSED CHANGE IMPLEMENTED:** a narrow `BolidRadioFireDetectorBase` now owns
+only the genuinely common one-row battery and explicit enclosure-event reducers.
+It does not model smoke/heat alarm semantics. Product classes retain their own
+KDL metadata, capabilities and dynamic primary-state icons. Existing
+S2000R-DIP entity keys and behavior are unchanged.
+
+### 26.3 State and entity contract
+
+**DOCUMENTED CAPABILITY / canonical Orion semantics:** detector state remains
+lossless and preserves ordered primary/expanded codes, including unknown codes.
+Fire (37), warning (43), attention (44), equipment fault (41), test (19),
+input control (111/112), generic input/device communication (187/188 and
+250/251), main battery (200/202/211), reserve battery (212/213), enclosure
+(149/152), and temperature measuring-part fault/restore (82/83) remain distinct.
+The generic communication pairs are not renamed to radio-link quality.
+
+The implemented entity matrix is:
+
+1. `sensor.detector_state` (lossless primary and expanded semantics);
+2. `binary_sensor.enclosure_tamper` (Unknown until explicit 149 or 152);
+3. `sensor.main_battery_state` (unambiguous one-code projection only);
+4. `sensor.reserve_battery_state` (unambiguous one-code projection only);
+5. `binary_sensor.measurement_fault` (Unknown until explicit 82 or 83).
+
+Both stateful binary sensors preserve their last explicit state across unrelated
+snapshots. Conflicting same-capability codes do not invent a result. The native
+`bolid_c2000r_ip` entities card uses the order above. Heat-specific dynamic icons
+do not reuse smoke-detector imagery.
+
+### 26.4 Temperature protocol boundary
+
+**DOCUMENTED FACT:** the detector manual says S2000R-IP transmits current ambient
+temperature in degrees Celsius to ARR. **DOCUMENTED FACT:** [*С2000-ПП*](https://bolid.ru/files/373/566/s2_pp_rep_v3_01_jule_2026.pdf),
+АЦДР.426469.020 РЭп, Изм.18 от 29.05.2026, sections 1.1.5.9-10
+documents selector 46179, result 46328, signed Q8.8 and PP zone type 6 only for
+`С2000-ИП`, `С2000-ВТ` and `С2000-ИПГ`; it does not list S2000R-IP.
+
+**UNRESOLVED:** no official document establishes that ARR/KDL forwards the
+S2000R-IP value through that S2000-PP numeric command. Consequently no
+temperature entity, selector transaction, scaling assumption or type-6 mapping
+was added. A read-only validation should configure a known S2000R-IP as an
+additional PP type-6 test row only if Bolid confirms that projection, then issue
+the canonical 46179 selector and read 46328 while comparing the signed raw word
+to ARR Configurator temperature. The existing production-like type-1 state row
+must not be changed for this experiment.
+
+### 26.5 Installation boundary and unsupported metadata
+
+**INSTALLATION-CONFIGURATION DEPENDENT:** event-driven entities can remain
+Unknown when the installation does not project the corresponding event. Check
+detector enclosure supervision, ARR/KDL configuration, S2000M/PProg event
+retransmission categories and correct zones/partitions, plus compatible
+S2000-PP mode. [PProg 2026](https://bolid.ru/files/373/566/PProg_rus_2026.pdf)
+documents rules by destination, associated zones and event categories. Absence
+in one installation is not proof that S2000R-IP lacks
+the documented capability.
+
+RSSI/LQI, RF channel, route, radio address, serial, actual firmware/hardware
+revision and battery voltage/percentage remain deliberately absent: the official
+device/ARR tooling may display them, but no supported runtime S2000-PP Modbus read
+path was established.
