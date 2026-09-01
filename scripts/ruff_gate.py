@@ -10,6 +10,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE_PATH = ROOT / ".ruff-format-baseline"
+RATCHET_EPOCH = "5d8572e8d5dc1b321802e2fdb91cc934a52fc0bf"
 
 
 def _git_lines(*arguments: str) -> tuple[str, ...]:
@@ -65,16 +66,63 @@ def _run_ruff(*arguments: str) -> None:
     )
 
 
-def _changed_python_files(base: str | None, files: frozenset[str]) -> set[str]:
-    if not base or set(base) == {"0"}:
-        return set()
-    subprocess.run(
-        ("git", "rev-parse", "--verify", f"{base}^{{commit}}"),
+def _verify_commit(revision: str, label: str) -> None:
+    try:
+        subprocess.run(
+            ("git", "rev-parse", "--verify", f"{revision}^{{commit}}"),
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(
+            f"Ruff gate cannot resolve {label} commit {revision}; "
+            "fetch the required Git history"
+        ) from error
+
+
+def _is_ancestor(older: str, newer: str) -> bool:
+    result = subprocess.run(
+        ("git", "merge-base", "--is-ancestor", older, newer),
         cwd=ROOT,
-        check=True,
+        check=False,
         capture_output=True,
     )
-    committed = set(_git_lines("diff", "--name-only", f"{base}...HEAD", "--", "*.py"))
+    if result.returncode not in (0, 1):
+        raise SystemExit(
+            f"Ruff gate could not compare Git history for {older} and {newer}"
+        )
+    return result.returncode == 0
+
+
+def _effective_diff_base(base: str | None) -> str | None:
+    if not base or set(base) == {"0"}:
+        return None
+
+    _verify_commit(base, "event comparison base")
+    _verify_commit(RATCHET_EPOCH, "ratchet epoch")
+    _verify_commit("HEAD", "current HEAD")
+    if not _is_ancestor(RATCHET_EPOCH, "HEAD"):
+        raise SystemExit(
+            f"Ruff ratchet epoch {RATCHET_EPOCH} is not an ancestor of HEAD"
+        )
+    if _is_ancestor(base, RATCHET_EPOCH):
+        return RATCHET_EPOCH
+    if _is_ancestor(RATCHET_EPOCH, base):
+        return base
+    raise SystemExit(
+        f"Ruff event base {base} and ratchet epoch {RATCHET_EPOCH} "
+        "have unrelated histories"
+    )
+
+
+def _changed_python_files(base: str | None, files: frozenset[str]) -> set[str]:
+    effective_base = _effective_diff_base(base)
+    if effective_base is None:
+        return set()
+    committed = set(
+        _git_lines("diff", "--name-only", f"{effective_base}...HEAD", "--", "*.py")
+    )
     working = set(_git_lines("diff", "--name-only", "--", "*.py"))
     return (committed | working) & files
 
