@@ -1,0 +1,25 @@
+name: Python quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Ruff
+        run: python -m pip install "ruff>=0.16.0,<0.17"
+
+      - name: Check correctness and formatting debt
+        env:
+          RUFF_CHANGED_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python scripts/ruff_gate.py --changed-base "$RUFF_CHANGED_BASE"

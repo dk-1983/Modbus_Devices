@@ -2,7 +2,9 @@
 
 ## 1. Executive Summary
 
-This report is a research/forensic audit of four distinct Bolid products:
+This report began as a research/forensic audit of four distinct Bolid products
+and was extended by the later implementation sections for related detector
+families:
 
 - `DIP34A05` — **ДИП-34А-05**, wired optical smoke detector;
 - `C2000RDIP` — **С2000Р-ДИП**, radio optical smoke detector;
@@ -15,18 +17,23 @@ wired analogues. The radio detector is a physical device behind a separate
 DPLS address, the KDL reports that address as an Orion input, and `С2000-ПП`
 projects the configured input into one Modbus zone row.
 
-The current implementations are **partially modern**. They already use one HA
-Device per configured DPLS identity, exact zone mappings, grouped primary plus
-expanded reads, stable entity keys, lossless unknown-code decoding, generic
-Config Flow ownership checks, and the shared DeviceInfo path. They are not the
-old direct-register classes implied by the original minimal feature set.
+The current implementations use one HA Device per configured physical DPLS
+identity, exact zone mappings, grouped primary plus expanded reads, stable
+entity keys, lossless unknown-code decoding, generic Config Flow ownership
+checks, and the shared DeviceInfo path. They are not the old direct-register
+classes implied by the original minimal feature set.
 
-The main deficiency is semantic, not transport-level:
+Current entity sets are deliberately model-specific:
 
-- **CURRENT CODE BEHAVIOR:** each detector exposes only one multistate sensor
-  (`detector_state` or `glass_break_state`). Battery, tamper, communication and
-  maintenance codes can be visible only inside that entity's
-  `expanded_codes`/`expanded_states` attributes.
+- **CURRENT CODE BEHAVIOR:** every implemented detector retains a lossless
+  multistate sensor (`detector_state`, `glass_break_state`, `contact_state`, or
+  the model-equivalent state entity). Depending on documented capability, a
+  model can additionally expose binary alarm/opening/moisture, enclosure
+  tamper, main or reserve battery state, equipment or measurement fault, and a
+  numeric measurement when S2000-PP provides a supported numeric path.
+- **CURRENT CODE BEHAVIOR:** semantic entities are projections of the lossless
+  primary/expanded state and do not discard unknown Orion codes or synthesize
+  normal states from the absence of event-driven evidence.
 - **DOCUMENTED FACT:** the radio detectors and ARR controller know substantially
   more: battery state, case state and radio supervision; ARR configuration tools
   also show radio address, serial number, firmware/hardware versions and signal
@@ -38,20 +45,14 @@ The main deficiency is semantic, not transport-level:
 - **INFERENCE:** missing HA RSSI/identity entities are therefore not explained by
   the detector class hierarchy. Those values are on the ARR configuration plane,
   not the currently implemented `С2000-ПП` zone-state plane.
-- **NEEDS HARDWARE VERIFICATION:** which battery/tamper/link codes are actually
-  retained in the expanded state block for each product and PP firmware, and
-  whether alarm and diagnostic conditions coexist without loss.
-
-Recommended classifications:
-
-| Model | Classification | Reason |
-|---|---|---|
-| ДИП-34А-05 | **SMALL FIX** | Physical topology is correct; firmware/input-type metadata and semantic entities/tests need correction. |
-| С2000Р-ДИП | **REFACTOR** | One-row physical identity is plausible, but radio diagnostic states need model-specific aggregation/entities after hardware validation. |
-| С2000Р-СТ исп.01 | **REFACTOR** | Same radio-plane limitation; one-battery and tamper/link semantics must be separated from the alarm state. |
-| С2000-СТ исп.04 | **SMALL FIX** | Physical model is correct; authoritative state semantics, firmware tests and presentation are incomplete. |
-
-No runtime source was changed by this audit.
+- **INSTALLATION-CONFIGURATION DEPENDENT:** event-driven entities can remain
+  unknown or unchanged unless detector supervision, ARR/KDL configuration,
+  S2000M/PProg retransmission, zone/partition selection, and S2000-PP projection
+  are configured to deliver the corresponding event.
+- **HARDWARE VALIDATION STATUS:** later sections preserve both negative and
+  positive captures, including the hardware-verified S2000R-DIP 149/152 tamper
+  lifecycle. Missing captures for another documented model are not treated as
+  proof that the model lacks the documented capability.
 
 ## 2. Audit Baseline
 
@@ -550,6 +551,11 @@ diagnostic.
 
 These must remain ordinary generated `type: entities` cards. No runtime dashboard
 wrapper is justified.
+
+> **Historical audit status:** Sections 17–23 record the pre-refactor gap
+> analysis and implementation recommendations at the original audit baseline.
+> They are retained for provenance; the executive summary and later
+> model-specific implementation sections describe the current architecture.
 
 ## 17. Test Coverage Audit
 

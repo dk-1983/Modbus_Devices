@@ -32,4 +32,3 @@ secrets.yaml
 # coverage
 .coverage
 htmlcov/
->>>>>>> c315afc (Complete change of program algorithms for work through the coordinator to reduce the number of requests on the Modbus bus.)

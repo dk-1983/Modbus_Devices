@@ -47,6 +47,8 @@ Support is model-specific; a listed manufacturer does not imply support for ever
 | С2000-БКИ | S2000-PP / Orion | Read-only device diagnostic state |
 | МИП-24 исп.20 | S2000-PP / Orion | Power states, electrical measurements, battery charge, and tamper |
 
+M3000 device time is read-only in Home Assistant. If its RTC is invalid or differs materially from Home Assistant time, the integration may correct the device RTC automatically through the validated Modbus write path.
+
 ### Bolid — wired KDL/DPLS equipment through S2000-PP
 
 | Model | Connection | Main capabilities |

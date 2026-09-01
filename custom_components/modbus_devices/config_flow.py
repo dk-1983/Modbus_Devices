@@ -206,11 +206,14 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                         "select": {
                             "mode": "dropdown",
                             "options": [
-                                {"value": name, "label": await self.hass.async_add_executor_job(
-                                    get_equipment_display_name,
-                                    self._selected_manufacturer,
-                                    name,
-                                )}
+                                {
+                                    "value": name,
+                                    "label": await self.hass.async_add_executor_job(
+                                        get_equipment_display_name,
+                                        self._selected_manufacturer,
+                                        name,
+                                    ),
+                                }
                                 for name in sorted(devices)
                             ],
                         }
@@ -327,15 +330,20 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(Config.CONF_DEVICE_CLASS): selector(
-                        {"select": {"mode": "dropdown", "options": [
-                            {
-                                "value": name,
-                                "label": await self.hass.async_add_executor_job(
-                                    get_equipment_display_name, "Bolid", name
-                                ),
+                        {
+                            "select": {
+                                "mode": "dropdown",
+                                "options": [
+                                    {
+                                        "value": name,
+                                        "label": await self.hass.async_add_executor_job(
+                                            get_equipment_display_name, "Bolid", name
+                                        ),
+                                    }
+                                    for name in sorted(devices)
+                                ],
                             }
-                            for name in sorted(devices)
-                        ]}}
+                        }
                     )
                 }
             ),
@@ -468,8 +476,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_HOST, default="10.0.2.13"): cv.string,
-                vol.Required(CONF_PORT, default=510): int,
+                vol.Required(CONF_HOST, default="192.0.2.1"): cv.string,
+                vol.Required(CONF_PORT, default=502): int,
                 vol.Required(CONF_DEVICE_ID, default=1): int,
                 vol.Optional(CONF_NAME, default="Modbus Device"): cv.string,
             }
@@ -540,7 +548,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_HOST, default="10.0.2.10"): cv.string,
+                vol.Required(CONF_HOST, default="192.0.2.1"): cv.string,
                 vol.Required(Config.CONF_REMOTE_PORT, default=40000): vol.All(
                     int, vol.Range(min=1, max=65535)
                 ),
@@ -692,8 +700,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             return f"{mode}:{self._data[CONF_HOST]}:{self._data[CONF_PORT]}"
         if mode == Config.MODBUS_RTU_OVER_UDP:
             return (
-                f"{mode}:{self._data[CONF_HOST]}:"
-                f"{self._data[Config.CONF_REMOTE_PORT]}"
+                f"{mode}:{self._data[CONF_HOST]}:{self._data[Config.CONF_REMOTE_PORT]}"
             )
 
         return (
@@ -815,7 +822,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                     if address_count is None:
                         address_count = self._gateway_device_metadata[
                             "variant_dpls_address_counts"
-                        ].get(variant, self._gateway_device_metadata["dpls_address_count"])
+                        ].get(
+                            variant, self._gateway_device_metadata["dpls_address_count"]
+                        )
                     self._dpls_identity = DPLSSubIdentity(
                         base_address=user_input[Config.CONF_DPLS_BASE_ADDRESS],
                         address_count=address_count,
@@ -836,29 +845,47 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 else vol.Required(Config.CONF_DEVICE_VARIANT)
             )
             schema_fields[variant_key] = selector(
-                    {"select": {"mode": "dropdown", "options": [
-                        {"value": value, "label": label}
-                        for value, label in self._gateway_device_metadata["variants"].items()
-                    ]}}
-                )
+                {
+                    "select": {
+                        "mode": "dropdown",
+                        "options": [
+                            {"value": value, "label": label}
+                            for value, label in self._gateway_device_metadata[
+                                "variants"
+                            ].items()
+                        ],
+                    }
+                }
+            )
         if self._gateway_device_metadata["topologies"]:
             schema_fields[vol.Required(Config.CONF_DEVICE_TOPOLOGY)] = selector(
-                {"select": {"mode": "dropdown", "options": [
-                    {"value": value, "label": label}
-                    for value, label in self._gateway_device_metadata["topologies"].items()
-                ]}}
+                {
+                    "select": {
+                        "mode": "dropdown",
+                        "options": [
+                            {"value": value, "label": label}
+                            for value, label in self._gateway_device_metadata[
+                                "topologies"
+                            ].items()
+                        ],
+                    }
+                }
             )
-        schema_fields.update({
+        schema_fields.update(
+            {
                 vol.Required(Config.CONF_ORION_ADDRESS): vol.All(
                     int, vol.Range(min=1, max=127)
                 ),
                 vol.Required(Config.CONF_DPLS_BASE_ADDRESS): vol.All(
                     int, vol.Range(min=1, max=127)
                 ),
-            })
+            }
+        )
         schema = vol.Schema(schema_fields)
         return self.async_show_form(
-            step_id="gateway_device", data_schema=schema, errors=errors,
+            step_id="gateway_device",
+            data_schema=schema,
+            errors=errors,
             description_placeholders={
                 "unsupported_variant": "С2000-СП4/220 исп.02 is not supported"
             },
@@ -1026,26 +1053,16 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             self._manual_mapping_error = None
         if user_input is not None:
             try:
-                object_kind = ObjectKind(
-                    user_input[Config.CONF_OBJECT_KIND]
-                )
+                object_kind = ObjectKind(user_input[Config.CONF_OBJECT_KIND])
                 if object_kind is ObjectKind.RELAY:
                     resolved_object = manual_relay_mapping(
-                        local_object_number=user_input[
-                            Config.CONF_LOCAL_OBJECT_NUMBER
-                        ],
-                        table_number=user_input[
-                            Config.CONF_GATEWAY_OBJECT_NUMBER
-                        ],
+                        local_object_number=user_input[Config.CONF_LOCAL_OBJECT_NUMBER],
+                        table_number=user_input[Config.CONF_GATEWAY_OBJECT_NUMBER],
                     )
                 elif object_kind is ObjectKind.ZONE:
                     resolved_object = manual_zone_mapping(
-                        local_object_number=user_input[
-                            Config.CONF_LOCAL_OBJECT_NUMBER
-                        ],
-                        table_number=user_input[
-                            Config.CONF_GATEWAY_OBJECT_NUMBER
-                        ],
+                        local_object_number=user_input[Config.CONF_LOCAL_OBJECT_NUMBER],
+                        table_number=user_input[Config.CONF_GATEWAY_OBJECT_NUMBER],
                         zone_type=user_input[Config.CONF_ZONE_TYPE],
                         partition_number=user_input.get(
                             Config.CONF_PARTITION_NUMBER,
@@ -1055,9 +1072,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                     )
                 else:
                     raise ValueError("Unsupported manual S2000-PP object kind")
-                self._manual_objects.append(
-                    resolved_object
-                )
+                self._manual_objects.append(resolved_object)
             except (KeyError, ValueError):
                 errors["base"] = "invalid_mapping"
             else:
@@ -1140,8 +1155,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 return await self._async_finish_manual_mapping()
 
         options = [
-            {"value": spec.key, "label": spec.name}
-            for spec in available.values()
+            {"value": spec.key, "label": spec.name} for spec in available.values()
         ]
         if not options:
             return await self._async_finish_manual_mapping()
@@ -1191,7 +1205,11 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     async def async_step_automatic_device(self, user_input=None):
         """Resolve one downstream device from С2000-ПП configuration tables."""
         errors = {}
-        if self._dpls_identity is not None and self._orion_address is not None and user_input is None:
+        if (
+            self._dpls_identity is not None
+            and self._orion_address is not None
+            and user_input is None
+        ):
             user_input = {Config.CONF_ORION_ADDRESS: self._orion_address}
         if user_input is not None:
             self._orion_address = user_input[Config.CONF_ORION_ADDRESS]
