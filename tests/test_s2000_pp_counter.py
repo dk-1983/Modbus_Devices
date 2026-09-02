@@ -46,8 +46,8 @@ class Client:
 
     async def read_holding_registers(self, **kwargs):
         self.reads.append(kwargs)
-        if hasattr(self.result, "_error") and not self.result._error:
-            self.result.function_code = 3
+        if hasattr(self.result, "function_code") and self.result.function_code is None:
+            self.result.function_code = 0x83 if self.result._error else 3
         return self.result
 
 
@@ -105,7 +105,7 @@ async def test_selector_exception_3_is_distinct_from_result_read_exception_3():
     client = Client()
 
     async def selector_error(**kwargs):
-        return Response(error=True, code=3)
+        return Response(error=True, code=3, function_code=0x86)
 
     client.write_register = selector_error
     result = await S2000PPCounterValueReader(
@@ -261,8 +261,8 @@ async def test_two_svk_counters_cannot_both_own_pending_selector_state():
 
 
 @pytest.mark.asyncio
-async def test_grouped_state_request_can_interleave_counter_selector_and_result():
-    """Characterize request locking without claiming vendor transaction semantics."""
+async def test_grouped_state_request_cannot_interleave_counter_selector_and_result():
+    """Keep one selector/result attempt atomic against grouped polling."""
 
     class InterleavingClient:
         def __init__(self):
@@ -311,7 +311,106 @@ async def test_grouped_state_request_can_interleave_counter_selector_and_result(
     assert grouped[1].primary_state == 80
     assert physical.trace == [
         ("counter_selector", 10),
-        ("grouped_primary", 40000),
         ("counter_result", 3),
+        ("grouped_primary", 40000),
         ("grouped_expanded", 4096),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("code", "status"), [
+    (15, NumericResultStatus.PENDING),
+    (6, NumericResultStatus.RETRYABLE),
+])
+async def test_counter_selector_retryable_exceptions_are_correlated(code, status):
+    client = Client()
+
+    async def selector_error(**kwargs):
+        return Response(error=True, code=code, function_code=0x86)
+
+    client.write_register = selector_error
+    result = await S2000PPCounterValueReader(
+        client, 1, f"counter-selector-{code}"
+    ).async_read(1)
+    assert result.status is status
+    assert result.result_register_read is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["selector", "result"])
+@pytest.mark.parametrize("code", [6, 15])
+async def test_counter_wrong_exception_function_is_protocol_error(phase, code):
+    response = Response(
+        error=True, code=code,
+        function_code=0x83 if phase == "selector" else 0x86,
+    )
+    client = Client(response)
+    if phase == "selector":
+        async def selector_error(**kwargs):
+            return response
+        client.write_register = selector_error
+    result = await S2000PPCounterValueReader(
+        client, 1, f"counter-wrong-{phase}-{code}"
+    ).async_read(1)
+    assert result.status is NumericResultStatus.PROTOCOL_ERROR
+
+
+@pytest.mark.asyncio
+async def test_counter_result_timeout_keeps_owner_for_result_only_retry():
+    client = Client()
+    original_read = client.read_holding_registers
+    calls = 0
+
+    async def timeout_once(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("result timeout")
+        return await original_read(**kwargs)
+
+    client.read_holding_registers = timeout_once
+    reader = S2000PPCounterValueReader(client, 1, "counter-timeout-owner")
+    with pytest.raises(TimeoutError, match="result timeout"):
+        await reader.async_read(9)
+    result = await reader.async_read(9)
+    assert result.status is NumericResultStatus.READY
+    assert [call["value"] for call in client.writes] == [9]
+
+
+@pytest.mark.asyncio
+async def test_numeric_and_counter_physical_attempts_do_not_interleave():
+    class PhysicalClient:
+        def __init__(self):
+            self.trace = []
+
+        async def write_register(self, **kwargs):
+            kind = "counter" if kwargs["address"] == 46180 else "numeric"
+            self.trace.append((kind, "selector"))
+            await asyncio.sleep(0)
+            return Response(
+                address=kwargs["address"], value=kwargs["value"], function_code=6
+            )
+
+        async def read_holding_registers(self, **kwargs):
+            kind = "counter" if kwargs["address"] == 46332 else "numeric"
+            self.trace.append((kind, "result"))
+            await asyncio.sleep(0)
+            return Response(
+                registers=[0, 0, 1] if kind == "counter" else [0x0100],
+                function_code=3,
+            )
+
+    physical = PhysicalClient()
+    client = SerializedModbusClient(physical)
+    await asyncio.gather(
+        S2000PPCounterValueReader(client, 1, "mixed-ready").async_read(10),
+        S2000PPNumericValueReader(client, 1, "mixed-ready").async_read(
+            11, NumericParameterKind.TEMPERATURE
+        ),
+    )
+    assert physical.trace in (
+        [("counter", "selector"), ("counter", "result"),
+         ("numeric", "selector"), ("numeric", "result")],
+        [("numeric", "selector"), ("numeric", "result"),
+         ("counter", "selector"), ("counter", "result")],
+    )

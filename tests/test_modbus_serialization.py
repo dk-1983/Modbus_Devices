@@ -156,8 +156,45 @@ async def test_selector_lock_precedes_request_lock_and_sequence_cannot_interleav
     )
     await asyncio.wait_for(asyncio.gather(selector, ordinary), timeout=1)
 
-    assert raw.trace.index("selector") < raw.trace.index("result")
-    assert sorted(raw.trace) == ["ordinary", "result", "selector"]
+    assert raw.trace in (
+        ["selector", "result", "ordinary"],
+        ["ordinary", "selector", "result"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_fc05_cannot_enter_between_selector_and_result():
+    class Client:
+        def __init__(self):
+            self.trace = []
+
+        async def write_register(self, **kwargs):
+            self.trace.append("selector")
+            await asyncio.sleep(0)
+            return SelectorResponse()
+
+        async def read_holding_registers(self, **kwargs):
+            self.trace.append("result")
+            await asyncio.sleep(0)
+            return NumericResponse()
+
+        async def write_coil(self, **kwargs):
+            self.trace.append("fc05")
+            await asyncio.sleep(0)
+            return object()
+
+    raw = Client()
+    client = SerializedModbusClient(raw)
+    await asyncio.gather(
+        S2000PPNumericValueReader(client, 1, "fc05-exclusion").async_read(
+            1, NumericParameterKind.TEMPERATURE
+        ),
+        client.write_coil(address=10000, value=True, device_id=1),
+    )
+    assert raw.trace in (
+        ["selector", "result", "fc05"],
+        ["fc05", "selector", "result"],
+    )
 
 
 @pytest.mark.asyncio

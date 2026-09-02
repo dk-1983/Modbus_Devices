@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from pymodbus.exceptions import ModbusException
@@ -26,6 +28,7 @@ from custom_components.modbus_devices.s2000_pp import (
     manual_relay_mapping,
     manual_zone_mapping,
 )
+from custom_components.modbus_devices.switch import ModBusSwitchEntity
 
 
 def gateway(name: str = "gateway-a") -> GatewayContext:
@@ -51,13 +54,16 @@ def mapping(*objects, orion_address: int = 10) -> ResolvedDeviceMapping:
 
 class Response:
     def __init__(self, *, bits=None, registers=None, error: bool = False,
-                 function_code=None, address=None, value=None) -> None:
+                 function_code=None, address=None, value=None,
+                 exception_code=None, dev_id=None) -> None:
         self.bits = bits
         self.registers = registers
         self._error = error
         self.function_code = function_code
         self.address = address
         self.value = value
+        self.exception_code = exception_code
+        self.dev_id = dev_id
 
     def isError(self) -> bool:
         return self._error
@@ -169,6 +175,114 @@ def test_write_error_is_not_optimistically_applied() -> None:
     with pytest.raises(ModbusException, match="Modbus error response"):
         asyncio.run(device.set_output(1, True))
     assert device.attr_out1["state"] is None
+
+
+def test_pending_write_retries_before_applying_state(monkeypatch) -> None:
+    client = Client()
+    attempts = 0
+
+    async def write_coil(address, value, device_id):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return Response(
+                error=True,
+                function_code=0x85,
+                exception_code=15,
+                dev_id=device_id,
+            )
+        return Response(
+            function_code=5,
+            address=address,
+            value=value,
+            dev_id=device_id,
+        )
+
+    client.write_coil = write_coil
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.s2000_pp.S2000_PP_FC05_RETRY_DELAY", 0
+    )
+    device = C2000KPB(client, 7)
+    device.apply_gateway_mapping(mapping(manual_relay_mapping(2, 41)))
+
+    result = asyncio.run(device.set_output(2, False))
+
+    assert attempts == 2
+    assert result["state"] is False
+    assert result["address"] == 10040
+
+
+@pytest.mark.asyncio
+async def test_pending_exhaustion_never_applies_ha_optimistic_state(monkeypatch):
+    client = Client()
+
+    async def write_coil(address, value, device_id):
+        return Response(
+            error=True,
+            function_code=0x85,
+            exception_code=15,
+            dev_id=device_id,
+        )
+
+    client.write_coil = write_coil
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.s2000_pp.S2000_PP_FC05_RETRY_DELAY", 0
+    )
+    device = C2000KPB(client, 7)
+    device.apply_gateway_mapping(mapping(manual_relay_mapping(2, 41)))
+    coordinator = Mock(last_update_success=True)
+    coordinator.data = {"outputs": {2: {"state": True}}}
+    coordinator.async_apply_optimistic_write = Mock()
+    entity = ModBusSwitchEntity(
+        coordinator,
+        device,
+        SimpleNamespace(entry_id="entry-kpb"),
+        device.attr_out2,
+    )
+
+    with pytest.raises(ModbusException):
+        await entity.async_turn_off()
+
+    coordinator.async_apply_optimistic_write.assert_not_called()
+    assert device.attr_out2["state"] is None
+
+
+@pytest.mark.asyncio
+async def test_exhausted_pending_verified_readback_updates_ha_state(monkeypatch):
+    client = Client()
+
+    async def write_coil(address, value, device_id):
+        return Response(
+            error=True,
+            function_code=0x85,
+            exception_code=15,
+            dev_id=device_id,
+        )
+
+    async def read_coils(address, count, device_id):
+        return Response(bits=[False], function_code=1, dev_id=device_id)
+
+    client.write_coil = write_coil
+    client.read_coils = read_coils
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.s2000_pp.S2000_PP_FC05_RETRY_DELAY", 0
+    )
+    device = C2000KPB(client, 7)
+    device.apply_gateway_mapping(mapping(manual_relay_mapping(2, 41)))
+    coordinator = Mock(last_update_success=True)
+    coordinator.data = {"outputs": {2: {"state": True}}}
+    coordinator.async_apply_optimistic_write = Mock()
+    entity = ModBusSwitchEntity(
+        coordinator,
+        device,
+        SimpleNamespace(entry_id="entry-kpb-verified"),
+        device.attr_out2,
+    )
+
+    await entity.async_turn_off()
+
+    coordinator.async_apply_optimistic_write.assert_called_once()
+    assert device.attr_out2["state"] is False
 
 
 def test_optimistic_write_generation_protects_against_stale_poll() -> None:

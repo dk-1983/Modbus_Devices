@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, replace
 from enum import Enum
+import logging
 from typing import Awaitable, Callable, Iterable
 from weakref import WeakKeyDictionary
 
@@ -17,6 +18,7 @@ from .gateway import (
     ResolvedZoneDetails,
 )
 from .modbus_validation import (
+    validate_fc05_response,
     validate_fc06_response,
     validated_bits,
     validated_registers,
@@ -48,6 +50,14 @@ S2000_PP_COUNTER_RESULT = 46332
 S2000_PP_COUNTER_REGISTER_COUNT = 3
 S2000_PP_COUNTER_ZONE_TYPE = 7
 
+# The manual requires retrying exception 15 but specifies no timing. Keep this
+# deliberately small and local until real S2000-PP hardware validation provides
+# a better bound. The count includes the initial FC05 request.
+S2000_PP_FC05_MAX_ATTEMPTS = 3
+S2000_PP_FC05_RETRY_DELAY = 0.1
+
+_LOGGER = logging.getLogger(__name__)
+
 
 class NumericParameterKind(str, Enum):
     """Physical numeric parameters transported by the generic gateway API."""
@@ -78,6 +88,31 @@ class NumericResultStatus(str, Enum):
     PENDING = "pending"
     RETRYABLE = "retryable"
     PROTOCOL_ERROR = "protocol_error"
+
+
+class S2000PPRelayWriteConfirmation(str, Enum):
+    """Protocol evidence confirming an S2000-PP relay write."""
+
+    FC05_ECHO = "fc05_echo"
+    FC01_READBACK = "fc01_readback"
+
+
+@dataclass(frozen=True, slots=True)
+class S2000PPRelayWriteResult:
+    """Confirmed result of one logical S2000-PP relay write."""
+
+    confirmation: S2000PPRelayWriteConfirmation
+    response: object
+    attempts: int
+    verified_state: bool
+
+
+class S2000PPRelayVerificationError(ModbusException):
+    """An exhausted relay write whose readback did not match the request."""
+
+    def __init__(self, message: str, *, verified_state: bool) -> None:
+        super().__init__(message)
+        self.verified_state = verified_state
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,11 +158,148 @@ _SELECTOR_CLIENT_SESSIONS: WeakKeyDictionary[
     object, dict[str, _SelectorGatewaySession]
 ] = WeakKeyDictionary()
 
+_S2000_PP_CLIENT_LOCKS: WeakKeyDictionary[object, asyncio.Lock] = (
+    WeakKeyDictionary()
+)
+
 
 def _gateway_selector_session(client, gateway_key: str) -> _SelectorGatewaySession:
     """Return a selector session scoped to one client and gateway lifecycle."""
     sessions = _SELECTOR_CLIENT_SESSIONS.setdefault(client, {})
     return sessions.setdefault(gateway_key, _SelectorGatewaySession(asyncio.Lock()))
+
+
+async def _async_execute_s2000_pp_serialized(client, operation):
+    """Run one S2000-PP protocol attempt inside the physical-client lock."""
+    serialized_executor = getattr(client, "async_execute_serialized", None)
+    if callable(serialized_executor):
+        return await serialized_executor(operation)
+
+    lock = _S2000_PP_CLIENT_LOCKS.setdefault(client, asyncio.Lock())
+    async with lock:
+        return await operation(client)
+
+
+def _is_valid_s2000_pp_fc05_pending(response, device_id: int) -> bool:
+    """Return whether response is a well-formed FC05 exception 15."""
+    is_error = getattr(response, "isError", None)
+    if not callable(is_error) or not is_error():
+        return False
+    if getattr(response, "function_code", None) != 0x85:
+        return False
+    if getattr(response, "exception_code", None) != 15:
+        return False
+    for attribute in ("dev_id", "device_id", "slave_id", "unit_id"):
+        actual = getattr(response, attribute, None)
+        if actual is not None and actual != device_id:
+            return False
+    return True
+
+
+def _validate_s2000_pp_relay_readback(
+    response, *, device_id: int, operation: str
+) -> bool:
+    """Strictly validate the single-coil FC01 exhaustion readback."""
+    bits = validated_bits(
+        response,
+        1,
+        operation,
+        expected_function=1,
+    )
+    for attribute in ("dev_id", "device_id", "slave_id", "unit_id"):
+        actual = getattr(response, attribute, None)
+        if actual is not None and actual != device_id:
+            raise ModbusException(
+                f"Wrong Modbus device id for {operation}: "
+                f"expected {device_id}, got {actual}"
+            )
+    raw_bits = getattr(response, "bits", None)
+    if type(raw_bits[0]) is not bool:
+        raise ModbusException(f"Invalid FC01 bit payload for {operation}")
+    return bits[0]
+
+
+async def async_write_s2000_pp_relay(
+    client,
+    *,
+    address: int,
+    value: bool,
+    device_id: int,
+    operation: str,
+):
+    """Write one S2000-PP relay, retrying only valid exception 15 replies."""
+
+    async def execute(physical_client):
+        for attempt in range(1, S2000_PP_FC05_MAX_ATTEMPTS + 1):
+            response = await physical_client.write_coil(
+                address=address,
+                value=value,
+                device_id=device_id,
+            )
+            if not _is_valid_s2000_pp_fc05_pending(response, device_id):
+                validate_fc05_response(
+                    response,
+                    address=address,
+                    value=value,
+                    device_id=device_id,
+                    operation=operation,
+                )
+                return S2000PPRelayWriteResult(
+                    S2000PPRelayWriteConfirmation.FC05_ECHO,
+                    response,
+                    attempt,
+                    value,
+                )
+            if attempt < S2000_PP_FC05_MAX_ATTEMPTS:
+                await asyncio.sleep(S2000_PP_FC05_RETRY_DELAY)
+
+        verification_operation = f"verify {operation} after FC05 exception 15"
+        try:
+            verification = await physical_client.read_coils(
+                address=address,
+                count=1,
+                device_id=device_id,
+            )
+            verified_state = _validate_s2000_pp_relay_readback(
+                verification,
+                device_id=device_id,
+                operation=verification_operation,
+            )
+            if verified_state != value:
+                raise S2000PPRelayVerificationError(
+                    f"S2000-PP relay readback mismatch for {operation}: "
+                    f"requested {value}, got {verified_state}",
+                    verified_state=verified_state,
+                )
+        except Exception as exc:
+            _LOGGER.warning(
+                "S2000-PP FC05 exhaustion verification device_id=%s address=%s "
+                "requested=%s attempts=%s result=failure reason=%s",
+                device_id,
+                address,
+                value,
+                S2000_PP_FC05_MAX_ATTEMPTS,
+                exc,
+            )
+            raise
+
+        _LOGGER.warning(
+            "S2000-PP FC05 exhaustion verification device_id=%s address=%s "
+            "requested=%s attempts=%s result=success verified_state=%s",
+            device_id,
+            address,
+            value,
+            S2000_PP_FC05_MAX_ATTEMPTS,
+            verified_state,
+        )
+        return S2000PPRelayWriteResult(
+            S2000PPRelayWriteConfirmation.FC01_READBACK,
+            verification,
+            S2000_PP_FC05_MAX_ATTEMPTS,
+            verified_state,
+        )
+
+    return await _async_execute_s2000_pp_serialized(client, execute)
 
 
 def decode_s2000_pp_q8_8(raw: int) -> float:
@@ -187,14 +359,27 @@ class S2000PPNumericValueReader:
                 ), parameter_kind, pending)
             if pending is None:
                 self._session.generation += 1
-                selected = await self._select(zone_table_number, parameter_kind)
-                if selected is not None:
-                    return self._with_session_context(
-                        selected, parameter_kind, request
+                async def execute(physical_client):
+                    selected = await self._select(
+                        physical_client, zone_table_number, parameter_kind
                     )
-                self._session.pending_request = request
+                    if selected is not None:
+                        return selected
+                    self._session.pending_request = request
+                    return await self._read_result(
+                        physical_client, zone_table_number, parameter_kind
+                    )
 
-            result = await self._read_result(zone_table_number, parameter_kind)
+                result = await _async_execute_s2000_pp_serialized(
+                    self._client, execute
+                )
+            else:
+                result = await _async_execute_s2000_pp_serialized(
+                    self._client,
+                    lambda physical_client: self._read_result(
+                        physical_client, zone_table_number, parameter_kind
+                    ),
+                )
             result = self._with_session_context(result, parameter_kind, request)
             if result.status not in {
                 NumericResultStatus.PENDING,
@@ -222,18 +407,22 @@ class S2000PPNumericValueReader:
             session_generation=self._session.generation,
         )
 
-    async def _select(self, zone: int, kind: NumericParameterKind):
+    async def _select(self, client, zone: int, kind: NumericParameterKind):
         selector = (
             S2000_PP_POWER_NUMERIC_SELECTOR
             if kind in _POWER_NUMERIC_KINDS
             else S2000_PP_NUMERIC_SELECTOR
         )
-        response = await self._client.write_register(
+        response = await client.write_register(
             address=selector,
             value=zone,
             device_id=self._modbus_unit_id,
         )
-        error = _numeric_error_result(response, kind, zone, "select numeric zone")
+        error = _numeric_error_result(
+            response, kind, zone, "select numeric zone",
+            expected_exception_function=0x86,
+            device_id=self._modbus_unit_id,
+        )
         if error is not None:
             return error
         try:
@@ -256,14 +445,18 @@ class S2000PPNumericValueReader:
         return None
 
     async def _read_result(
-        self, zone: int, kind: NumericParameterKind
+        self, client, zone: int, kind: NumericParameterKind
     ) -> S2000PPNumericResult:
-        response = await self._client.read_holding_registers(
+        response = await client.read_holding_registers(
             address=S2000_PP_NUMERIC_RESULT,
             count=1,
             device_id=self._modbus_unit_id,
         )
-        error = _numeric_error_result(response, kind, zone, "read numeric result")
+        error = _numeric_error_result(
+            response, kind, zone, "read numeric result",
+            expected_exception_function=0x83,
+            device_id=self._modbus_unit_id,
+        )
         if error is not None:
             return error
         try:
@@ -332,12 +525,23 @@ class S2000PPCounterValueReader:
                     ),
                 )
             if pending is None:
-                selected = await self._select(zone_table_number)
-                if selected is not None:
-                    return selected
-                self._session.pending_request = request
+                async def execute(physical_client):
+                    selected = await self._select(physical_client, zone_table_number)
+                    if selected is not None:
+                        return selected
+                    self._session.pending_request = request
+                    return await self._read_result(physical_client, zone_table_number)
 
-            result = await self._read_result(zone_table_number)
+                result = await _async_execute_s2000_pp_serialized(
+                    self._client, execute
+                )
+            else:
+                result = await _async_execute_s2000_pp_serialized(
+                    self._client,
+                    lambda physical_client: self._read_result(
+                        physical_client, zone_table_number
+                    ),
+                )
             if result.status not in {
                 NumericResultStatus.PENDING,
                 NumericResultStatus.RETRYABLE,
@@ -345,13 +549,17 @@ class S2000PPCounterValueReader:
                 self._session.pending_request = None
             return result
 
-    async def _select(self, zone: int) -> S2000PPCounterResult | None:
-        response = await self._client.write_register(
+    async def _select(self, client, zone: int) -> S2000PPCounterResult | None:
+        response = await client.write_register(
             address=S2000_PP_COUNTER_SELECTOR,
             value=zone,
             device_id=self._modbus_unit_id,
         )
-        error = _counter_error_result(response, zone, "select counter zone")
+        error = _counter_error_result(
+            response, zone, "select counter zone",
+            expected_exception_function=0x86,
+            device_id=self._modbus_unit_id,
+        )
         if error is not None:
             return error
         try:
@@ -370,8 +578,8 @@ class S2000PPCounterValueReader:
             )
         return None
 
-    async def _read_result(self, zone: int) -> S2000PPCounterResult:
-        response = await self._client.read_holding_registers(
+    async def _read_result(self, client, zone: int) -> S2000PPCounterResult:
+        response = await client.read_holding_registers(
             address=S2000_PP_COUNTER_RESULT,
             count=S2000_PP_COUNTER_REGISTER_COUNT,
             device_id=self._modbus_unit_id,
@@ -381,6 +589,8 @@ class S2000PPCounterValueReader:
             zone,
             "read counter result",
             result_register_read=True,
+            expected_exception_function=0x83,
+            device_id=self._modbus_unit_id,
         )
         if error is not None:
             return error
@@ -406,7 +616,8 @@ class S2000PPCounterValueReader:
 
 
 def _counter_error_result(
-    response, zone, operation, *, result_register_read: bool = False
+    response, zone, operation, *, result_register_read: bool = False,
+    expected_exception_function: int, device_id: int,
 ):
     if response is None:
         return S2000PPCounterResult(
@@ -424,11 +635,14 @@ def _counter_error_result(
     if not is_error():
         return None
     code = getattr(response, "exception_code", None)
+    correlated = _is_correlated_exception_response(
+        response, expected_exception_function, device_id
+    )
     status = (
         NumericResultStatus.PENDING
-        if code == 15
+        if correlated and code == 15
         else NumericResultStatus.RETRYABLE
-        if code == 6
+        if correlated and code == 6
         else NumericResultStatus.PROTOCOL_ERROR
     )
     return S2000PPCounterResult(
@@ -440,7 +654,10 @@ def _counter_error_result(
     )
 
 
-def _numeric_error_result(response, kind, zone, operation):
+def _numeric_error_result(
+    response, kind, zone, operation, *, expected_exception_function: int,
+    device_id: int,
+):
     if response is None:
         return S2000PPNumericResult(
             NumericResultStatus.PROTOCOL_ERROR, kind, zone,
@@ -457,11 +674,14 @@ def _numeric_error_result(response, kind, zone, operation):
     if not is_error():
         return None
     code = getattr(response, "exception_code", None)
+    correlated = _is_correlated_exception_response(
+        response, expected_exception_function, device_id
+    )
     status = (
         NumericResultStatus.PENDING
-        if code == 15
+        if correlated and code == 15
         else NumericResultStatus.RETRYABLE
-        if code == 6
+        if correlated and code == 6
         else NumericResultStatus.PROTOCOL_ERROR
     )
     return S2000PPNumericResult(
@@ -470,6 +690,19 @@ def _numeric_error_result(response, kind, zone, operation):
         operation=operation,
         response_function_code=getattr(response, "function_code", None),
     )
+
+
+def _is_correlated_exception_response(
+    response, expected_function: int, device_id: int
+) -> bool:
+    """Validate that an exception belongs to the current request phase."""
+    if getattr(response, "function_code", None) != expected_function:
+        return False
+    for attribute in ("dev_id", "device_id", "slave_id", "unit_id"):
+        actual = getattr(response, attribute, None)
+        if actual is not None and actual != device_id:
+            return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)

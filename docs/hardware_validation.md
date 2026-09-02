@@ -537,3 +537,28 @@ with the same coordinator-level leakage for a typed FC03 exception 4.
 The equipment-layer containment defect is proven. The device-side reason that
 S2000-PP generated exception 3 or 4 remains unknown; these observations do not
 establish a transport root cause.
+
+## S2000-PP 3.01 release-candidate validation
+
+The 1.0.1 release candidate was validated on physical equipment through an
+S2000-PP with firmware 3.01. The previously problematic C2000-KPB output passed
+30 of 30 controlled transitions. Earlier hardware evidence showed that three
+strictly correlated FC05 exception-15 responses can still leave the relay in
+the requested state. The final policy therefore performs one strict FC01
+verification after exhausting the three bounded FC05 attempts.
+
+Four of four physical C2000-SP4 devices passed normal ON/OFF operation, with
+physical, Home Assistant, and readback states remaining consistent. Numeric and
+state polling passed for two C2000-VT devices, one C2000-VTI, five C2000R-VTI,
+and two MIP24 isp.20 devices.
+
+The final numeric observation ran for 15 minutes 41 seconds and covered 26
+numeric entities and 61 total target entities, including state and tamper
+entities. No target entity became unknown or unavailable. Round-robin polling,
+selector-session ownership, physical selector/result serialization, and
+last-known-good value preservation all passed.
+
+Two transient result-phase exception-4 responses occurred during the final
+observation. They had no availability impact, preserved last-known-good values,
+and normal polling continued afterward. They remain a non-blocking hardware
+observation for this release candidate.

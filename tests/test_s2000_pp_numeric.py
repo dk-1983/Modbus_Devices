@@ -41,8 +41,8 @@ class Client:
         )
 
     async def read_holding_registers(self, **kwargs):
-        if self.result is not None and not self.result._error:
-            self.result.function_code = 3
+        if self.result is not None and self.result.function_code is None:
+            self.result.function_code = 0x83 if self.result._error else 3
         return self.result
 
 
@@ -92,6 +92,84 @@ async def test_retryable_modbus_exceptions(code, status):
     assert result.status is status
     assert result.exception_code == code
     assert result.value is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("code", "status"), [
+    (15, NumericResultStatus.PENDING),
+    (6, NumericResultStatus.RETRYABLE),
+])
+async def test_selector_retryable_exceptions_are_phase_correlated(code, status):
+    client = Client(Response(registers=[0]))
+
+    async def selector_error(**kwargs):
+        return Response(error=True, code=code, function_code=0x86)
+
+    client.write_register = selector_error
+    result = await S2000PPNumericValueReader(
+        client, 1, f"selector-exception-{code}"
+    ).async_read(1, NumericParameterKind.TEMPERATURE)
+    assert result.status is status
+    assert result.exception_code == code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["selector", "result"])
+@pytest.mark.parametrize("code", [6, 15])
+async def test_wrong_exception_function_is_protocol_error(phase, code):
+    response = Response(
+        error=True,
+        code=code,
+        function_code=0x83 if phase == "selector" else 0x86,
+    )
+    client = Client(response)
+    if phase == "selector":
+        client.write_register = lambda **kwargs: _async_response(response)
+    result = await S2000PPNumericValueReader(
+        client, 1, f"wrong-{phase}-function-{code}"
+    ).async_read(1, NumericParameterKind.TEMPERATURE)
+    assert result.status is NumericResultStatus.PROTOCOL_ERROR
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["selector", "result"])
+async def test_mismatched_exception_device_is_protocol_error(phase):
+    function = 0x86 if phase == "selector" else 0x83
+    response = Response(error=True, code=15, function_code=function)
+    response.dev_id = 2
+    client = Client(response)
+    if phase == "selector":
+        client.write_register = lambda **kwargs: _async_response(response)
+    result = await S2000PPNumericValueReader(
+        client, 1, f"wrong-{phase}-device"
+    ).async_read(1, NumericParameterKind.TEMPERATURE)
+    assert result.status is NumericResultStatus.PROTOCOL_ERROR
+
+
+async def _async_response(response):
+    return response
+
+
+@pytest.mark.asyncio
+async def test_selector_timeout_does_not_create_pending_owner():
+    client = Client(Response(registers=[0x0100]))
+    calls = 0
+    original_write = client.write_register
+
+    async def timeout_once(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("selector timeout")
+        return await original_write(**kwargs)
+
+    client.write_register = timeout_once
+    reader = S2000PPNumericValueReader(client, 1, "numeric-selector-timeout")
+    with pytest.raises(TimeoutError, match="selector timeout"):
+        await reader.async_read(7, NumericParameterKind.TEMPERATURE)
+    result = await reader.async_read(7, NumericParameterKind.TEMPERATURE)
+    assert result.status is NumericResultStatus.READY
+    assert calls == 2
 
 
 @pytest.mark.asyncio

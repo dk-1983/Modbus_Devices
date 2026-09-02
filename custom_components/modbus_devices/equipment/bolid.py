@@ -52,6 +52,7 @@ from ..s2000_pp import (
     S2000PPNumericValueReader,
     S2000PPRuntimeReader,
     S2000PPZoneState,
+    async_write_s2000_pp_relay,
     resolve_zone_row,
 )
 from .equipment import canonical_equipment_class_name
@@ -1188,15 +1189,10 @@ class C2000KPB:
         # FC05
         #
 
-        response = await self.attr_client.write_coil(
+        await async_write_s2000_pp_relay(
+            self.attr_client,
             address=attr["address"],
             value=value,
-            device_id=self.attr_device_id,
-        )
-        validate_fc05_response(
-            response,
-            address=attr["address"],
-            value=bool(value),
             device_id=self.attr_device_id,
             operation=f"set C2000-KPB output {output}",
         )
@@ -4007,22 +4003,13 @@ class BolidDPLSOutputBase:
         if output not in self._relay_mappings:
             raise ValueError("Output is not configured")
         address = self._relay_mappings[output].modbus_address
-        response = await self.attr_client.write_coil(
-            address=address, value=value, device_id=self.attr_device_id
-        )
-        validate_fc05_response(
-            response,
+        await async_write_s2000_pp_relay(
+            self.attr_client,
             address=address,
-            value=bool(value),
+            value=value,
             device_id=self.attr_device_id,
             operation=f"set {self.__class__.__name__} output {output}",
         )
-        if getattr(response, "address", None) != address:
-            raise ModbusException("FC05 response does not echo the requested address")
-        echoed = getattr(response, "value", None)
-        accepted_values = ({True, 0xFF00} if value else {False, 0x0000})
-        if echoed not in accepted_values:
-            raise ModbusException("FC05 response does not echo the requested value")
         updated = dict(self._outputs[output])
         updated["state"] = bool(value)
         self._outputs[output] = updated
@@ -5456,15 +5443,10 @@ class C2000SP4:
             raise ValueError("C2000-SP4 actuator control is not configured")
         attr = self.attr_out1
 
-        result = await self.attr_client.write_coil(
+        await async_write_s2000_pp_relay(
+            self.attr_client,
             address=attr["address"],
             value=value,
-            device_id=self.attr_device_id,
-        )
-        validate_fc05_response(
-            result,
-            address=attr["address"],
-            value=bool(value),
             device_id=self.attr_device_id,
             operation=f"set C2000-SP4 output {output}",
         )

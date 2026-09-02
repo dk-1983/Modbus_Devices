@@ -5,7 +5,7 @@ from functools import wraps
 import logging
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from pymodbus import ModbusException
 from pymodbus.client import (
@@ -64,6 +64,14 @@ class SerializedModbusClient:
     def request_lock(self) -> asyncio.Lock:
         """Expose the physical-request boundary for protocol-level tests."""
         return self._request_lock
+
+    async def async_execute_serialized(
+        self,
+        operation: Callable[[Any], Awaitable[Any]],
+    ) -> Any:
+        """Execute one logical operation inside the physical-client lock."""
+        async with self._request_lock:
+            return await operation(self._client)
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._client, name)

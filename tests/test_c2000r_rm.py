@@ -27,13 +27,15 @@ from custom_components.modbus_devices.s2000_pp import (
 
 class Response:
     def __init__(self, *, bits=None, registers=None, error=False, address=None,
-                 value=None, function_code=None):
+                 value=None, function_code=None, exception_code=None, dev_id=None):
         self.bits = bits
         self.registers = registers
         self.address = address
         self.value = value
         self._error = error
         self.function_code = function_code
+        self.exception_code = exception_code
+        self.dev_id = dev_id
 
     def isError(self):
         return self._error
@@ -160,3 +162,27 @@ def test_failed_or_invalid_write_never_patches_output():
     with pytest.raises(ModbusException):
         asyncio.run(device.set_output(1, True))
     assert device.get_output_descriptions()[0]["state"] is None
+
+
+def test_shared_s2000_pp_pending_policy_is_used_by_dpls_outputs(monkeypatch):
+    client = Client()
+    responses = [
+        Response(error=True, function_code=0x85, exception_code=15, dev_id=1),
+        Response(address=10099, value=True, function_code=5, dev_id=1),
+    ]
+
+    async def write_coil(**kwargs):
+        client.writes.append((kwargs["address"], kwargs["value"], kwargs["device_id"]))
+        return responses.pop(0)
+
+    client.write_coil = write_coil
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.s2000_pp.S2000_PP_FC05_RETRY_DELAY", 0
+    )
+    device = C2000RRM(client, 1)
+    device.apply_gateway_mapping(mapping(*relay_objects()))
+
+    result = asyncio.run(device.set_output(1, True))
+
+    assert result["state"] is True
+    assert client.writes == [(10099, True, 1), (10099, True, 1)]

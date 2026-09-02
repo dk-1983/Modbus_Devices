@@ -43,7 +43,7 @@ class RoundRobinClient:
         if address == 46328:
             result = next(self.results)
             if result == "pending":
-                return Response(exception_code=15)
+                return Response(exception_code=15, function_code=0x83)
             if result in {"error3", "error4"}:
                 return Response(
                     exception_code=4 if result == "error4" else 3,

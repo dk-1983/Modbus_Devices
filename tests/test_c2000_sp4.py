@@ -33,13 +33,16 @@ from custom_components.modbus_devices.s2000_pp import (
 
 class Response:
     def __init__(self, *, bits=None, registers=None, error=False,
-                 function_code=None, address=None, value=None):
+                 function_code=None, address=None, value=None,
+                 exception_code=None, dev_id=None):
         self.bits = bits
         self.registers = registers
         self._error = error
         self.function_code = function_code
         self.address = address
         self.value = value
+        self.exception_code = exception_code
+        self.dev_id = dev_id
 
     def isError(self):
         return self._error
@@ -187,6 +190,29 @@ def test_write_error_is_not_applied():
     with pytest.raises(ModbusException):
         asyncio.run(device.set_output(1, True))
     assert device.attr_out1["state"] is None
+
+
+def test_exhausted_pending_uses_shared_verified_readback(monkeypatch):
+    client = Client()
+
+    async def pending_write(address, value, device_id):
+        return Response(
+            error=True,
+            function_code=0x85,
+            exception_code=15,
+            dev_id=device_id,
+        )
+
+    client.write_coil = pending_write
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.s2000_pp.S2000_PP_FC05_RETRY_DELAY", 0
+    )
+    device = C2000SP4(client, 7)
+    device.apply_gateway_mapping(mapping(manual_relay_mapping(20, 41)))
+
+    result = asyncio.run(device.set_output(1, False))
+
+    assert result["state"] is False
 
 
 def test_multistate_expanded_and_unknown_codes_preserved():
