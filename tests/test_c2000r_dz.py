@@ -116,9 +116,7 @@ async def test_two_unit_quiescent_hardware_fixture_exposes_radio_semantics():
         ([80], None, None),
     ],
 )
-async def test_documented_battery_codes_are_unknown_preserving(
-    expanded, main, reserve
-):
+async def test_documented_battery_codes_are_unknown_preserving(expanded, main, reserve):
     """Candidate fault codes are documentation-derived, not transition fixtures."""
     device = C2000RDZ(Client(expanded=expanded), 2)
     device.apply_gateway_mapping(mapping(manual_zone_mapping(53, 11, 1, 20, None)))
@@ -150,6 +148,7 @@ def test_identity_device_info_and_capabilities_are_product_specific():
         entry_id="rdz-entry",
         options={"gateway_entry_id": "pp-entry"},
         data={},
+        runtime_data=SimpleNamespace(via_device_id="gateway-device-id"),
     )
 
     info = device_info_for_entry(device, entry)
@@ -161,7 +160,7 @@ def test_identity_device_info_and_capabilities_are_product_specific():
     assert info["sw_version"] is None
     assert info["hw_version"] is None
     assert info["serial_number"] is None
-    assert info["via_device"] == ("modbus_devices", "pp-entry")
+    assert info["via_device_id"] == "gateway-device-id"
     assert device.get_binary_sensor_descriptions()[0]["device_class"] is (
         BinarySensorDeviceClass.MOISTURE
     )

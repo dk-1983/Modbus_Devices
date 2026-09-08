@@ -15,7 +15,7 @@ from custom_components.modbus_devices.button import ModBusCommandButtonEntity
 from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.device_info import (
     EquipmentMetadata,
-    via_device_for_entry,
+    via_device_id_for_entry,
 )
 from custom_components.modbus_devices.equipment.bolid import (
     C2000DZ,
@@ -54,6 +54,15 @@ class Entry:
         self.entry_id = entry_id
         self.options = {} if options is None else options
         self.data = {} if data is None else data
+        source = self.options or self.data
+        gateway_entry_id = source.get(Config.CONF_GATEWAY_ENTRY_ID)
+        self.runtime_data = SimpleNamespace(
+            via_device_id=(
+                None
+                if gateway_entry_id is None
+                else f"device-registry:{gateway_entry_id}"
+            )
+        )
 
 
 def coordinator(device, data=None):
@@ -105,9 +114,9 @@ def mip_mapping(gateway_entry_id: str = "gateway-1") -> ResolvedDeviceMapping:
             2,
         ),
         MappingSource.MANUAL,
-        (manual_zone_mapping(0, 20, 3, 0, None),) + tuple(
-            manual_zone_mapping(local, local + 20, 8, 0, None)
-            for local in range(1, 6)
+        (manual_zone_mapping(0, 20, 3, 0, None),)
+        + tuple(
+            manual_zone_mapping(local, local + 20, 8, 0, None) for local in range(1, 6)
         ),
     )
 
@@ -170,15 +179,15 @@ def test_direct_device_and_direct_s2000_pp_have_no_parent() -> None:
         },
     )
 
-    assert via_device_for_entry(direct) is None
-    assert via_device_for_entry(gateway) is None
+    assert via_device_id_for_entry(direct) is None
+    assert via_device_id_for_entry(gateway) is None
 
     device = S2000PP(None, 1)
     entity = ModBusBinarySensorEntity(
         coordinator(device), device, gateway, device.attr_in1
     )
     assert entity.device_info["identifiers"] == {(Config.DOMAIN, "gateway-1")}
-    assert entity.device_info["via_device"] is None
+    assert entity.device_info["via_device_id"] is None
 
 
 def test_c2000_vt_entities_share_one_device_and_gateway_parent() -> None:
@@ -196,12 +205,18 @@ def test_c2000_vt_entities_share_one_device_and_gateway_parent() -> None:
     entities = state_entities + numeric_entities
 
     expected_identifier = {(Config.DOMAIN, device.attr_device_identifier)}
-    expected_parent = (Config.DOMAIN, "gateway-1")
+    expected_parent = "device-registry:gateway-1"
     assert len(entities) == 4
     assert len({entity.unique_id for entity in entities}) == 4
-    assert all(entity.device_info["identifiers"] == expected_identifier for entity in entities)
-    assert all(entity.device_info["via_device"] == expected_parent for entity in entities)
-    assert all(entity.entity_category is EntityCategory.DIAGNOSTIC for entity in state_entities)
+    assert all(
+        entity.device_info["identifiers"] == expected_identifier for entity in entities
+    )
+    assert all(
+        entity.device_info["via_device_id"] == expected_parent for entity in entities
+    )
+    assert all(
+        entity.entity_category is EntityCategory.DIAGNOSTIC for entity in state_entities
+    )
     assert {entity.unique_id for entity in entities} == {
         f"{device.attr_unique_id_prefix}_{key}"
         for key in ("temperature_state", "temperature", "humidity_state", "humidity")
@@ -231,9 +246,11 @@ def test_mip_six_rows_share_one_device_parent_and_unique_entity_ids() -> None:
     assert len(entities) == 12
     assert len({entity.unique_id for entity in entities}) == 12
     expected_identifier = {(Config.DOMAIN, device.attr_device_identifier)}
-    assert all(entity.device_info["identifiers"] == expected_identifier for entity in entities)
-    assert {entity.device_info["via_device"] for entity in entities} == {
-        (Config.DOMAIN, "gateway-1")
+    assert all(
+        entity.device_info["identifiers"] == expected_identifier for entity in entities
+    )
+    assert {entity.device_info["via_device_id"] for entity in entities} == {
+        "device-registry:gateway-1"
     }
     tamper = binary_entities[0]
     assert tamper.unique_id == f"{device.attr_unique_id_prefix}_tamper"
@@ -283,8 +300,8 @@ def test_water_detector_entities_share_product_specific_device_identity() -> Non
             == {(Config.DOMAIN, device.attr_device_identifier)}
             for entity in entities
         )
-        assert {entity.device_info["via_device"] for entity in entities} == {
-            (Config.DOMAIN, "gateway-1")
+        assert {entity.device_info["via_device_id"] for entity in entities} == {
+            "device-registry:gateway-1"
         }
 
 
@@ -325,9 +342,7 @@ def test_water_detector_moisture_icons_follow_semantic_state() -> None:
         assert wet.icon == "mdi:water-alert"
         assert unknown.icon is None
         assert unavailable.icon is None
-        assert device.get_state_sensor_descriptions()[0]["icon"] == (
-            "mdi:water-alert"
-        )
+        assert device.get_state_sensor_descriptions()[0]["icon"] == ("mdi:water-alert")
 
 
 def test_unrelated_tamper_keeps_its_static_icon() -> None:
@@ -367,9 +382,12 @@ def test_two_kpb_children_keep_distinct_devices_and_one_parent() -> None:
         second.attr_out1,
     )
 
-    assert first_entity.device_info["identifiers"] != second_entity.device_info["identifiers"]
-    assert first_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
-    assert second_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
+    assert (
+        first_entity.device_info["identifiers"]
+        != second_entity.device_info["identifiers"]
+    )
+    assert first_entity.device_info["via_device_id"] == "device-registry:gateway-1"
+    assert second_entity.device_info["via_device_id"] == "device-registry:gateway-1"
     assert first_entity.unique_id == f"{first.attr_unique_id_prefix}_output_1"
     assert second_entity.unique_id == f"{second.attr_unique_id_prefix}_output_1"
 
@@ -383,12 +401,18 @@ def test_same_child_identity_behind_two_gateways_has_distinct_topology() -> None
         coordinator(first), first, child_entry("child-a", "gateway-1"), first.attr_out1
     )
     second_entity = ModBusSwitchEntity(
-        coordinator(second), second, child_entry("child-b", "gateway-2"), second.attr_out1
+        coordinator(second),
+        second,
+        child_entry("child-b", "gateway-2"),
+        second.attr_out1,
     )
 
-    assert first_entity.device_info["identifiers"] != second_entity.device_info["identifiers"]
-    assert first_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
-    assert second_entity.device_info["via_device"] == (Config.DOMAIN, "gateway-2")
+    assert (
+        first_entity.device_info["identifiers"]
+        != second_entity.device_info["identifiers"]
+    )
+    assert first_entity.device_info["via_device_id"] == "device-registry:gateway-1"
+    assert second_entity.device_info["via_device_id"] == "device-registry:gateway-2"
 
 
 def test_future_sp4_uses_the_common_downstream_topology_path() -> None:
@@ -404,7 +428,7 @@ def test_future_sp4_uses_the_common_downstream_topology_path() -> None:
     assert entity.device_info["identifiers"] == {
         (Config.DOMAIN, device.attr_device_identifier)
     }
-    assert entity.device_info["via_device"] == (Config.DOMAIN, "gateway-1")
+    assert entity.device_info["via_device_id"] == "device-registry:gateway-1"
 
 
 def test_existing_child_data_format_resolves_parent_without_runtime() -> None:
@@ -412,7 +436,7 @@ def test_existing_child_data_format_resolves_parent_without_runtime() -> None:
         "legacy-child",
         data={Config.CONF_GATEWAY_ENTRY_ID: "gateway-legacy"},
     )
-    assert via_device_for_entry(entry) == (Config.DOMAIN, "gateway-legacy")
+    assert via_device_id_for_entry(entry) == "device-registry:gateway-legacy"
 
 
 def test_all_entity_platform_device_info_uses_the_same_parent() -> None:
@@ -490,8 +514,8 @@ def test_all_entity_platform_device_info_uses_the_same_parent() -> None:
         ),
     )
 
-    assert {entity.device_info["via_device"] for entity in entities} == {
-        (Config.DOMAIN, "gateway-1")
+    assert {entity.device_info["via_device_id"] for entity in entities} == {
+        "device-registry:gateway-1"
     }
 
 
@@ -552,9 +576,7 @@ def test_missing_binary_and_switch_snapshot_values_are_unknown() -> None:
     entry = Entry("gateway-1")
     empty_snapshot = coordinator(device, {"inputs": {}, "outputs": {}})
 
-    binary = ModBusBinarySensorEntity(
-        empty_snapshot, device, entry, device.attr_in1
-    )
+    binary = ModBusBinarySensorEntity(empty_snapshot, device, entry, device.attr_in1)
     switch = ModBusSwitchEntity(
         empty_snapshot,
         device,

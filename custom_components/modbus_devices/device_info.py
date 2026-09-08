@@ -34,25 +34,16 @@ class EquipmentMetadata:
             model_id = getattr(device, "attr_device_type", None)
         return cls(
             model_id=_metadata_text(model_id),
-            sw_version=_metadata_text(
-                getattr(device, "attr_software_version", None)
-            ),
-            hw_version=_metadata_text(
-                getattr(device, "attr_hardware_version", None)
-            ),
-            serial_number=_metadata_text(
-                getattr(device, "attr_serial_number", None)
-            ),
+            sw_version=_metadata_text(getattr(device, "attr_software_version", None)),
+            hw_version=_metadata_text(getattr(device, "attr_hardware_version", None)),
+            serial_number=_metadata_text(getattr(device, "attr_serial_number", None)),
         )
 
 
-def via_device_for_entry(entry: ConfigEntry) -> tuple[str, str] | None:
-    """Return the persisted S2000-PP parent identity for a downstream entry."""
-    options = getattr(entry, "options", None) or getattr(entry, "data", {})
-    gateway_entry_id = options.get(Config.CONF_GATEWAY_ENTRY_ID)
-    if not isinstance(gateway_entry_id, str) or not gateway_entry_id:
-        return None
-    return (Config.DOMAIN, gateway_entry_id)
+def via_device_id_for_entry(entry: ConfigEntry) -> str | None:
+    """Return the resolved S2000-PP parent device registry ID."""
+    runtime_data = getattr(entry, "runtime_data", None)
+    return getattr(runtime_data, "via_device_id", None)
 
 
 def device_info_for_entry(
@@ -64,9 +55,7 @@ def device_info_for_entry(
     """Build stable Home Assistant device metadata for one equipment instance."""
     metadata = EquipmentMetadata.from_device(device)
     device_identifier = (
-        identifier
-        or getattr(device, "attr_device_identifier", None)
-        or entry.entry_id
+        identifier or getattr(device, "attr_device_identifier", None) or entry.entry_id
     )
     return DeviceInfo(
         identifiers={(Config.DOMAIN, device_identifier)},
@@ -77,5 +66,5 @@ def device_info_for_entry(
         hw_version=metadata.hw_version,
         sw_version=metadata.sw_version,
         serial_number=metadata.serial_number,
-        via_device=via_device_for_entry(entry),
+        via_device_id=via_device_id_for_entry(entry),
     )

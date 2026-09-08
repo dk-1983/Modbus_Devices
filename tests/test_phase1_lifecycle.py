@@ -13,7 +13,13 @@ import pytest
 from pymodbus.exceptions import ConnectionException, ModbusException
 
 from homeassistant.config_entries import ConfigEntryError, ConfigEntryNotReady
-from homeassistant.const import CONF_DEVICE_ID, CONF_HOST, CONF_NAME, CONF_PORT, Platform
+from homeassistant.const import (
+    CONF_DEVICE_ID,
+    CONF_HOST,
+    CONF_NAME,
+    CONF_PORT,
+    Platform,
+)
 
 import custom_components.modbus_devices as integration
 from custom_components.modbus_devices.binary_sensor import (
@@ -140,7 +146,9 @@ async def test_config_flow_transport_manufacturer_and_real_model_steps(monkeypat
         "Zuked",
     ]
 
-    result = await flow.async_step_manufacturer({Config.CONF_MANUFACTURER: "Dyna Drive"})
+    result = await flow.async_step_manufacturer(
+        {Config.CONF_MANUFACTURER: "Dyna Drive"}
+    )
     assert result["step_id"] == "device"
     model_schema = next(iter(result["data_schema"].schema.values()))
     assert model_schema.config["options"] == [{"value": "DN310", "label": "DN310"}]
@@ -156,7 +164,9 @@ async def test_config_flow_transport_manufacturer_and_real_model_steps(monkeypat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [Config.MODBUS_TCP, Config.MODBUS_UDP])
-async def test_direct_network_creation_freezes_unique_id_and_serialized_shape(monkeypatch, mode):
+async def test_direct_network_creation_freezes_unique_id_and_serialized_shape(
+    monkeypatch, mode
+):
     flow = ModbusDevicesConfigFlow()
     flow.hass = FakeHass()
     flow._data = {
@@ -167,9 +177,17 @@ async def test_direct_network_creation_freezes_unique_id_and_serialized_shape(mo
     flow._selected_manufacturer = "Dyna Drive"
     bypass_flow_manager(flow)
     client = FakeClient()
-    monkeypatch.setattr("custom_components.modbus_devices.config_flow.connect_modbus", AsyncMock(return_value=client))
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.config_flow.connect_modbus",
+        AsyncMock(return_value=client),
+    )
 
-    payload = {CONF_HOST: "10.0.2.10", CONF_PORT: 40000, CONF_DEVICE_ID: 9, CONF_NAME: "Drive"}
+    payload = {
+        CONF_HOST: "10.0.2.10",
+        CONF_PORT: 40000,
+        CONF_DEVICE_ID: 9,
+        CONF_NAME: "Drive",
+    }
     result = await flow.async_step_network(payload)
 
     assert result["type"].value == "create_entry"
@@ -180,7 +198,9 @@ async def test_direct_network_creation_freezes_unique_id_and_serialized_shape(mo
 
 
 @pytest.mark.asyncio
-async def test_direct_serial_creation_freezes_unique_id_and_serialized_shape(monkeypatch):
+async def test_direct_serial_creation_freezes_unique_id_and_serialized_shape(
+    monkeypatch,
+):
     flow = ModbusDevicesConfigFlow()
     flow.hass = FakeHass()
     flow._data = {
@@ -191,7 +211,10 @@ async def test_direct_serial_creation_freezes_unique_id_and_serialized_shape(mon
     flow._selected_manufacturer = "Owen"
     bypass_flow_manager(flow)
     flow._serial_ports = ["COM7"]
-    monkeypatch.setattr("custom_components.modbus_devices.config_flow.connect_modbus", AsyncMock(return_value=FakeClient()))
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.config_flow.connect_modbus",
+        AsyncMock(return_value=FakeClient()),
+    )
     payload = {
         CONF_DEVICE_ID: 3,
         Config.CONF_COM_PORT: "COM7",
@@ -293,8 +316,14 @@ async def test_configuration_assisted_ambiguous_mapping_is_reported(monkeypatch)
         async def async_resolve(self, **_kwargs):
             raise AmbiguousDeviceMappingError("ambiguous")
 
-    monkeypatch.setattr("custom_components.modbus_devices.config_flow.connect_modbus", AsyncMock(return_value=FakeClient()))
-    monkeypatch.setattr("custom_components.modbus_devices.config_flow.AutomaticDeviceMappingProvider", Provider)
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.config_flow.connect_modbus",
+        AsyncMock(return_value=FakeClient()),
+    )
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.config_flow.AutomaticDeviceMappingProvider",
+        Provider,
+    )
 
     result = await flow.async_step_automatic_device({Config.CONF_ORION_ADDRESS: 4})
     assert result["step_id"] == "automatic_device"
@@ -339,8 +368,14 @@ async def test_configuration_assisted_mapping_persists_the_existing_shape(monkey
             return expected
 
     bypass_flow_manager(flow)
-    monkeypatch.setattr("custom_components.modbus_devices.config_flow.connect_modbus", AsyncMock(return_value=FakeClient()))
-    monkeypatch.setattr("custom_components.modbus_devices.config_flow.AutomaticDeviceMappingProvider", Provider)
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.config_flow.connect_modbus",
+        AsyncMock(return_value=FakeClient()),
+    )
+    monkeypatch.setattr(
+        "custom_components.modbus_devices.config_flow.AutomaticDeviceMappingProvider",
+        Provider,
+    )
 
     result = await flow.async_step_automatic_device({Config.CONF_ORION_ADDRESS: 4})
     assert result["type"].value == "create_entry"
@@ -371,13 +406,17 @@ async def test_network_connection_failure_stays_on_form(monkeypatch):
 
 
 def test_gateway_and_downstream_identity_and_serialization_are_frozen():
-    gateway = GatewayContext(GatewayType.S2000_PP, "Main PP", "ModBus TCP/IP:10.0.2.10:502", 1)
+    gateway = GatewayContext(
+        GatewayType.S2000_PP, "Main PP", "ModBus TCP/IP:10.0.2.10:502", 1
+    )
     identity = DownstreamDeviceIdentity(
         gateway=gateway,
         model="C2000RSMK",
         orion_address=12,
         dpls=DPLSSubIdentity(40, 2),
-        metadata=DownstreamDeviceMetadata(variant="hardware_2_0", topology="contact_and_external_input"),
+        metadata=DownstreamDeviceMetadata(
+            variant="hardware_2_0", topology="contact_and_external_input"
+        ),
     )
     mapping = ResolvedDeviceMapping(
         identity=identity,
@@ -424,12 +463,15 @@ async def test_setup_first_refresh_platform_forward_unload_and_reload(monkeypatc
     assert first_runtime.client is clients[0]
     assert first_runtime.coordinator is coordinators[0]
     assert first_runtime.coordinator.device is devices[0]
+    assert first_runtime.via_device_id is None
     assert not hasattr(first_runtime, "device")
     assert not hasattr(first_runtime, "gateway_mapping")
     assert not hasattr(first_runtime, "gateway_entry_id")
     devices[0].data_init.assert_awaited_once_with()
     coordinators[0].async_config_entry_first_refresh.assert_awaited_once_with()
-    hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(entry, [Platform.SENSOR])
+    hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(
+        entry, [Platform.SENSOR]
+    )
 
     assert await integration.async_unload_entry(hass, entry) is True
     clients[0].close.assert_called_once_with()
@@ -449,7 +491,11 @@ async def test_setup_first_refresh_platform_forward_unload_and_reload(monkeypatc
 async def test_temporary_connection_failure_becomes_not_ready(monkeypatch):
     hass = FakeHass()
     entry = FakeEntry(options=direct_options())
-    monkeypatch.setattr(integration, "connect_modbus", AsyncMock(side_effect=ConnectionException("offline")))
+    monkeypatch.setattr(
+        integration,
+        "connect_modbus",
+        AsyncMock(side_effect=ConnectionException("offline")),
+    )
 
     with pytest.raises(ConfigEntryNotReady, match="offline"):
         await integration.async_setup_entry(hass, entry)
@@ -464,7 +510,9 @@ async def test_device_unavailable_during_initialization_becomes_not_ready(monkey
     class OfflineDevice(FakeDevice):
         def __init__(self, client, device_id):
             super().__init__(client, device_id)
-            self.data_init = AsyncMock(side_effect=ConnectionException("device unavailable"))
+            self.data_init = AsyncMock(
+                side_effect=ConnectionException("device unavailable")
+            )
 
     monkeypatch.setattr(integration, "connect_modbus", AsyncMock(return_value=client))
     monkeypatch.setattr(integration, "get_class", lambda *_args: OfflineDevice)
@@ -476,7 +524,9 @@ async def test_device_unavailable_during_initialization_becomes_not_ready(monkey
 
 
 @pytest.mark.asyncio
-async def test_first_refresh_failure_never_attempts_post_refresh_maintenance(monkeypatch):
+async def test_first_refresh_failure_never_attempts_post_refresh_maintenance(
+    monkeypatch,
+):
     hass = FakeHass()
     entry = FakeEntry(options=direct_options())
     client = FakeClient()
@@ -515,12 +565,16 @@ async def test_first_refresh_failure_never_attempts_post_refresh_maintenance(mon
         {**direct_options(), Config.CONF_GATEWAY_MAPPING: {"broken": True}},
     ],
 )
-async def test_invalid_persisted_configuration_becomes_config_entry_error(monkeypatch, options):
+async def test_invalid_persisted_configuration_becomes_config_entry_error(
+    monkeypatch, options
+):
     hass = FakeHass()
     entry = FakeEntry(options=options)
     client = FakeClient()
     monkeypatch.setattr(integration, "connect_modbus", AsyncMock(return_value=client))
-    monkeypatch.setattr(integration, "get_class", Mock(side_effect=AttributeError("missing")))
+    monkeypatch.setattr(
+        integration, "get_class", Mock(side_effect=AttributeError("missing"))
+    )
 
     with pytest.raises(ConfigEntryError):
         await integration.async_setup_entry(hass, entry)
@@ -528,9 +582,13 @@ async def test_invalid_persisted_configuration_becomes_config_entry_error(monkey
 
 
 @pytest.mark.asyncio
-async def test_unexpected_platform_failure_is_not_swallowed_and_resources_close(monkeypatch):
+async def test_unexpected_platform_failure_is_not_swallowed_and_resources_close(
+    monkeypatch,
+):
     hass = FakeHass()
-    hass.config_entries.async_forward_entry_setups.side_effect = RuntimeError("platform bug")
+    hass.config_entries.async_forward_entry_setups.side_effect = RuntimeError(
+        "platform bug"
+    )
     entry = FakeEntry(options=direct_options())
     client = FakeClient()
 
@@ -551,7 +609,9 @@ async def test_unexpected_platform_failure_is_not_swallowed_and_resources_close(
 @pytest.mark.asyncio
 async def test_cleanup_failure_does_not_mask_original_setup_failure(monkeypatch):
     hass = FakeHass()
-    hass.config_entries.async_forward_entry_setups.side_effect = RuntimeError("platform bug")
+    hass.config_entries.async_forward_entry_setups.side_effect = RuntimeError(
+        "platform bug"
+    )
     entry = FakeEntry(options=direct_options())
     client = FakeClient()
     client.close.side_effect = RuntimeError("close bug")
@@ -569,7 +629,9 @@ async def test_cleanup_failure_does_not_mask_original_setup_failure(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_optional_post_refresh_transport_failure_does_not_block_setup(monkeypatch):
+async def test_optional_post_refresh_transport_failure_does_not_block_setup(
+    monkeypatch,
+):
     hass = FakeHass()
     entry = FakeEntry(options=direct_options())
     client = FakeClient()
@@ -601,7 +663,9 @@ async def test_optional_post_refresh_transport_failure_does_not_block_setup(monk
 
 @pytest.mark.asyncio
 async def test_binary_sensor_platform_uses_first_refresh_snapshot_without_io():
-    device = SimpleNamespace(get_inputs=AsyncMock(side_effect=RuntimeError("input bug")))
+    device = SimpleNamespace(
+        get_inputs=AsyncMock(side_effect=RuntimeError("input bug"))
+    )
     coordinator = Mock(data={"inputs": {}})
     coordinator.device = device
     hass = SimpleNamespace(data={})
@@ -620,8 +684,12 @@ async def test_binary_sensor_platform_uses_first_refresh_snapshot_without_io():
 def test_config_flow_localization_catalogs_have_identical_keys():
     root = Path(__file__).parents[1] / "custom_components" / "modbus_devices"
     strings = json.loads((root / "strings.json").read_text(encoding="utf-8"))
-    english = json.loads((root / "translations" / "en.json").read_text(encoding="utf-8"))
-    russian = json.loads((root / "translations" / "ru.json").read_text(encoding="utf-8"))
+    english = json.loads(
+        (root / "translations" / "en.json").read_text(encoding="utf-8")
+    )
+    russian = json.loads(
+        (root / "translations" / "ru.json").read_text(encoding="utf-8")
+    )
 
     def shape(value):
         if isinstance(value, dict):
@@ -631,16 +699,29 @@ def test_config_flow_localization_catalogs_have_identical_keys():
     assert english == strings
     assert shape(strings) == shape(russian)
     assert set(strings["config"]["step"]) == {
-        "user", "manufacturer", "device", "io_mapping", "network",
-        "rtu_over_udp", "serial",
-        "existing_gateway", "gateway_child_model", "discovered_device",
-        "gateway_context", "gateway_new", "gateway_device", "mapping_source",
-        "manual_device", "manual_object", "manual_capability", "automatic_device",
+        "user",
+        "manufacturer",
+        "device",
+        "io_mapping",
+        "network",
+        "rtu_over_udp",
+        "serial",
+        "existing_gateway",
+        "gateway_child_model",
+        "discovered_device",
+        "gateway_context",
+        "gateway_new",
+        "gateway_device",
+        "mapping_source",
+        "manual_device",
+        "manual_object",
+        "manual_capability",
+        "automatic_device",
     }
     assert set(strings["selector"]["modbus_transport"]["options"]) == {
         "modbus_tcp",
         "modbus_udp",
-            Config.MODBUS_RTU_OVER_UDP,
-            "serial",
-            "existing_gateway",
-        }
+        Config.MODBUS_RTU_OVER_UDP,
+        "serial",
+        "existing_gateway",
+    }

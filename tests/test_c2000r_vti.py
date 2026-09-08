@@ -61,9 +61,7 @@ class Response:
 class HardwareClient:
     """Serve captured state rows and controlled numeric results."""
 
-    def __init__(
-        self, results, *, include_251=True, expanded_rows=None, first_row=19
-    ):
+    def __init__(self, results, *, include_251=True, expanded_rows=None, first_row=19):
         self.results = iter(results)
         self.include_251 = include_251
         self.expanded_rows = expanded_rows
@@ -197,8 +195,12 @@ async def test_five_hardware_footprints_preserve_exact_expanded_captures(
 def test_entity_matrix_metadata_and_one_physical_battery():
     device = C2000RVTI(None, 2)
     device.apply_gateway_mapping(mapping())
-    numeric = {item["sensor_id"]: item for item in device.get_numeric_sensor_descriptions()}
-    states = {item["sensor_id"]: item for item in device.get_state_sensor_descriptions()}
+    numeric = {
+        item["sensor_id"]: item for item in device.get_numeric_sensor_descriptions()
+    }
+    states = {
+        item["sensor_id"]: item for item in device.get_state_sensor_descriptions()
+    }
 
     assert list(numeric) == ["temperature", "humidity"]
     assert list(states) == [
@@ -235,13 +237,14 @@ def test_device_info_uses_radio_model_and_gateway_parent_without_versions():
         entry_id="rvti-entry",
         options={Config.CONF_GATEWAY_ENTRY_ID: "pp-entry"},
         data={},
+        runtime_data=SimpleNamespace(via_device_id="gateway-device-id"),
     )
 
     info = device_info_for_entry(device, entry)
 
     assert info["model"] == "С2000Р-ВТИ"
     assert info["manufacturer"] == "Bolid"
-    assert info["via_device"] == (Config.DOMAIN, "pp-entry")
+    assert info["via_device_id"] == "gateway-device-id"
     assert info.get("sw_version") is None
     assert info.get("hw_version") is None
     assert info.get("serial_number") is None
@@ -324,9 +327,15 @@ async def test_hardware_quiescent_states_numeric_q8_8_and_battery_aggregation():
     temperature = await device.async_get_snapshot()
     humidity = await device.async_get_snapshot()
 
-    assert temperature["state_sensors"]["temperature_state"]["state"] == "temperature_normal"
+    assert (
+        temperature["state_sensors"]["temperature_state"]["state"]
+        == "temperature_normal"
+    )
     assert temperature["state_sensors"]["humidity_state"]["state"] == "level_normal"
-    assert temperature["state_sensors"]["main_battery_state"]["state"] == "battery_restored"
+    assert (
+        temperature["state_sensors"]["main_battery_state"]["state"]
+        == "battery_restored"
+    )
     assert temperature["state_sensors"]["main_battery_state"]["primary_code"] == 200
     assert humidity["numeric_sensors"]["temperature"]["value"] == 26.0
     assert humidity["numeric_sensors"]["humidity"]["value"] == 32.0
@@ -338,9 +347,7 @@ async def test_hardware_quiescent_states_numeric_q8_8_and_battery_aggregation():
 
 @pytest.mark.asyncio
 async def test_numeric_diagnostics_use_the_runtime_radio_product_context(caplog):
-    caplog.set_level(
-        "DEBUG", logger="custom_components.modbus_devices.equipment.bolid"
-    )
+    caplog.set_level("DEBUG", logger="custom_components.modbus_devices.equipment.bolid")
     device = C2000RVTI(HardwareClient([0x1A00]), 2)
     device.apply_gateway_mapping(mapping())
 
@@ -370,7 +377,10 @@ async def test_unknown_zone_state_is_lossless_and_missing_battery_is_unknown():
 
     snapshot = await device.async_get_snapshot()
 
-    assert snapshot["state_sensors"]["temperature_state"]["expanded_states"][0] == "unknown_254"
+    assert (
+        snapshot["state_sensors"]["temperature_state"]["expanded_states"][0]
+        == "unknown_254"
+    )
     assert snapshot["state_sensors"]["main_battery_state"]["state"] is None
 
 
@@ -393,9 +403,7 @@ async def test_unknown_zone_state_is_lossless_and_missing_battery_is_unknown():
 async def test_battery_aggregation_requires_one_distinct_code(
     temperature_codes, humidity_codes, expected
 ):
-    client = HardwareClient(
-        [0x1A00], expanded_rows=(temperature_codes, humidity_codes)
-    )
+    client = HardwareClient([0x1A00], expanded_rows=(temperature_codes, humidity_codes))
     device = C2000RVTI(client, 2)
     device.apply_gateway_mapping(mapping())
 
@@ -438,9 +446,7 @@ async def test_native_serial_exception4_sequence_releases_session_and_recovers()
 @pytest.mark.asyncio
 async def test_production_row77_pending_then_exception3_recovers_fresh_selector():
     """Reproduce the production-observed 15 -> 3 lifecycle without blaming transport."""
-    client = HardwareClient(
-        ["pending", "error3", "pending", 0x1860], first_row=77
-    )
+    client = HardwareClient(["pending", "error3", "pending", 0x1860], first_row=77)
     device = C2000RVTI(client, 2)
     row77_mapping = mapping(base=10, first_row=77)
     device.apply_gateway_mapping(row77_mapping)

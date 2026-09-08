@@ -129,9 +129,7 @@ def bypass_duplicates(flow: ModbusDevicesConfigFlow) -> None:
 async def prepare_gateway_flow(flow: ModbusDevicesConfigFlow, gateway: FakeEntry):
     flow.hass = FakeHass([gateway])
     flow._device_classes = {"Bolid": ["S2000PP", "C2000KPB"]}
-    result = await flow.async_step_user(
-        {Config.CONF_MODBUS_MODE: "existing_gateway"}
-    )
+    result = await flow.async_step_user({Config.CONF_MODBUS_MODE: "existing_gateway"})
     assert result["step_id"] == "existing_gateway"
     result = await flow.async_step_existing_gateway(
         {Config.CONF_GATEWAY_ENTRY_ID: gateway.entry_id}
@@ -161,9 +159,9 @@ async def test_direct_serial_tcp_and_direct_s2000_pp_routes_remain_available(
         "serial",
         "existing_gateway",
     ]
-    assert (await flow.async_step_user(
-        {Config.CONF_MODBUS_MODE: Config.MODBUS_TCP}
-    ))["step_id"] == "manufacturer"
+    assert (await flow.async_step_user({Config.CONF_MODBUS_MODE: Config.MODBUS_TCP}))[
+        "step_id"
+    ] == "manufacturer"
 
     direct = ModbusDevicesConfigFlow()
     direct.hass = FakeHass([gateway])
@@ -310,7 +308,9 @@ async def test_duplicate_identity_is_scoped_to_gateway():
     assert first_id != second_id
 
     seen = []
-    first_flow.async_set_unique_id = AsyncMock(side_effect=lambda value: seen.append(value))
+    first_flow.async_set_unique_id = AsyncMock(
+        side_effect=lambda value: seen.append(value)
+    )
     first_flow._abort_if_unique_id_configured = Mock(
         side_effect=RuntimeError("duplicate")
     )
@@ -385,10 +385,9 @@ async def test_child_setup_reuses_gateway_client_and_child_unload_does_not_close
         async def async_get_snapshot(self):
             return {"state_sensors": {}}
 
-    coordinator = SimpleNamespace(
-        async_config_entry_first_refresh=AsyncMock(), data={}
-    )
+    coordinator = SimpleNamespace(async_config_entry_first_refresh=AsyncMock(), data={})
     monkeypatch.setattr(integration, "get_class", lambda *_args: Device)
+
     def coordinator_factory(**kwargs):
         coordinator.device = kwargs["device"]
         return coordinator
@@ -396,10 +395,22 @@ async def test_child_setup_reuses_gateway_client_and_child_unload_does_not_close
     monkeypatch.setattr(integration, "ModbusDeviceCoordinator", coordinator_factory)
     connect = AsyncMock(side_effect=AssertionError("child opened a connection"))
     monkeypatch.setattr(integration, "connect_modbus", connect)
+    get_parent_device_id = Mock(return_value="gateway-device-id")
+    monkeypatch.setattr(
+        integration.dr,
+        "async_get_device_id_by_identifier",
+        get_parent_device_id,
+    )
 
     assert await integration.async_setup_entry(hass, child)
     connect.assert_not_awaited()
     assert child.runtime_data.owns_client is False
+    assert child.runtime_data.via_device_id == "gateway-device-id"
+    get_parent_device_id.assert_called_once_with(
+        hass,
+        (Config.DOMAIN, "gateway-1"),
+        config_entry_id="gateway-1",
+    )
     assert await integration.async_unload_entry(hass, child)
     gateway.runtime_data.client.close.assert_not_called()
 
@@ -426,7 +437,9 @@ async def test_existing_direct_entry_loads_without_migration_or_shape_change(
             return {}
 
     monkeypatch.setattr(integration, "get_class", lambda *_args: Device)
-    monkeypatch.setattr(integration, "connect_modbus", AsyncMock(return_value=FakeClient()))
+    monkeypatch.setattr(
+        integration, "connect_modbus", AsyncMock(return_value=FakeClient())
+    )
     monkeypatch.setattr(
         integration,
         "ModbusDeviceCoordinator",

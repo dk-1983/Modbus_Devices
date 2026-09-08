@@ -7,7 +7,11 @@ from pymodbus.exceptions import ConnectionException, ModbusException
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 
 from .const import Config
 from .coordinator import ModbusDeviceCoordinator
@@ -155,6 +159,7 @@ async def async_setup_entry(
     client = None
     owns_client = True
     gateway_entry_id = options.get(Config.CONF_GATEWAY_ENTRY_ID)
+    via_device_id = None
     setup_succeeded = False
 
     try:
@@ -167,6 +172,16 @@ async def async_setup_entry(
                 raise ConfigEntryNotReady("S2000-PP gateway is not loaded")
             client = gateway_entry.runtime_data.client
             owns_client = False
+            try:
+                via_device_id = dr.async_get_device_id_by_identifier(
+                    hass,
+                    (Config.DOMAIN, gateway_entry_id),
+                    config_entry_id=gateway_entry_id,
+                )
+            except ValueError as exc:
+                raise ConfigEntryNotReady(
+                    "S2000-PP gateway device is not registered"
+                ) from exc
         else:
             client = await connect_modbus(options)
 
@@ -217,9 +232,7 @@ async def async_setup_entry(
             required_gateway is not None
             and gateway_mapping.identity.gateway.gateway_type is not required_gateway
         ):
-            raise ConfigEntryError(
-                f"Gateway mapping type does not match {device_name}"
-            )
+            raise ConfigEntryError(f"Gateway mapping type does not match {device_name}")
 
         if gateway_mapping is not None:
             options, gateway_mapping = await _async_reconcile_gateway_mapping(
@@ -297,6 +310,7 @@ async def async_setup_entry(
             client=client,
             coordinator=coordinator,
             owns_client=owns_client,
+            via_device_id=via_device_id,
         )
 
         _LOGGER.info(

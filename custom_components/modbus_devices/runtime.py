@@ -16,6 +16,7 @@ class ModbusDevicesRuntimeData:
     client: SerializedModbusClient
     coordinator: ModbusDeviceCoordinator
     owns_client: bool = True
+    via_device_id: str | None = None
 
 
 type ModbusDevicesConfigEntry = ConfigEntry[ModbusDevicesRuntimeData]
