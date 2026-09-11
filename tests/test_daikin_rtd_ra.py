@@ -70,9 +70,9 @@ async def test_snapshot_decodes_controls_status_and_signed_temperatures():
     }
     assert snapshot["numeric_sensors"]["coil_inlet_temperature"]["value"] == 27.0
     assert raw.calls == [
-        ("read_holding_registers", {"address": 0, "count": 5, "device_id": 4}),
-        ("read_input_registers", {"address": 120, "count": 3, "device_id": 4}),
-        ("read_input_registers", {"address": 129, "count": 2, "device_id": 4}),
+        ("read_holding_registers", {"address": 1, "count": 5, "device_id": 4}),
+        ("read_input_registers", {"address": 121, "count": 3, "device_id": 4}),
+        ("read_input_registers", {"address": 130, "count": 2, "device_id": 4}),
     ]
 
 
@@ -85,15 +85,15 @@ async def test_mode_write_uses_documented_registers():
         "hvac_mode": HVACMode.COOL
     }
     assert raw.calls == [
-        ("write_register", {"address": 2, "value": 3, "device_id": 4}),
-        ("write_register", {"address": 4, "value": 1, "device_id": 4}),
+        ("write_register", {"address": 3, "value": 3, "device_id": 4}),
+        ("write_register", {"address": 5, "value": 1, "device_id": 4}),
     ]
 
 
 @pytest.mark.asyncio
 async def test_wrong_device_write_echo_fails():
     raw = FakeClient()
-    raw.write_responses = [response(6, address=1, value=5, dev_id=99)]
+    raw.write_responses = [response(6, address=2, value=5, dev_id=99)]
     device = RTDRA(SerializedModbusClient(raw), 4)
 
     with pytest.raises(ModbusException, match="Wrong Modbus device id"):

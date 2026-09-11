@@ -83,19 +83,19 @@ class RTDRA:
 
     async def async_get_snapshot(self) -> dict[str, Any]:
         controls_response = await self.attr_client.read_holding_registers(
-            address=0, count=5, device_id=self.attr_device_id
+            address=1, count=5, device_id=self.attr_device_id
         )
         controls = validated_registers(
             controls_response, 5, "read RTD-RA controls", expected_function=3
         )
         status_response = await self.attr_client.read_input_registers(
-            address=120, count=3, device_id=self.attr_device_id
+            address=121, count=3, device_id=self.attr_device_id
         )
         status = validated_registers(
             status_response, 3, "read RTD-RA status", expected_function=4
         )
         thermo_response = await self.attr_client.read_input_registers(
-            address=129, count=2, device_id=self.attr_device_id
+            address=130, count=2, device_id=self.attr_device_id
         )
         thermo = validated_registers(
             thermo_response, 2, "read RTD-RA thermo status", expected_function=4
@@ -122,7 +122,7 @@ class RTDRA:
                 "coil_inlet_temperature": {
                     "value": _signed_16(thermo[1]) / 100,
                     "raw_register": thermo[1],
-                    "register_address": 130,
+                    "register_address": 131,
                     "parameter_kind": "coil_inlet_temperature",
                 }
             },
@@ -155,16 +155,16 @@ class RTDRA:
 
     async def async_set_hvac_mode(self, mode: HVACMode) -> dict[str, Any]:
         if mode == HVACMode.OFF:
-            await self._write_register(4, 0, "turn off RTD-RA")
+            await self._write_register(5, 0, "turn off RTD-RA")
             return {"hvac_mode": HVACMode.OFF}
         if mode not in self._MODE_TO_REGISTER:
             raise ValueError(f"Unsupported RTD-RA HVAC mode: {mode}")
 
         async def set_mode_and_power(client) -> None:
             await self._write_register_on(
-                client, 2, self._MODE_TO_REGISTER[mode], "set RTD-RA mode"
+                client, 3, self._MODE_TO_REGISTER[mode], "set RTD-RA mode"
             )
-            await self._write_register_on(client, 4, 1, "turn on RTD-RA")
+            await self._write_register_on(client, 5, 1, "turn on RTD-RA")
 
         await self.attr_client.async_execute_serialized(set_mode_and_power)
         return {"hvac_mode": mode}
@@ -173,14 +173,14 @@ class RTDRA:
         value = int(temperature)
         if value != temperature or not 10 <= value <= 32:
             raise ValueError("RTD-RA target temperature must be 10..32 °C")
-        await self._write_register(0, value, "set RTD-RA target temperature")
+        await self._write_register(1, value, "set RTD-RA target temperature")
         return value
 
     async def async_set_fan_mode(self, fan_mode: str) -> str:
         if fan_mode not in self._FAN_TO_REGISTER:
             raise ValueError(f"Unsupported RTD-RA fan mode: {fan_mode}")
         await self._write_register(
-            1, self._FAN_TO_REGISTER[fan_mode], "set RTD-RA fan mode"
+            2, self._FAN_TO_REGISTER[fan_mode], "set RTD-RA fan mode"
         )
         return fan_mode
 
@@ -188,7 +188,7 @@ class RTDRA:
         if swing_mode not in self._SWING_TO_REGISTER:
             raise ValueError(f"Unsupported RTD-RA swing mode: {swing_mode}")
         await self._write_register(
-            3, self._SWING_TO_REGISTER[swing_mode], "set RTD-RA louvre mode"
+            4, self._SWING_TO_REGISTER[swing_mode], "set RTD-RA louvre mode"
         )
         return swing_mode
 
