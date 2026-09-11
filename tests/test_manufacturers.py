@@ -31,7 +31,13 @@ from custom_components.modbus_devices.const import Config
 def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
     manufacturers = get_equipment_classes_by_manufacturer()
 
-    assert list(manufacturers) == ["Bolid", "Dyna Drive", "Owen", "Zuked"]
+    assert list(manufacturers) == [
+        "Bolid",
+        "Dyna Drive",
+        "Haier",
+        "Owen",
+        "Zuked",
+    ]
 
 
 def test_registry_contains_only_canonical_manufacturers_and_modules():
@@ -40,12 +46,14 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
     ] == [
         ("Bolid", "bolid"),
         ("Dyna Drive", "dyna_drive"),
+        ("Haier", "haier"),
         ("Owen", "owen"),
         ("Zuked", "zuked"),
     ]
     assert manufacturer_module_name("Bolid") == "bolid"
     assert manufacturer_module_name("Owen") == "owen"
     assert manufacturer_module_name("Dyna Drive") == "dyna_drive"
+    assert manufacturer_module_name("Haier") == "haier"
     assert manufacturer_module_name("bolid") == "bolid"
     assert manufacturer_module_name("owen") == "owen"
     assert manufacturer_module_name("dyna_drive") == "dyna_drive"
@@ -53,7 +61,9 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
     assert manufacturer_module_name("zuked") == "zuked"
 
 
-@pytest.mark.parametrize("stored_name", ["Bolid", "Owen", "Dyna Drive", "Zuked"])
+@pytest.mark.parametrize(
+    "stored_name", ["Bolid", "Owen", "Dyna Drive", "Haier", "Zuked"]
+)
 def test_canonical_entry_options_remain_stable(stored_name):
     options = {
         Config.CONF_MANUFACTURER: stored_name,
