@@ -893,8 +893,60 @@ async def test_haier_ycj_a002_card_contains_only_primary_climate(registry_hass):
         "type": "entities",
         "title": "Living room Haier",
         "show_header_toggle": False,
+        "entities": [{"entity": "climate.living_room_haier", "name": "Climate"}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_daikin_rtd_ra_card_orders_control_before_diagnostic(registry_hass):
+    device = Device(
+        "daikin",
+        "daikin-entry",
+        manufacturer="Daikin",
+        model="RTD-RA",
+        name="Bedroom Daikin",
+        config_entry_id="daikin-config",
+    )
+    entities = [
+        entity(
+            device,
+            "coil_inlet_temperature",
+            entity_id="sensor.daikin_coil_inlet_temperature",
+            category=EntityCategory.DIAGNOSTIC,
+            original_name="Coil inlet temperature",
+        ),
+        entity(
+            device,
+            "unrelated",
+            entity_id="sensor.daikin_unrelated",
+        ),
+        entity(
+            device,
+            "climate",
+            entity_id="climate.bedroom_daikin",
+            domain="climate",
+            original_name="Climate",
+        ),
+    ]
+
+    result = await build(
+        registry_hass,
+        device,
+        entities,
+        "RTDRA",
+    )
+
+    assert result.profile_id == "daikin_rtd_ra"
+    assert result.card == {
+        "type": "entities",
+        "title": "Bedroom Daikin",
+        "show_header_toggle": False,
         "entities": [
-            {"entity": "climate.living_room_haier", "name": "Climate"}
+            {"entity": "climate.bedroom_daikin", "name": "Climate"},
+            {
+                "entity": "sensor.daikin_coil_inlet_temperature",
+                "name": "Coil inlet temperature",
+            },
         ],
     }
 
