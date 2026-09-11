@@ -856,6 +856,50 @@ async def test_m3000_partial_entities_keep_semantic_relative_order(registry_hass
 
 
 @pytest.mark.asyncio
+async def test_haier_ycj_a002_card_contains_only_primary_climate(registry_hass):
+    device = Device(
+        "haier",
+        "haier-entry",
+        manufacturer="Haier",
+        model="YCJ-A002",
+        name="Living room Haier",
+        config_entry_id="haier-config",
+    )
+    entities = [
+        entity(
+            device,
+            "unrelated",
+            entity_id="sensor.haier_unrelated",
+            category=EntityCategory.DIAGNOSTIC,
+        ),
+        entity(
+            device,
+            "climate",
+            entity_id="climate.living_room_haier",
+            domain="climate",
+            original_name="Climate",
+        ),
+    ]
+
+    result = await build(
+        registry_hass,
+        device,
+        entities,
+        "YCJA002",
+    )
+
+    assert result.profile_id == "haier_ycj_a002"
+    assert result.card == {
+        "type": "entities",
+        "title": "Living room Haier",
+        "show_header_toggle": False,
+        "entities": [
+            {"entity": "climate.living_room_haier", "name": "Climate"}
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_two_kpb_devices_build_separate_cards(registry_hass):
     first = Device("kpb-9", "kpb-9-stable", config_entry_id="entry-9")
     second = Device("kpb-10", "kpb-10-stable", config_entry_id="entry-10")
