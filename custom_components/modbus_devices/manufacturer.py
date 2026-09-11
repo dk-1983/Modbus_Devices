@@ -18,6 +18,7 @@ class Manufacturer:
 
 MANUFACTURERS: tuple[Manufacturer, ...] = (
     Manufacturer("Bolid", "bolid"),
+    Manufacturer("Daikin", "daikin"),
     Manufacturer("Dyna Drive", "dyna_drive"),
     Manufacturer("Haier", "haier"),
     Manufacturer("Owen", "owen"),

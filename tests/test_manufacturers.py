@@ -33,6 +33,7 @@ def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
 
     assert list(manufacturers) == [
         "Bolid",
+        "Daikin",
         "Dyna Drive",
         "Haier",
         "Owen",
@@ -45,12 +46,14 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
         (item.canonical_name, item.module_name) for item in MANUFACTURERS
     ] == [
         ("Bolid", "bolid"),
+        ("Daikin", "daikin"),
         ("Dyna Drive", "dyna_drive"),
         ("Haier", "haier"),
         ("Owen", "owen"),
         ("Zuked", "zuked"),
     ]
     assert manufacturer_module_name("Bolid") == "bolid"
+    assert manufacturer_module_name("Daikin") == "daikin"
     assert manufacturer_module_name("Owen") == "owen"
     assert manufacturer_module_name("Dyna Drive") == "dyna_drive"
     assert manufacturer_module_name("Haier") == "haier"
@@ -62,7 +65,7 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
 
 
 @pytest.mark.parametrize(
-    "stored_name", ["Bolid", "Owen", "Dyna Drive", "Haier", "Zuked"]
+    "stored_name", ["Bolid", "Daikin", "Owen", "Dyna Drive", "Haier", "Zuked"]
 )
 def test_canonical_entry_options_remain_stable(stored_name):
     options = {
