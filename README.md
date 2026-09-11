@@ -11,10 +11,12 @@ Modbus Devices is a local Home Assistant integration for explicitly supported in
 ## Key features
 
 - Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, and Modbus RTU over UDP.
-- Explicit equipment models from Bolid, Owen, Zuked, and Dyna Drive.
+- Explicit equipment models from Bolid, Daikin, Dyna Drive, Haier, Owen, and
+  Zuked.
 - Direct Modbus devices and equipment connected through supported gateways.
 - Bolid S2000-PP, Orion, KDL, DPLS, and S2000R-ARR topologies.
-- Model-appropriate sensors, binary sensors, switches, and buttons.
+- Model-appropriate climate controls, sensors, binary sensors, switches, and
+  buttons.
 - Strict response validation and grouped/coordinated polling where appropriate.
 - Safe explicit write controls only for equipment with a supported command contract.
 - UI-only setup, English/Russian localization, and an optional native card generator.
@@ -83,6 +85,68 @@ Supported S2000-SP4 variants are `/24`, `/24 isp.01`, `/220`, and `/220 isp.01`;
 | С2000Р-ВТИ | S2000-PP / ARR/KDL | Temperature, relative humidity, both channel states, and main battery diagnostics |
 
 Some documented Bolid events require matching ARR/KDL/S2000M/PProg/S2000-PP configuration and retransmission. If an entity does not change, first verify that the event is configured to reach S2000-PP; this alone does not prove a device or integration defect.
+
+### Haier
+
+| Model | Connection | Main capabilities |
+|---|---|---|
+| [YCJ-A002](https://haier-rus.ru/product/ycj-a002-soglasovatel/) | Direct Modbus RTU | Power, HVAC mode, target/current temperature, fan mode, and fault/lock diagnostics |
+
+The adapter must be configured for its open Modbus RTU protocol
+(BM1: switch 1 OFF, switch 2 ON). The documented defaults are 19200 baud,
+8 data bits, no parity, and 1 stop bit. The integration uses the zero-based
+addresses printed in the
+[official YCJ-A002 installation and operation manual](https://haier-rus.ru/wp-content/uploads/2020/11/instrukcziya_ycj-a002.pdf):
+
+| Data area | Address | Access | Meaning |
+|---|---:|---|---|
+| Coil | 0 | FC01 / FC05 | Power |
+| Holding register | 0 | FC03 / FC06 | Target temperature, 16–30 °C |
+| Holding register | 1 | FC03 / FC06 | HVAC mode |
+| Holding register | 2 | FC03 / FC06 | Fan mode |
+| Holding register | 3 | FC03 | Controller lock state |
+| Input register | 0 | FC04 | Room temperature |
+| Input register | 1 | FC04 | Fault code |
+| Input register | 2 | FC04 | Compatibility unit number |
+
+The generated YCJ-A002 device card contains the primary climate control.
+Fault, lock, and raw protocol values remain available as diagnostic attributes.
+
+### Daikin
+
+| Model | Connection | Main capabilities |
+|---|---|---|
+| [RTD-RA](https://www.daikin.eu/en_us/products/product.html/RTD-RA.html) | Direct Modbus RTU | Power, HVAC mode, target/current temperature, five fan speeds, louvre swing, fault status, and coil-inlet temperature |
+
+RTD-RA uses Modbus RTU over three-wire RS-485. Its documented defaults are
+9600 baud, no parity, and 1 stop bit. Register references in the
+[official RTD-RA installation instructions](https://support.realtime-controls.co.uk/hc/en-us/article_attachments/360007028079)
+are already zero-based protocol addresses: H0001 is address 1, not address 0.
+The integration uses:
+
+| Manual reference | Address | Access | Meaning |
+|---|---:|---|---|
+| H0001 | 1 | FC03 / FC06 | Target temperature |
+| H0002 | 2 | FC03 / FC06 | Fan mode |
+| H0003 | 3 | FC03 / FC06 | HVAC mode |
+| H0004 | 4 | FC03 / FC06 | Louvre stop/swing |
+| H0005 | 5 | FC03 / FC06 | Power |
+| I0121 | 121 | FC04 | Fault active |
+| I0122 | 122 | FC04 | Fault code |
+| I0123 | 123 | FC04 | Return-air temperature, signed value ×100 |
+| I0130 | 130 | FC04 | Thermostat state |
+| I0131 | 131 | FC04 | Coil-inlet temperature, signed value ×100 |
+
+The generated RTD-RA device card places the climate control first and the
+coil-inlet temperature in its diagnostic section. Configure the RTD-RA
+Modbus-master timeout deliberately: the integration does not create artificial
+keepalive writes. Installation and operating-mode guidance is also available
+from the
+[official RTD-RA support page](https://support.realtime-controls.co.uk/hc/en-us/articles/360010965160-How-to-install-the-RTD-RA).
+
+Haier YCJ-A002 and Daikin RTD-RA support is covered by automated protocol,
+entity, presentation, and full regression tests. Hardware validation has not
+yet been performed because physical test devices are not currently available.
 
 ### Owen
 
@@ -227,7 +291,9 @@ Equipment implementations are manufacturer- and model-specific. Validation uses 
 - [Releases](https://github.com/dk-1983/Modbus_Devices/releases)
 - [License](LICENSE.md)
 - [Bolid](https://bolid.ru/)
+- [Daikin RTD-RA](https://www.daikin.eu/en_us/products/product.html/RTD-RA.html)
 - [Dyna Drive](https://www.dninno.com/)
+- [Haier YCJ-A002](https://haier-rus.ru/product/ycj-a002-soglasovatel/)
 - [Owen](https://owen.ru/)
 
 ## Author
