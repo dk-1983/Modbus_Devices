@@ -185,8 +185,6 @@ def test_invalid_registry_export_fails_loudly():
     with pytest.raises(TypeError, match="must be a tuple"):
         _validate_equipment_classes("Dyna Drive", "dyna_drive", [DN310])
     with pytest.raises(ValueError, match="Duplicate equipment class"):
-        _validate_equipment_classes(
-            "Dyna Drive", "dyna_drive", (DN310, DN310)
-        )
+        _validate_equipment_classes("Dyna Drive", "dyna_drive", (DN310, DN310))
     with pytest.raises(TypeError, match="non-class"):
         _validate_equipment_classes("Dyna Drive", "dyna_drive", (object(),))

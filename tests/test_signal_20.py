@@ -135,9 +135,9 @@ def test_exact_data_driven_capabilities_and_partial_mapping():
     capabilities = Signal20M.get_gateway_capabilities()
     assert len(capabilities) == 21
     assert (capabilities[0].local_object_number, capabilities[0].zone_type) == (0, 3)
-    assert [(item.local_object_number, item.zone_type) for item in capabilities[1:]] == [
-        (number, 1) for number in range(1, 21)
-    ]
+    assert [
+        (item.local_object_number, item.zone_type) for item in capabilities[1:]
+    ] == [(number, 1) for number in range(1, 21)]
     partial = configured(objects=(manual_zone_mapping(20, 7, 1, 0, None),))
     assert partial.attr_platforms == [Platform.SENSOR]
     assert [item["sensor_id"] for item in partial.get_state_sensor_descriptions()] == [
@@ -207,7 +207,9 @@ def test_unknown_primary_and_expanded_states_are_preserved():
             values[0] = 998
             return Response(values, function_code=4)
 
-    snapshot = asyncio.run(configured(UnknownClient()).async_get_snapshot())["state_sensors"]
+    snapshot = asyncio.run(configured(UnknownClient()).async_get_snapshot())[
+        "state_sensors"
+    ]
     assert snapshot["device_state"]["state"] == "unknown_254"
     assert snapshot["device_state"]["expanded_states"] == ("unknown_998",)
 
@@ -242,7 +244,9 @@ def test_configuration_assisted_mapping_filters_exact_rows_and_orion_address():
             return configuration
 
     automatic = asyncio.run(
-        AutomaticDeviceMappingProvider(Reader(), S2000PPConfigurationCache()).async_resolve(
+        AutomaticDeviceMappingProvider(
+            Reader(), S2000PPConfigurationCache()
+        ).async_resolve(
             gateway(),
             "Signal20M",
             12,

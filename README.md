@@ -8,6 +8,17 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
+## New in 1.1.0 — climate control
+
+This release introduces the first Home Assistant `climate` entities in Modbus
+Devices: **Haier YCJ-A002** and **Daikin RTD-RA**, with dedicated device-card
+profiles. It also adds **Modbus RTU over TCP** for transparent RAW TCP gateways.
+YCJ-A002 has been hardware-validated in Home Assistant through a 4VRS Gateway.
+
+Existing configurations require no migration. Update the integration and restart
+Home Assistant. Select the new transport when adding equipment behind a RAW TCP
+gateway. Cards remain an optional, manually added dashboard feature.
+
 ## Key features
 
 - Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, Modbus RTU over UDP, and Modbus RTU over TCP.
@@ -91,7 +102,7 @@ Some documented Bolid events require matching ARR/KDL/S2000M/PProg/S2000-PP conf
 
 | Model | Connection | Main capabilities |
 |---|---|---|
-| [YCJ-A002](https://haier-rus.ru/product/ycj-a002-soglasovatel/) | Direct Modbus RTU | Power, HVAC mode, target/current temperature, fan mode, and fault/lock diagnostics |
+| [YCJ-A002](https://haier-rus.ru/product/ycj-a002-soglasovatel/) | Modbus RTU, including RTU over TCP through a RAW TCP gateway | Power, HVAC mode, target/current temperature, fan mode, and fault/lock diagnostics |
 
 The adapter must be configured for its open Modbus RTU protocol
 (BM1: switch 1 OFF, switch 2 ON). The documented defaults are 19200 baud,
@@ -112,6 +123,11 @@ addresses printed in the
 
 The generated YCJ-A002 device card contains the primary climate control.
 Fault, lock, and raw protocol values remain available as diagnostic attributes.
+
+Hardware validation confirmed successful operation of a physical YCJ-A002 in
+Home Assistant using the new RTU-over-TCP transport through 4VRS Gateway RAW TCP
+at `10.0.2.13:502`, slave ID `1`. These are the validation setup's settings;
+use your own gateway endpoint and device address.
 
 ### Daikin
 
@@ -145,9 +161,9 @@ keepalive writes. Installation and operating-mode guidance is also available
 from the
 [official RTD-RA support page](https://support.realtime-controls.co.uk/hc/en-us/articles/360010965160-How-to-install-the-RTD-RA).
 
-Haier YCJ-A002 and Daikin RTD-RA support is covered by automated protocol,
-entity, presentation, and full regression tests. Hardware validation has not
-yet been performed because physical test devices are not currently available.
+Both models are covered by automated protocol, entity, presentation, and full
+regression tests. YCJ-A002 is hardware-validated on the 4VRS RAW TCP setup above;
+RTD-RA has not yet been hardware-validated.
 
 ### Owen
 
@@ -280,9 +296,12 @@ transaction ID: a gateway must not replay old serial responses onto a new TCP
 connection, and arbitrarily late identical replies cannot be distinguished from
 fresh replies. Use a single master for the serial bus.
 
-Automated TCP-emulator tests cover YCJ-A002 polling and controls. These tests
-do not establish physical gateway compatibility; see the validation record in
-[RTU over TCP](docs/rtu_over_tcp.md).
+Automated TCP-emulator tests cover YCJ-A002 polling and controls. Physical
+YCJ-A002 operation with Home Assistant is also confirmed on 4VRS RAW TCP
+(`10.0.2.13:502`, slave ID `1`); see [RTU over TCP](docs/rtu_over_tcp.md).
+During validation, a displayed `rtu_over_tcp` translation key was caused by the
+frontend cache and resolved after refreshing the page. Production configuration
+was not changed.
 
 ## Modbus RTU over UDP
 

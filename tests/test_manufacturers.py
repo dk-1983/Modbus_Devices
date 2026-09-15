@@ -42,9 +42,7 @@ def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
 
 
 def test_registry_contains_only_canonical_manufacturers_and_modules():
-    assert [
-        (item.canonical_name, item.module_name) for item in MANUFACTURERS
-    ] == [
+    assert [(item.canonical_name, item.module_name) for item in MANUFACTURERS] == [
         ("Bolid", "bolid"),
         ("Daikin", "daikin"),
         ("Dyna Drive", "dyna_drive"),

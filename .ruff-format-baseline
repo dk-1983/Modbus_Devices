@@ -9,7 +9,6 @@ custom_components/modbus_devices/equipment/bolid.py
 custom_components/modbus_devices/equipment/equipment.py
 custom_components/modbus_devices/equipment/owen.py
 custom_components/modbus_devices/gateway.py
-custom_components/modbus_devices/manufacturer.py
 custom_components/modbus_devices/mapping.py
 custom_components/modbus_devices/modbus_validation.py
 custom_components/modbus_devices/presentation/bolid.py
@@ -29,10 +28,8 @@ tests/test_c2000r_rm.py
 tests/test_c2000r_sirena.py
 tests/test_device_card_generator.py
 tests/test_dn310.py
-tests/test_equipment_registry.py
 tests/test_m3000_clock_sync.py
 tests/test_m3000_protocol.py
-tests/test_manufacturers.py
 tests/test_mip24_isp20.py
 tests/test_modbus_validation.py
 tests/test_phase3_startup_polling.py
@@ -40,14 +37,9 @@ tests/test_phase6_config_flow.py
 tests/test_phase7_reliability.py
 tests/test_plc110_24_60_k_m.py
 tests/test_rtu_over_udp.py
-tests/test_s2000_2.py
-tests/test_s2000_4.py
-tests/test_s2000_bki.py
 tests/test_s2000_pp.py
 tests/test_s2000_pp_counter.py
 tests/test_s2000_pp_numeric.py
-tests/test_s2000_sp2.py
-tests/test_signal_20.py
 tests/test_svk15_3_2_b.py
 tests/test_svk15_3_8_1_b3.py
 tests/test_trm138.py

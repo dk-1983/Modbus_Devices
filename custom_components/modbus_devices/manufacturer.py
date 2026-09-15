@@ -58,7 +58,5 @@ def canonicalize_manufacturer_options(
     normalized = dict(options)
     manufacturer = normalized.get(Config.CONF_MANUFACTURER)
     if manufacturer:
-        normalized[Config.CONF_MANUFACTURER] = canonical_manufacturer_name(
-            manufacturer
-        )
+        normalized[Config.CONF_MANUFACTURER] = canonical_manufacturer_name(manufacturer)
     return normalized

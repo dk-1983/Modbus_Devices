@@ -1,8 +1,9 @@
-# Modbus RTU over TCP — development validation
+# Modbus RTU over TCP — v1.1.0 validation
 
 ## Scope
 
-Development baseline: `41ffb7e`. Relevant local history:
+Transport implementation: `8f4bc60`, introduced in v1.1.0. Development baseline:
+`41ffb7e`. Relevant local history:
 
 - `6bd2b62`: YCJ-A002 climate support, zero-based map and serialized mode/power writes.
 - `d31026a`: RTU-over-UDP stale-response recovery; this transport remains unchanged.
@@ -12,6 +13,9 @@ The new `rtu_over_tcp` mode uses a separate `ModbusRtuOverTcpClient`, wrapped by
 the existing `SerializedModbusClient`. It sends full RTU ADUs, including CRC,
 through the configured RAW TCP endpoint. There is no MBAP header. No changes to
 YCJ-A002 register addressing or equipment behavior are needed.
+
+Existing configurations require no migration. The new transport is an additional
+config-flow choice; existing TCP, UDP and serial entries retain their transport.
 
 The TCP module keeps its codec independent of the UDP implementation to avoid
 changing UDP behavior in this narrowly scoped addition. CRC wire order and RTU
@@ -58,7 +62,7 @@ canonical identity, persisted fields, connection failure, cleanup and EN/RU
 translations. Existing UDP, common validation, lifecycle and serialization tests
 are included in regression runs.
 
-Validation on 2026-09-15:
+Transport validation on 2026-09-15 (before release preparation):
 
 - Python 3.14, Home Assistant 2026.9.2, pymodbus 3.15.0.
 - Full suite: **1336 passed**, five dependency deprecation warnings.

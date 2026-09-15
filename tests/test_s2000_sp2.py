@@ -118,7 +118,16 @@ def test_dpls_identity_uses_gateway_kdl_and_base_address():
     moved = mapping(manual_relay_mapping(21, 1), base=21)
     other_kdl = mapping(manual_relay_mapping(20, 1), kdl=11)
     assert first.identity.dpls == DPLSSubIdentity(20, 2)
-    assert len({first.identity.stable_id, moved.identity.stable_id, other_kdl.identity.stable_id}) == 3
+    assert (
+        len(
+            {
+                first.identity.stable_id,
+                moved.identity.stable_id,
+                other_kdl.identity.stable_id,
+            }
+        )
+        == 3
+    )
     assert configured().attr_device_identifier == first.identity.stable_id
 
 
@@ -211,7 +220,9 @@ def test_assisted_mapping_filters_exact_kdl_dpls_relay_rows():
 
     metadata = DownstreamDeviceMetadata(topology="two_outputs")
     automatic = asyncio.run(
-        AutomaticDeviceMappingProvider(Reader(), S2000PPConfigurationCache()).async_resolve(
+        AutomaticDeviceMappingProvider(
+            Reader(), S2000PPConfigurationCache()
+        ).async_resolve(
             gateway(),
             "C2000SP2",
             10,

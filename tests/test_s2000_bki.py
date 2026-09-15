@@ -115,7 +115,9 @@ def test_registry_metadata_and_config_flow_visibility():
 def test_direct_orion_identity_has_no_dpls_and_is_stable():
     first = mapping(device_state())
     second = ResolvedDeviceMapping(
-        identity=identity(orion=13), source=MappingSource.MANUAL, objects=(device_state(),)
+        identity=identity(orion=13),
+        source=MappingSource.MANUAL,
+        objects=(device_state(),),
     )
     assert first.identity.dpls is None
     assert first.identity.stable_id != second.identity.stable_id
@@ -197,15 +199,16 @@ def test_unknown_primary_and_expanded_states_are_preserved():
             self.input_calls.append((address, count, device_id))
             return Response([998] + [0] * 15, function_code=4)
 
-    state = asyncio.run(configured(UnknownClient()).async_get_snapshot())["state_sensors"][
-        "device_state"
-    ]
+    state = asyncio.run(configured(UnknownClient()).async_get_snapshot())[
+        "state_sensors"
+    ]["device_state"]
     assert state["state"] == "unknown_254"
     assert state["expanded_states"] == ("unknown_998",)
 
 
 @pytest.mark.parametrize(
-    "failure", ["none", "error", "wrong_function", "exception", "truncated", "expanded_none"]
+    "failure",
+    ["none", "error", "wrong_function", "exception", "truncated", "expanded_none"],
 )
 def test_malformed_and_transport_failures_are_not_normal(failure):
     with pytest.raises(ModbusException):
@@ -230,7 +233,9 @@ def test_assisted_mapping_selects_only_own_device_state_at_orion_address():
             return configuration
 
     automatic = asyncio.run(
-        AutomaticDeviceMappingProvider(Reader(), S2000PPConfigurationCache()).async_resolve(
+        AutomaticDeviceMappingProvider(
+            Reader(), S2000PPConfigurationCache()
+        ).async_resolve(
             gateway(),
             "C2000BKI",
             12,

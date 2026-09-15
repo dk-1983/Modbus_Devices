@@ -136,7 +136,11 @@ def test_direct_orion_identity_has_no_dpls_and_is_stable():
 def test_exact_optional_capabilities_and_entities():
     capabilities = C20004.get_gateway_capabilities()
     assert [(item.local_object_number, item.zone_type) for item in capabilities] == [
-        (0, 3), (1, 1), (2, 1), (3, 1), (4, 1)
+        (0, 3),
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (4, 1),
     ]
     partial = configured(objects=(manual_zone_mapping(2, 7, 1, 0, None),))
     assert partial.attr_platforms == [Platform.SENSOR]
@@ -238,7 +242,9 @@ def test_configuration_assisted_mapping_filters_exact_rows():
             return configuration
 
     automatic = asyncio.run(
-        AutomaticDeviceMappingProvider(Reader(), S2000PPConfigurationCache()).async_resolve(
+        AutomaticDeviceMappingProvider(
+            Reader(), S2000PPConfigurationCache()
+        ).async_resolve(
             gateway(),
             "C20004",
             12,
