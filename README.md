@@ -212,7 +212,7 @@ Configuration is performed entirely in the Home Assistant UI.
 4. Enter the host/port or serial settings and Modbus unit ID.
 5. Finish setup; one Home Assistant device is created for the physical instrument.
 
-<p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Choose a Modbus transport" width="78%"></p>
+<p align="center"><img src="pictures/config-flow/modbus_transport_selection.png" alt="Choose a Modbus transport" width="78%"></p>
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step2.jpg" alt="Choose a manufacturer" width="78%"></p>
 

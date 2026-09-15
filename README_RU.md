@@ -211,7 +211,7 @@ Modbus Devices доступна в стандартном каталоге ин�
 4. Укажите адрес/порт либо параметры последовательного соединения и Modbus Unit ID.
 5. Завершите настройку; для физического прибора будет создано одно устройство Home Assistant.
 
-<p align="center"><img src="pictures/config-flow/MD_menu_step1.jpg" alt="Выбор Modbus-подключения" width="78%"></p>
+<p align="center"><img src="pictures/config-flow/modbus_transport_selection.png" alt="Выбор Modbus-подключения" width="78%"></p>
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step2.jpg" alt="Выбор производителя" width="78%"></p>
 
