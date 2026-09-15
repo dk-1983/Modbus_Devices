@@ -14,7 +14,7 @@ Modbus Devices — локальная интеграция Home Assistant для
 Devices: **Haier YCJ-A002** и **Daikin RTD-RA**, а также специализированные
 профили карточек этих устройств. Добавлен **Modbus RTU over TCP** для прозрачных
 RAW TCP-шлюзов. Работа YCJ-A002 аппаратно подтверждена в Home Assistant через
-[4VRS Gateway](https://github.com/dk-1983/moxa-serial-server) в режиме RAW TCP.
+[4VRS Gateway](https://github.com/dk-1983/moxa-4vrs-gateway) в режиме RAW TCP.
 
 Миграция существующих конфигураций не требуется. Обновите интеграцию и
 перезапустите Home Assistant. Новый транспорт выбирается при добавлении

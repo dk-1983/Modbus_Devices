@@ -84,7 +84,7 @@ Transport validation on 2026-09-15 (before release preparation):
 Hardware validation confirmed by the user on 2026-09-15:
 
 - A physical YCJ-A002 successfully operates through Modbus RTU over TCP.
-- [4VRS Gateway](https://github.com/dk-1983/moxa-serial-server) in RAW TCP mode:
+- [4VRS Gateway](https://github.com/dk-1983/moxa-4vrs-gateway) in RAW TCP mode:
   endpoint `10.0.2.13:502`; slave ID: `1`.
 - Home Assistant successfully uses the new integration transport.
 - The displayed `rtu_over_tcp` label was caused by the frontend cache and

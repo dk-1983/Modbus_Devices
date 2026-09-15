@@ -14,7 +14,7 @@ This release introduces the first Home Assistant `climate` entities in Modbus
 Devices: **Haier YCJ-A002** and **Daikin RTD-RA**, with dedicated device-card
 profiles. It also adds **Modbus RTU over TCP** for transparent RAW TCP gateways.
 YCJ-A002 has been hardware-validated in Home Assistant through
-[4VRS Gateway](https://github.com/dk-1983/moxa-serial-server) in RAW TCP mode.
+[4VRS Gateway](https://github.com/dk-1983/moxa-4vrs-gateway) in RAW TCP mode.
 
 Existing configurations require no migration. Update the integration and restart
 Home Assistant. Select the new transport when adding equipment behind a RAW TCP

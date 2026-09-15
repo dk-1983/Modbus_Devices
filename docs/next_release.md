@@ -30,7 +30,7 @@ Existing Modbus RTU over UDP behavior is unchanged.
 
 A physical **Haier YCJ-A002 successfully operates in Home Assistant through
 the new Modbus RTU over TCP transport** using
-[4VRS Gateway](https://github.com/dk-1983/moxa-serial-server) in RAW TCP mode
+[4VRS Gateway](https://github.com/dk-1983/moxa-4vrs-gateway) in RAW TCP mode
 at `10.0.2.13:502`, slave ID `1`. These are validation-setup parameters, not
 required defaults for other installations.
 
