@@ -1,5 +1,6 @@
 """Constants for the modbus_devices integration."""
 
+
 class Config:
     """Settings constants params."""
 
@@ -54,4 +55,5 @@ class Config:
     MODBUS_TCP: str = "ModBus TCP/IP"
     MODBUS_UDP: str = "ModBus UDP/IP"
     MODBUS_RTU_OVER_UDP: str = "rtu_over_udp"
+    MODBUS_RTU_OVER_TCP: str = "rtu_over_tcp"
     MODBUS_SERIAL: str = "SerialPort"

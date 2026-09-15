@@ -705,6 +705,7 @@ def test_config_flow_localization_catalogs_have_identical_keys():
         "io_mapping",
         "network",
         "rtu_over_udp",
+        "rtu_over_tcp",
         "serial",
         "existing_gateway",
         "gateway_child_model",
@@ -722,6 +723,7 @@ def test_config_flow_localization_catalogs_have_identical_keys():
         "modbus_tcp",
         "modbus_udp",
         Config.MODBUS_RTU_OVER_UDP,
+        Config.MODBUS_RTU_OVER_TCP,
         "serial",
         "existing_gateway",
     }

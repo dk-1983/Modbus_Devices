@@ -82,6 +82,7 @@ async def test_transport_is_a_separate_localized_selector_option(monkeypatch):
         "modbus_tcp",
         "modbus_udp",
         Config.MODBUS_RTU_OVER_UDP,
+        Config.MODBUS_RTU_OVER_TCP,
         "serial",
     ]
     assert selector_field.config["translation_key"] == "modbus_transport"
@@ -99,9 +100,7 @@ async def test_flow_order_continues_through_manufacturer_model_and_rtu_form():
         )
     )["step_id"] == "manufacturer"
     assert (
-        await flow.async_step_manufacturer(
-            {Config.CONF_MANUFACTURER: "Dyna Drive"}
-        )
+        await flow.async_step_manufacturer({Config.CONF_MANUFACTURER: "Dyna Drive"})
     )["step_id"] == "device"
     result = await flow.async_step_device({Config.CONF_DEVICE_CLASS: "DN310"})
     assert result["step_id"] == "rtu_over_udp"
@@ -226,7 +225,11 @@ async def test_invalid_local_configuration_is_rejected_before_connect(
 @pytest.mark.parametrize("failure", [None, OSError("offline"), TimeoutError()])
 async def test_connection_failures_use_existing_cannot_connect(monkeypatch, failure):
     flow = flow_for_rtu()
-    connect = AsyncMock(return_value=None) if failure is None else AsyncMock(side_effect=failure)
+    connect = (
+        AsyncMock(return_value=None)
+        if failure is None
+        else AsyncMock(side_effect=failure)
+    )
     monkeypatch.setattr(
         "custom_components.modbus_devices.config_flow.connect_modbus", connect
     )
@@ -287,4 +290,6 @@ def test_gateway_connection_key_ignores_local_bind_routing_details():
 def test_s2000_ethernet_is_not_an_equipment_model():
     equipment = get_equipment_classes_by_manufacturer()
     assert [len(equipment[name]) for name in equipment] == [29, 1, 1, 1, 2, 1]
-    assert all("Ethernet" not in model for models in equipment.values() for model in models)
+    assert all(
+        "Ethernet" not in model for models in equipment.values() for model in models
+    )

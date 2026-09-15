@@ -156,6 +156,7 @@ async def test_direct_serial_tcp_and_direct_s2000_pp_routes_remain_available(
         "modbus_tcp",
         "modbus_udp",
         "rtu_over_udp",
+        "rtu_over_tcp",
         "serial",
         "existing_gateway",
     ]

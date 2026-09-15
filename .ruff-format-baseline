@@ -4,7 +4,6 @@
 # changed, CI also requires that complete file to be formatted and removed from
 # this baseline. The list must only shrink.
 custom_components/modbus_devices/binary_sensor.py
-custom_components/modbus_devices/const.py
 custom_components/modbus_devices/coordinator.py
 custom_components/modbus_devices/equipment/bolid.py
 custom_components/modbus_devices/equipment/equipment.py
@@ -12,7 +11,6 @@ custom_components/modbus_devices/equipment/owen.py
 custom_components/modbus_devices/gateway.py
 custom_components/modbus_devices/manufacturer.py
 custom_components/modbus_devices/mapping.py
-custom_components/modbus_devices/modbus_client.py
 custom_components/modbus_devices/modbus_validation.py
 custom_components/modbus_devices/presentation/bolid.py
 custom_components/modbus_devices/rtu_over_udp.py
@@ -42,7 +40,6 @@ tests/test_phase6_config_flow.py
 tests/test_phase7_reliability.py
 tests/test_plc110_24_60_k_m.py
 tests/test_rtu_over_udp.py
-tests/test_rtu_over_udp_config_flow.py
 tests/test_s2000_2.py
 tests/test_s2000_4.py
 tests/test_s2000_bki.py

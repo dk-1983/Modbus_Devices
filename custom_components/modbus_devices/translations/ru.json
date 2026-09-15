@@ -10,6 +10,7 @@
       "io_mapping": {"title": "Прямая привязка входов и выходов", "description": "Настройте расположение входов и выходов прибора в Modbus.", "data": {"di_data_area": "Область данных дискретных входов", "di_base_address": "Начальный адрес дискретных входов", "di_address_stride": "Шаг адресов дискретных входов", "do_base_address": "Начальный адрес дискретных выходов", "do_address_stride": "Шаг адресов дискретных выходов"}},
       "network": {"title": "Сетевое подключение", "description": "Настройте сетевой узел Modbus.", "data": {"host": "Хост", "port": "Порт", "device_id": "Адрес прибора", "name": "Имя"}},
       "rtu_over_udp": {"title": "Modbus RTU через UDP", "description": "Настройте передачу необработанных кадров Modbus RTU через UDP. Локальный UDP-порт необходим шлюзам, которые отвечают на заранее настроенный порт статического узла.", "data": {"host": "Удалённый хост", "remote_port": "Удалённый UDP-порт", "local_udp_port": "Локальный UDP-порт", "timeout": "Тайм-аут", "local_bind_address": "Локальный адрес привязки", "device_id": "Адрес прибора", "name": "Имя"}},
+      "rtu_over_tcp": {"title": "Modbus RTU через TCP", "description": "Полные кадры RTU с CRC через прозрачный RAW TCP шлюза 4VRS, без MBAP. Укажите настроенный RAW TCP-порт шлюза.", "data": {"host": "Хост", "port": "RAW TCP-порт", "timeout": "Тайм-аут", "device_id": "Адрес прибора", "name": "Имя"}},
       "serial": {"title": "Последовательное подключение", "description": "Настройте последовательное подключение Modbus.", "data": {"device_id": "Адрес прибора", "com_port": "Последовательный порт", "baudrate": "Скорость обмена", "bytesize": "Биты данных", "parity": "Чётность", "stopbits": "Стоповые биты", "name": "Имя"}},
       "gateway_context": {"title": "Шлюз С2000-ПП", "description": "Выберите существующий контекст шлюза или добавьте новый.", "data": {"gateway_selection": "Шлюз"}},
       "gateway_new": {"title": "Новый шлюз С2000-ПП", "description": "Задайте стабильное имя физического шлюза.", "data": {"gateway_id": "Имя шлюза"}},
@@ -23,6 +24,7 @@
     "error": {
       "cannot_connect": "Не удалось подключиться к прибору Modbus.",
       "invalid_rtu_over_udp_config": "Некорректная конфигурация Modbus RTU через UDP.",
+      "invalid_rtu_over_tcp_config": "Некорректная конфигурация Modbus RTU через TCP.",
       "invalid_io_mapping": "Некорректная прямая привязка входов и выходов.",
       "invalid_gateway": "Некорректная конфигурация шлюза.",
       "unsupported_gateway_transport": "Этот прибор не поддерживается через выбранный шлюз.",
@@ -51,6 +53,7 @@
         "modbus_tcp": "ModBus TCP/IP",
         "modbus_udp": "ModBus UDP/IP",
         "rtu_over_udp": "Modbus RTU через UDP",
+        "rtu_over_tcp": "Modbus RTU через TCP",
         "serial": "SerialPort",
         "existing_gateway": "Через существующий С2000-ПП"
       }

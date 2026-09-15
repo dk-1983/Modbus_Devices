@@ -10,7 +10,7 @@ Modbus Devices is a local Home Assistant integration for explicitly supported in
 
 ## Key features
 
-- Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, and Modbus RTU over UDP.
+- Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, Modbus RTU over UDP, and Modbus RTU over TCP.
 - Explicit equipment models from Bolid, Daikin, Dyna Drive, Haier, Owen, and
   Zuked.
 - Direct Modbus devices and equipment connected through supported gateways.
@@ -29,6 +29,7 @@ Modbus Devices is a local Home Assistant integration for explicitly supported in
 | Modbus UDP/IP | Native Modbus messages over UDP |
 | Serial Modbus RTU | Direct RS-485/serial connections |
 | Modbus RTU over UDP | Complete RTU frames carried inside UDP datagrams |
+| Modbus RTU over TCP | Complete RTU frames with CRC over a transparent RAW TCP stream, without MBAP |
 
 Native Modbus UDP and RTU-over-UDP use different wire formats. Select the transport that matches the equipment or gateway.
 
@@ -189,7 +190,7 @@ Configuration is performed entirely in the Home Assistant UI.
 ### Option 1 — Direct Modbus device
 
 1. Add **Modbus Devices** and choose **Add a new hub**.
-2. Select TCP, UDP, serial RTU, or RTU over UDP.
+2. Select TCP, UDP, serial RTU, RTU over UDP, or RTU over TCP.
 3. Select the manufacturer and exact model.
 4. Enter the host/port or serial settings and Modbus unit ID.
 5. Finish setup; one Home Assistant device is created for the physical instrument.
@@ -258,6 +259,30 @@ Manufacturer → Equipment model → Transport or gateway → Coordinator
 Home Assistant ← Modbus ← S2000-PP ← Orion ← S2000-KDL ← DPLS device
                                                    ↖ S2000R-ARR radio infrastructure
 ```
+
+## Modbus RTU over TCP (4VRS RAW TCP)
+
+Select **Modbus RTU over TCP** for the transparent RAW TCP transport of a
+4VRS Gateway, including Haier YCJ-A002. Enter the gateway host, its configured
+RAW TCP port, device ID (1–247), and timeout. The port must match the gateway;
+502 in the form is only a default. Serial settings remain configured on the gateway.
+The config flow checks TCP connectivity; device polling validates RTU responses.
+
+Requests contain a full RTU ADU with CRC and no MBAP header. The client supports
+FC01/02/03/04/05/06/16, assembles fragmented TCP responses, and validates frame
+length, CRC, slave, function, byte count, and write acknowledgement fields.
+`SerializedModbusClient` remains the shared physical request boundary.
+
+A timeout, cancellation, invalid response, or incomplete EOF closes the stream.
+The next independent request reconnects; the failed command is never replayed.
+Buffered unsolicited data and coalesced extra frames are rejected. RTU has no
+transaction ID: a gateway must not replay old serial responses onto a new TCP
+connection, and arbitrarily late identical replies cannot be distinguished from
+fresh replies. Use a single master for the serial bus.
+
+Automated TCP-emulator tests cover YCJ-A002 polling and controls. These tests
+do not establish physical gateway compatibility; see the validation record in
+[RTU over TCP](docs/rtu_over_tcp.md).
 
 ## Modbus RTU over UDP
 

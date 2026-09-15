@@ -59,6 +59,7 @@ _TRANSPORT_CHOICES = {
     "modbus_tcp": Config.MODBUS_TCP,
     "modbus_udp": Config.MODBUS_UDP,
     Config.MODBUS_RTU_OVER_UDP: Config.MODBUS_RTU_OVER_UDP,
+    Config.MODBUS_RTU_OVER_TCP: Config.MODBUS_RTU_OVER_TCP,
     "serial": Config.MODBUS_SERIAL,
 }
 _VIA_EXISTING_GATEWAY = "existing_gateway"
@@ -361,6 +362,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         if mode == Config.MODBUS_RTU_OVER_UDP:
             return await self.async_step_rtu_over_udp()
 
+        if mode == Config.MODBUS_RTU_OVER_TCP:
+            return await self.async_step_rtu_over_tcp()
+
         return await self.async_step_serial()
 
     async def async_step_io_mapping(self, user_input=None):
@@ -486,6 +490,73 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         return self.async_show_form(
             step_id="network",
             data_schema=schema,
+            errors=errors,
+        )
+
+    async def async_step_rtu_over_tcp(self, user_input=None):
+        """Configure full RTU ADUs with CRC over a RAW TCP gateway."""
+        errors = {}
+        if user_input is not None:
+            try:
+                host = cv.string(user_input[CONF_HOST]).strip().lower()
+                port = user_input[CONF_PORT]
+                device_id = user_input.get(CONF_DEVICE_ID, 1)
+                timeout = user_input[Config.CONF_TIMEOUT]
+                if not host:
+                    raise ValueError("Host must not be empty")
+                if type(port) is not int or not 1 <= port <= 65535:
+                    raise ValueError("TCP port is out of range")
+                if type(device_id) is not int or not 1 <= device_id <= 247:
+                    raise ValueError("Device ID is out of range")
+                if isinstance(timeout, bool):
+                    raise ValueError("Timeout must be numeric")
+                timeout = float(timeout)
+                if not math.isfinite(timeout) or timeout <= 0:
+                    raise ValueError("Timeout must be positive and finite")
+            except (KeyError, TypeError, ValueError):
+                errors["base"] = "invalid_rtu_over_tcp_config"
+            else:
+                self._data.update(
+                    {
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        Config.CONF_TIMEOUT: timeout,
+                        CONF_DEVICE_ID: device_id,
+                        CONF_NAME: cv.string(
+                            user_input.get(CONF_NAME, "Modbus Device")
+                        ),
+                    }
+                )
+                client = None
+                try:
+                    client = await connect_modbus(self._data)
+                    if not client or not client.connected:
+                        errors["base"] = "cannot_connect"
+                except (ModbusException, OSError, TimeoutError):
+                    errors["base"] = "cannot_connect"
+                finally:
+                    if client is not None:
+                        client.close()
+                if not errors:
+                    return await self._async_connection_ready(
+                        f"{Config.MODBUS_RTU_OVER_TCP}:{host}:{port}:{device_id}"
+                    )
+
+        return self.async_show_form(
+            step_id="rtu_over_tcp",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_HOST, default="192.0.2.1"): cv.string,
+                    vol.Required(CONF_PORT, default=502): vol.All(
+                        int, vol.Range(min=1, max=65535)
+                    ),
+                    vol.Required(Config.CONF_TIMEOUT, default=3.0): vol.Coerce(float),
+                    vol.Required(CONF_DEVICE_ID, default=1): vol.All(
+                        int, vol.Range(min=1, max=247)
+                    ),
+                    vol.Optional(CONF_NAME, default="Modbus Device"): cv.string,
+                }
+            ),
             errors=errors,
         )
 
@@ -696,6 +767,8 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     def _connection_key(self) -> str:
         """Return a stable transport key for gateway identity and reuse."""
         mode = self._data[Config.CONF_MODBUS_MODE]
+        if mode == Config.MODBUS_RTU_OVER_TCP:
+            return f"{mode}:{self._data[CONF_HOST]}:{self._data[CONF_PORT]}"
         if mode in (Config.MODBUS_TCP, Config.MODBUS_UDP):
             return f"{mode}:{self._data[CONF_HOST]}:{self._data[CONF_PORT]}"
         if mode == Config.MODBUS_RTU_OVER_UDP:
