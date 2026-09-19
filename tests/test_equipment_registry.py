@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from custom_components.modbus_devices.equipment import (
+    apc,
     bolid,
     daikin,
     dyna_drive,
@@ -24,6 +25,7 @@ from custom_components.modbus_devices.equipment.equipment import (
 
 
 EXPECTED_CLASSES = {
+    "APC": ["SmartUPS3000RMXL"],
     "Bolid": [
         "C20002",
         "C20004",
@@ -63,6 +65,7 @@ EXPECTED_CLASSES = {
 }
 
 EXPECTED_MODELS = {
+    "APC": ["Smart-UPS 3000 RM XL"],
     "Bolid": [
         "С2000-2",
         "С2000-4",
@@ -104,10 +107,11 @@ EXPECTED_MODELS = {
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 35
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 36
 
 
 def test_module_exports_are_the_single_registry_source():
+    assert apc.EQUIPMENT_CLASSES == _get_equipment_classes("APC")
     assert bolid.EQUIPMENT_CLASSES == _get_equipment_classes("Bolid")
     assert daikin.EQUIPMENT_CLASSES == _get_equipment_classes("Daikin")
     assert dyna_drive.EQUIPMENT_CLASSES == _get_equipment_classes("Dyna Drive")
