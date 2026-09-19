@@ -1,11 +1,13 @@
 """Protocol and compatibility tests for Owen TRM-138."""
 
 import struct
+from types import SimpleNamespace
 
 import pytest
 from pymodbus.exceptions import ModbusException
 
 from custom_components.modbus_devices.equipment.owen import TRM138
+from custom_components.modbus_devices.sensor import ModBusSensorEntity
 
 
 class Response:
@@ -34,6 +36,109 @@ class Client:
 
 def float_words(value: float) -> list[int]:
     return list(struct.unpack(">HH", struct.pack(">f", value)))
+
+
+HARDWARE_VECTORS = [
+    ([3, 15, 0, 0x4171, 0xF36D], 15.12193, 0.015),
+    ([3, 15, 0, 0x4171, 0xC80D], 15.11134, 0.015),
+    ([3, 15, 0, 0x4171, 0xC196], 15.10976, 0.015),
+    ([0, 1510, 0, 0x4171, 0xAB2C], 15.10429, 1510.0),
+    ([3, 15, 0, 0x4171, 0xBFA5], 15.10929, 0.015),
+]
+
+
+def sensor(device, channel):
+    coordinator = SimpleNamespace(
+        data={"chanels": {channel["chanel_number"]: channel}},
+        last_update_success=True,
+    )
+    return ModBusSensorEntity(
+        coordinator, device, SimpleNamespace(entry_id="trm138"), channel
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("registers", "expected", "legacy"), HARDWARE_VECTORS)
+async def test_hardware_vectors_use_float_for_all_eight_channels(
+    registers, expected, legacy
+):
+    client = Client(registers * 8)
+    device = TRM138(client, 8)
+
+    snapshot = await device.async_get_snapshot()
+
+    assert client.calls == [{"address": 0, "count": 40, "device_id": 8}]
+    assert set(snapshot["chanels"]) == set(range(1, 9))
+    for number, channel in snapshot["chanels"].items():
+        assert channel["chanel_number"] == number
+        assert channel["raw_registers"] == registers
+        assert channel["decimal_point"] == registers[0]
+        assert channel["integer_value"] == registers[1]
+        assert channel["legacy_measurement"] == legacy
+        assert channel["measurement"] == pytest.approx(expected, abs=0.000005)
+        assert channel["measurement"] == channel["float_value"]
+        assert channel["valid"] is True
+        entity = sensor(device, channel)
+        assert entity.native_value == channel["measurement"]
+        assert entity.suggested_display_precision == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("float_value", [float("nan"), float("inf"), -float("inf")])
+async def test_non_finite_float_invalidates_only_affected_channel(float_value):
+    registers = channel_payload(1, 123, float_value=float_value)
+    device = TRM138(Client(registers + channel_payload(2) * 7), 8)
+    snapshot = await device.async_get_snapshot()
+    channel = snapshot["chanels"][1]
+
+    assert channel["valid"] is False
+    assert channel["measurement"] is None
+    assert channel["float_value"] is None
+    assert channel["raw_registers"] == registers
+    assert channel["legacy_measurement"] == 12.3
+    assert sensor(device, channel).native_value is None
+    assert all(snapshot["chanels"][n]["valid"] for n in range(2, 9))
+
+
+@pytest.mark.asyncio
+async def test_entity_uses_current_measurement_and_stable_display_precision():
+    device = TRM138(Client([]), 8)
+    entity = sensor(device, device.attr_ch2)
+    assert entity.native_value is None
+    assert entity.suggested_display_precision == 2
+    for registers, _, _ in HARDWARE_VECTORS:
+        channel = device._update_channel(2, registers)
+        entity.coordinator.data = {"chanels": {2: channel}}
+        assert entity.native_value == channel["measurement"]
+        assert entity.suggested_display_precision == 2
+
+    # The entity consumes the decoder result even without the legacy block.
+    entity.coordinator.data = {"chanels": {2: {"measurement": -12.345}}}
+    assert entity.native_value == -12.345
+    entity.coordinator.data = {"chanels": {}}
+    assert entity.native_value is None
+    assert entity.suggested_display_precision == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [1, 11, 99])
+async def test_entity_suppresses_status_error_and_recovers(status):
+    device = TRM138(Client([]), 8)
+    entity = sensor(device, device.attr_ch1)
+    for current_status in (0, status, 0):
+        channel = device._update_channel(
+            1, channel_payload(1, status=current_status, float_value=15.1)
+        )
+        entity.coordinator.data = {"chanels": {1: channel}}
+        assert entity.available
+        if current_status:
+            assert entity.native_value is None
+        else:
+            assert entity.native_value == pytest.approx(15.1)
+    entity.coordinator.data = {
+        "chanels": {1: {"measurement": 15.1, "status_code": status}}
+    }
+    assert entity.native_value is None
 
 
 def channel_payload(
@@ -78,7 +183,9 @@ async def test_signed_int16_measurement_and_float_high_low_words_are_decoded():
     channel = await device.get_chanel(1)
 
     assert channel["value"][:3] == [2, -123, 0]
-    assert channel["measurement"] == -1.23
+    assert channel["measurement"] == -1.25
+    assert channel["integer_value"] == -123
+    assert channel["legacy_measurement"] == -1.23
     assert channel["float_value"] == -1.25
     assert channel["raw_registers"][1] == 0xFF85
     assert channel["valid"] is True
@@ -121,7 +228,9 @@ async def test_documented_decimal_point_scaling(precision):
         Client(channel_payload(1, 1234, precision=precision)), 1
     ).get_chanel(1)
 
-    assert channel["measurement"] == 1234 / (10**precision)
+    assert channel["legacy_measurement"] == 1234 / (10**precision)
+    assert channel["decimal_point"] == precision
+    assert channel["measurement"] == 1.0
 
 
 @pytest.mark.asyncio
@@ -135,6 +244,8 @@ async def test_known_and_unknown_statuses_are_device_level_channel_failures():
 
     assert (known["status"], known["valid"]) == ("sensor_line_break", False)
     assert (unknown["status"], unknown["valid"]) == ("unknown", False)
+    assert known["measurement"] is None
+    assert unknown["measurement"] is None
 
 
 @pytest.mark.asyncio

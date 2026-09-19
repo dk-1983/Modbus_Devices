@@ -175,33 +175,16 @@ class ModBusSensorEntity(
         # A valid Modbus response can still report a device-level channel fault.
         # Keep the entity available (transport succeeded), but do not publish the
         # accompanying measurement as a valid state.
-        if channel.get("valid") is False:
+        if channel.get("valid") is False or channel.get("status_code", 0) != 0:
             return None
 
-        value = channel.get("value")
-
-        if not value or len(value) < 2:
-            return None
-
-        precision = value[0]
-
-        return value[1] / (10**precision)
+        return channel.get("measurement")
 
     @property
     def suggested_display_precision(self) -> int:
         """Return display precision."""
 
-        channel = self.current_channel
-
-        if channel is None:
-            return 0
-
-        value = channel.get("value")
-
-        if not value:
-            return 0
-
-        return value[0]
+        return self._channel.get("suggested_display_precision", 0)
 
 
 class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):

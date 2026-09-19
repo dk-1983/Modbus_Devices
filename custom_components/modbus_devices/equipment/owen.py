@@ -1,6 +1,7 @@
 """Equipment models manufactured by Owen."""
 
 from datetime import datetime, timedelta, timezone
+import math
 import struct
 from typing import Any
 
@@ -93,6 +94,7 @@ class TRM138:
             "func_mode": [4],
             "device_class": SensorDeviceClass.TEMPERATURE,
             "state_class": SensorStateClass.MEASUREMENT,
+            "suggested_display_precision": 2,
             "icon_c": "mdi:temperature-celsius",
             "icon_f": "mdi:temperature-fahrenheit",
             "icon_k": "mdi:temperature-kelvin",
@@ -201,18 +203,23 @@ class TRM138:
         decoded[1] = integer_value
         status_code = decoded[2]
         float_value = struct.unpack(">f", struct.pack(">HH", decoded[3], decoded[4]))[0]
+        finite = math.isfinite(float_value)
+        valid = status_code == 0 and finite
         channel = {
             **self._channels[number],
-            # ``value`` is the established entity contract: decimal point, signed
+            # Preserve the legacy diagnostic block: decimal point, signed
             # integer, status, then the documented IEEE-754 high/low words.
             "value": decoded,
             "raw_registers": list(registers),
             "decimal_point": decimal_point,
-            "measurement": integer_value / (10**decimal_point),
-            "float_value": float_value,
+            "integer_value": integer_value,
+            "legacy_measurement": integer_value / (10**decimal_point),
+            "measurement": float_value if valid else None,
+            # Non-finite numbers must not leak into HA state/diagnostic JSON.
+            "float_value": float_value if finite else None,
             "status_code": status_code,
             "status": self.STATUS_DESCRIPTIONS.get(status_code, "unknown"),
-            "valid": status_code == 0,
+            "valid": valid,
         }
         self._channels[number] = channel
         setattr(self, f"attr_ch{number}", channel)
