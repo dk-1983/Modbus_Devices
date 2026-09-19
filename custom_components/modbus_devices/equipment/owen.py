@@ -19,6 +19,7 @@ from homeassistant.const import Platform, UnitOfTemperature
 
 from ..modbus_validation import (
     validate_fc05_response,
+    validate_fc06_response,
     validated_bits,
     validated_registers,
 )
@@ -32,6 +33,10 @@ class TRM138:
     CHANNEL_COUNT = 8
     REGISTERS_PER_CHANNEL = 5
     REGISTER_COUNT = CHANNEL_COUNT * REGISTERS_PER_CHANNEL
+    COMPARATOR_OUTPUT_BASE_ADDRESS = 65
+    COMPARATOR_OUTPUT_COUNT = CHANNEL_COUNT
+    COMPARATOR_OUTPUT_MIN = 0
+    COMPARATOR_OUTPUT_MAX = 8
     VALID_DECIMAL_POINTS = frozenset(range(4))
     STATUS_DESCRIPTIONS = {
         0: "ok",
@@ -71,6 +76,7 @@ class TRM138:
         self.attr_secret: str | None = None
         self.attr_platforms: list[Platform] = [
             Platform.SENSOR,
+            Platform.NUMBER,
         ]
         self._channels = {
             number: self._channel_description(number)
@@ -170,9 +176,76 @@ class TRM138:
         return [await self.get_chanel(number) for number in selected]
 
     async def async_get_snapshot(self) -> dict[str, dict[int, dict[str, Any]]]:
-        """Read one coherent FC04 snapshot of all measurement channels."""
+        """Read the measurement channels and comparator output assignments."""
         channels = await self.get_chanels()
-        return {"chanels": {item["chanel_number"]: item for item in channels}}
+        comparator_outputs = await self.get_comparator_outputs()
+        return {
+            "chanels": {item["chanel_number"]: item for item in channels},
+            "comparator_outputs": comparator_outputs,
+        }
+
+    @classmethod
+    def get_number_descriptions(cls) -> list[dict[str, Any]]:
+        """Return one writable C.dr control for every logic channel."""
+        return [
+            {
+                "number_id": f"comparator_output_{channel}",
+                "channel": channel,
+                "name": f"C.dr {channel}",
+                "address": cls.COMPARATOR_OUTPUT_BASE_ADDRESS + channel - 1,
+                "native_min_value": cls.COMPARATOR_OUTPUT_MIN,
+                "native_max_value": cls.COMPARATOR_OUTPUT_MAX,
+                "native_step": 1,
+                "icon": "mdi:electric-switch",
+            }
+            for channel in range(1, cls.CHANNEL_COUNT + 1)
+        ]
+
+    async def get_comparator_outputs(self) -> dict[int, int]:
+        """Read all eight C.dr output assignments through one FC03 request."""
+        response = await self.attr_client.read_holding_registers(
+            address=self.COMPARATOR_OUTPUT_BASE_ADDRESS,
+            count=self.COMPARATOR_OUTPUT_COUNT,
+            device_id=self.attr_device_id,
+        )
+        registers = validated_registers(
+            response,
+            self.COMPARATOR_OUTPUT_COUNT,
+            "read TRM-138 comparator outputs",
+            expected_function=3,
+        )
+        for channel, value in enumerate(registers, start=1):
+            if not self.COMPARATOR_OUTPUT_MIN <= value <= self.COMPARATOR_OUTPUT_MAX:
+                raise ModbusException(
+                    f"Invalid TRM-138 channel {channel} comparator output: {value}"
+                )
+        return dict(enumerate(registers, start=1))
+
+    async def set_comparator_output(self, channel: int, output: int) -> None:
+        """Assign C.dr for one logic channel through a strict FC06 write."""
+        self._validate_comparator_output(channel, output)
+        address = self.COMPARATOR_OUTPUT_BASE_ADDRESS + channel - 1
+        response = await self.attr_client.write_register(
+            address=address,
+            value=output,
+            device_id=self.attr_device_id,
+        )
+        validate_fc06_response(
+            response,
+            address=address,
+            value=output,
+            operation=f"set TRM-138 channel {channel} comparator output",
+            device_id=self.attr_device_id,
+        )
+
+    @classmethod
+    def _validate_comparator_output(cls, channel: int, output: int) -> None:
+        if not 1 <= channel <= cls.CHANNEL_COUNT:
+            raise ValueError(f"Unknown TRM-138 channel: {channel}")
+        if type(output) is not int or not (
+            cls.COMPARATOR_OUTPUT_MIN <= output <= cls.COMPARATOR_OUTPUT_MAX
+        ):
+            raise ValueError("TRM-138 comparator output must be an integer from 0 to 8")
 
     def _get_channel(self, number: int) -> dict[str, Any]:
         self._validate_channels([number])
@@ -183,9 +256,7 @@ class TRM138:
         if unknown:
             raise ValueError(f"Unknown TRM-138 channels: {unknown}")
 
-    def _update_channel(
-        self, number: int, registers: list[int]
-    ) -> dict[str, Any]:
+    def _update_channel(self, number: int, registers: list[int]) -> dict[str, Any]:
         if len(registers) != self.REGISTERS_PER_CHANNEL:
             raise ModbusException(
                 f"Invalid TRM-138 channel {number} block length: "
@@ -418,8 +489,9 @@ class PLC110_24_60_K_M:
             result.append(updated)
         return result
 
-
-    async def get_outputs(self, outputs: list[int] | None = None) -> list[dict[str, Any]]:
+    async def get_outputs(
+        self, outputs: list[int] | None = None
+    ) -> list[dict[str, Any]]:
         selected = list(self._outputs) if outputs is None else outputs
         unknown = set(selected) - set(self._outputs)
         if unknown:
@@ -481,9 +553,7 @@ class PLC110_24_60_K_M:
                 f"read PLC110 {data_area} at {start}",
                 expected_function=2 if data_area == "discrete_input" else 1,
             )
-            result.update(
-                {start + offset: state for offset, state in enumerate(bits)}
-            )
+            result.update({start + offset: state for offset, state in enumerate(bits)})
         return result
 
 

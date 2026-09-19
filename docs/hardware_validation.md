@@ -562,3 +562,23 @@ Two transient result-phase exception-4 responses occurred during the final
 observation. They had no availability impact, preserved last-known-good values,
 and normal polling continued afterward. They remain a non-blocking hardware
 observation for this release candidate.
+
+## APC Smart-UPS and Owen TRM-138 validation
+
+The 1.2.0 candidate was validated with a physical APC Smart-UPS 3000 RM XL
+through an AP9630 Network Management Card 2, hardware revision 05. The card was
+updated with Schneider Electric package
+apc_hw05_aos722_sumx722_bootmon109.exe from AOS/SUMX 5.1.7 and Boot Monitor
+1.0.2 to AOS/SUMX 7.2.2 and Boot Monitor 1.0.9. Modbus TCP monitoring returned
+stable electrical, load, battery, temperature, state, AVR, calibration, and
+diagnostic values. The integration issued grouped FC03 reads only and exposed
+no UPS control operations.
+
+On a physical Owen TRM-138, the IEEE-754 words remained stable while the legacy
+decimal-point and INT16 representation of channel 2 alternated between
+incompatible scales. Publishing the IEEE-754 measurement eliminated the
+observed Home Assistant value jumps and matched the instrument display.
+Registers 65 through 72 were confirmed as the eight C.dr parameters. Direct
+FC03/FC06 testing confirmed that changing C.dr between 0 and its configured
+output assignment immediately disables and restores the corresponding
+comparator output.

@@ -8,23 +8,25 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
-## New in 1.1.0 — climate control
+## New in 1.2.0 — APC UPS monitoring and TRM-138 control
 
-This release introduces the first Home Assistant `climate` entities in Modbus
-Devices: **Haier YCJ-A002** and **Daikin RTD-RA**, with dedicated device-card
-profiles. It also adds **Modbus RTU over TCP** for transparent RAW TCP gateways.
-YCJ-A002 has been hardware-validated in Home Assistant through
-[4VRS Gateway](https://github.com/dk-1983/moxa-4vrs-gateway) in RAW TCP mode.
+This release adds hardware-validated, read-only **APC Smart-UPS 3000 RM XL**
+monitoring over Modbus TCP, including power/battery states, electrical values,
+load, runtime, temperature, AVR states, and diagnostics.
 
-Existing configurations require no migration. Update the integration and restart
-Home Assistant. Select the new transport when adding equipment behind a RAW TCP
-gateway. Cards remain an optional, manually added dashboard feature.
+**Owen TRM-138** now uses its stable IEEE-754 measurements for all eight
+temperature channels and exposes the documented `C.dr 1` … `C.dr 8`
+configuration values. Each value is read through FC03 and may be written as an
+integer from 0 to 8 through a strictly validated FC06 command.
+
+Existing configurations require no migration. Update the integration and
+restart Home Assistant.
 
 ## Key features
 
 - Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, Modbus RTU over UDP, and Modbus RTU over TCP.
-- Explicit equipment models from Bolid, Daikin, Dyna Drive, Haier, Owen, and
-  Zuked.
+- Explicit equipment models from APC, Bolid, Daikin, Dyna Drive, Haier, Owen,
+  and Zuked.
 - Direct Modbus devices and equipment connected through supported gateways.
 - Bolid S2000-PP, Orion, KDL, DPLS, and S2000R-ARR topologies.
 - Model-appropriate climate controls, sensors, binary sensors, switches, and
@@ -166,12 +168,35 @@ Both models are covered by automated protocol, entity, presentation, and full
 regression tests. YCJ-A002 is hardware-validated on the 4VRS RAW TCP setup above;
 RTD-RA has not yet been hardware-validated.
 
+### APC
+
+| Model | Connection | Main capabilities |
+|---|---|---|
+| [Smart-UPS 3000 RM XL](https://www.se.com/us/en/download/document/SPD_ASTE-6YWRZN_EN/) | Modbus TCP through AP9630/NMC2 | Read-only input/output voltage, input frequency, output load, battery charge/voltage/runtime, internal temperature, online/on-battery/low-battery/replace-battery/overload states, AVR and calibration diagnostics |
+
+The implementation follows Schneider Electric register map
+[990-5702A-EN](https://www.se.com/ae/en/download/document/Modbus_MGE_Galax_Smart_UPS/)
+and performs only grouped FC03 reads. No UPS command or configuration write is
+exposed. The profile was hardware-validated with a physical Smart-UPS 3000 RM XL.
+
+The validation used an [AP9630 Network Management Card 2](https://www.se.com/uk/en/faqs/FA237786/),
+hardware revision 05. Its original AOS 5.1.7 / SUMX 5.1.7 / Boot Monitor 1.0.2
+software did not expose the required Modbus TCP service. The card was updated
+with Schneider Electric package `apc_hw05_aos722_sumx722_bootmon109.exe` to
+[AOS 7.2.2 / SUMX 7.2.2](https://www.se.com/us/en/download/document/APC_SUMX_EN/)
+and Boot Monitor 1.0.9 before the hardware validation.
+
 ### Owen
 
 | Model | Connection | Main capabilities |
 |---|---|---|
 | ПЛК110-24.60.К-М | Direct Modbus | 36 user-mapped binary inputs and 24 output switches |
-| TRM-138 | Direct Modbus | Read-only eight-channel temperature monitoring and diagnostics |
+| TRM-138 | Direct Modbus | Eight IEEE-754 temperature channels, diagnostics, and `C.dr 1…8` output-assignment configuration |
+
+TRM-138 measurements are read as one grouped FC04 snapshot. The `C.dr` values
+use documented holding registers 65…72, are read together through FC03, and are
+written individually through FC06 with strict function, device, address, and
+value-echo validation. Only integral values from 0 to 8 are accepted.
 
 ### Zuked
 

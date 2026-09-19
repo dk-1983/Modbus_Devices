@@ -11,6 +11,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .device_info import device_info_for_entry
 from .runtime import ModbusDevicesConfigEntry
 
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ModbusDevicesConfigEntry,
@@ -70,10 +71,7 @@ class ModBusSwitchEntity(
 
         self._output_number = output["out_number"]
 
-        self._attr_name = (
-            f"{output['out_type']} "
-            f"{output['out_number_view']}"
-        )
+        self._attr_name = f"{output['out_type']} {output['out_number_view']}"
 
         identity = getattr(device, "attr_unique_id_prefix", None)
         self._attr_unique_id = (

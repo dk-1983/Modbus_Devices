@@ -1,53 +1,46 @@
-# Modbus Devices 1.1.0 — Climate Control and RTU over TCP
+# Modbus Devices 1.2.0 — APC monitoring and TRM-138 control
 
-Modbus Devices 1.1.0 introduces its first Home Assistant **climate entities**,
-bringing climate control to the integration alongside its existing industrial
-and building-automation devices.
+Modbus Devices 1.2.0 adds hardware-validated APC Smart-UPS monitoring and
+improves Owen TRM-138 measurement and configuration support.
 
-## Climate control
+## APC Smart-UPS
 
-- **Haier YCJ-A002:** power, HVAC mode, target and current temperature, fan
-  mode, and fault/lock diagnostics.
-- **Daikin RTD-RA:** power, HVAC mode, target and current temperature, automatic
-  fan mode and five fan speeds, louvre swing, fault diagnostics, and a separate
-  diagnostic coil-inlet temperature sensor.
-- **Dedicated device-card profiles:** YCJ-A002 presents its primary climate
-  control; RTD-RA places climate control first and coil-inlet temperature in
-  the diagnostic section. Cards are added manually through the optional
-  Modbus Device card generator.
+- Adds a read-only **APC Smart-UPS 3000 RM XL** equipment profile over Modbus
+  TCP through an AP9630 Network Management Card 2.
+- Exposes electrical measurements, load, battery charge/voltage/runtime,
+  internal temperature, power and battery states, AVR states, calibration
+  state, and raw Status Word 3 diagnostics.
+- Uses grouped FC03 reads only. UPS commands and configuration writes are not
+  exposed.
+- Follows Schneider Electric register map
+  [990-5702A-EN](https://www.se.com/ae/en/download/document/Modbus_MGE_Galax_Smart_UPS/).
 
-## Modbus RTU over TCP
+Hardware validation used an AP9630 hardware revision 05 updated from
+AOS/SUMX 5.1.7 and Boot Monitor 1.0.2 to
+[AOS/SUMX 7.2.2](https://www.se.com/us/en/download/document/APC_SUMX_EN/)
+and Boot Monitor 1.0.9 with the official
+apc_hw05_aos722_sumx722_bootmon109.exe package.
 
-The new transport supports transparent **RAW TCP gateways**, carrying complete
-Modbus RTU ADUs with CRC and no MBAP header. It handles TCP fragmentation and
-strictly validates response framing, CRC, slave ID, function, byte count and
-write acknowledgements. Requests retain the existing `SerializedModbusClient`
-serialization; failed commands are not automatically replayed.
+## Owen TRM-138
 
-Existing Modbus RTU over UDP behavior is unchanged.
+- Uses each channel's IEEE-754 measurement words as the published temperature,
+  avoiding unstable legacy decimal-point/INT16 representations observed on
+  real hardware.
+- Preserves channel status handling and rejects non-finite measurements.
+- Adds C.dr 1 through C.dr 8 configuration number entities.
+- Reads registers 65 through 72 together with FC03.
+- Writes one selected value with FC06 and strictly validates the returned
+  function, slave identity, register address, and mirrored value.
+- Accepts only documented integral values from 0 through 8.
 
-## Hardware validation
-
-A physical **Haier YCJ-A002 successfully operates in Home Assistant through
-the new Modbus RTU over TCP transport** using
-[4VRS Gateway](https://github.com/dk-1983/moxa-4vrs-gateway) in RAW TCP mode
-at `10.0.2.13:502`, slave ID `1`. These are validation-setup parameters, not
-required defaults for other installations.
-
-The displayed `rtu_over_tcp` translation key was a frontend-cache issue and
-resolved after refreshing the page. Production configuration was not changed.
-
-Both climate models have automated protocol, entity and device-card coverage.
-Daikin RTD-RA has not yet been hardware-validated.
+The IEEE-754 temperature path was confirmed on a physical TRM-138. Direct
+FC03/FC06 access to the C.dr registers and its physical output effect were
+confirmed during hardware investigation.
 
 ## Upgrade
 
-**No configuration migration is required.** Update the integration and restart
-Home Assistant. Existing entries retain their current transport and configuration.
-Select Modbus RTU over TCP when adding equipment through a transparent RAW TCP
-gateway. Refresh the browser page if it shows a cached transport label.
+No configuration or entity migration is required. Update the integration and
+restart Home Assistant. Existing configurations remain compatible.
 
-Equipment setup and register references are documented in the
+Equipment details and official references are documented in the
 [English README](../README.md) and [Russian README](../README_RU.md).
-The [RTU-over-TCP validation record](rtu_over_tcp.md) describes framing and
-recovery behavior and the confirmed hardware setup.

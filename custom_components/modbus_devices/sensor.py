@@ -131,23 +131,15 @@ class ModBusSensorEntity(
 
         self._channel_number = channel["chanel_number"]
 
-        self._attr_name = (
-            f"{channel['chanel_type']} "
-            f"{channel['chanel_number_view']}"
-        )
+        self._attr_name = f"{channel['chanel_type']} {channel['chanel_number_view']}"
 
-        self._attr_unique_id = (
-            f"{self._entry.entry_id}_"
-            f"{self._channel_number}"
-        )
+        self._attr_unique_id = f"{self._entry.entry_id}_{self._channel_number}"
 
         self._attr_device_class = channel["device_class"]
 
         self._attr_state_class = channel["state_class"]
 
-        self._attr_native_unit_of_measurement = (
-            channel["unit_of_temperature_c"]
-        )
+        self._attr_native_unit_of_measurement = channel["unit_of_temperature_c"]
 
         self._attr_device_info = device_info_for_entry(
             device,
@@ -260,8 +252,10 @@ class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
 
     @property
     def _current(self) -> dict | None:
-        return (self.coordinator.data or {}).get("numeric_sensors", {}).get(
-            self._sensor_id
+        return (
+            (self.coordinator.data or {})
+            .get("numeric_sensors", {})
+            .get(self._sensor_id)
         )
 
     @property
@@ -279,7 +273,12 @@ class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
             **metadata,
             **{
                 key: current[key]
-                for key in ("raw_register", "raw_count", "register_address", "parameter_kind")
+                for key in (
+                    "raw_register",
+                    "raw_count",
+                    "register_address",
+                    "parameter_kind",
+                )
                 if key in current
             },
         }

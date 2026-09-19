@@ -7,10 +7,16 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 import custom_components.modbus_devices as integration
-from custom_components.modbus_devices.binary_sensor import async_setup_entry as setup_binary
+from custom_components.modbus_devices.binary_sensor import (
+    async_setup_entry as setup_binary,
+)
 from custom_components.modbus_devices.button import async_setup_entry as setup_button
 from custom_components.modbus_devices.const import Config
-from custom_components.modbus_devices.equipment.bolid import C2000KPB, M3000BB1020, S2000PP
+from custom_components.modbus_devices.equipment.bolid import (
+    C2000KPB,
+    M3000BB1020,
+    S2000PP,
+)
 from custom_components.modbus_devices.equipment.dyna_drive import DN310
 from custom_components.modbus_devices.equipment.owen import TRM138
 from custom_components.modbus_devices.sensor import async_setup_entry as setup_sensor
@@ -48,6 +54,8 @@ class CountingClient:
             return Response(registers=[3], function_code=3)
         if address == 0x8000:
             return Response(registers=[0], function_code=3)
+        if address == 65:
+            return Response(registers=[0] * 8, function_code=3)
         raise AssertionError(f"Unexpected holding-register read: {kwargs}")
 
     async def read_input_registers(self, **kwargs):
@@ -80,7 +88,7 @@ async def test_dn310_local_init_is_io_free_and_first_snapshot_is_three_reads():
 
 
 @pytest.mark.asyncio
-async def test_owen_local_init_is_io_free_and_first_snapshot_is_one_bulk_read():
+async def test_owen_local_init_is_io_free_and_first_snapshot_is_two_bulk_reads():
     client = CountingClient()
     device = TRM138(client, 1)
 
@@ -89,7 +97,8 @@ async def test_owen_local_init_is_io_free_and_first_snapshot_is_one_bulk_read():
 
     snapshot = await device.async_get_snapshot()
     assert set(snapshot["chanels"]) == set(range(1, 9))
-    assert client.calls == [("input", 0, 40)]
+    assert snapshot["comparator_outputs"] == dict.fromkeys(range(1, 9), 0)
+    assert client.calls == [("input", 0, 40), ("holding", 65, 8)]
 
 
 @pytest.mark.asyncio
