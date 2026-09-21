@@ -1,41 +1,36 @@
-# Modbus Devices 1.2.0 — APC monitoring and TRM-138 control
+# Modbus Devices 1.3.0 — 4VRS Haier-ESP32 climate control
 
-Modbus Devices 1.2.0 adds hardware-validated APC Smart-UPS monitoring and
-improves Owen TRM-138 measurement and configuration support.
+Modbus Devices 1.3.0 adds a dedicated equipment profile for the
+[Haier-ESP32-Modbus](https://github.com/dk-1983/Haier-ESP32-Modbus) controller
+under the new 4VRS manufacturer.
 
-## APC Smart-UPS
+## Haier-ESP32
 
-- Adds a read-only **APC Smart-UPS 3000 RM XL** equipment profile over Modbus
-  TCP through an AP9630 Network Management Card 2.
-- Exposes electrical measurements, load, battery charge/voltage/runtime,
-  internal temperature, power and battery states, AVR states, calibration
-  state, and raw Status Word 3 diagnostics.
-- Uses grouped FC03 reads only. UPS commands and configuration writes are not
-  exposed.
-- Follows Schneider Electric register map
-  [990-5702A-EN](https://www.se.com/ae/en/download/document/Modbus_MGE_Galax_Smart_UPS/).
+Haier-ESP32 is a separate 4VRS device. Its register map was developed from the
+factory YCJ-A002 register set as a compatible base and extended with additional
+registers required by the new functionality. The existing Haier YCJ-A002
+equipment profile remains unchanged.
 
-Hardware validation used an AP9630 hardware revision 05 updated from
-AOS/SUMX 5.1.7 and Boot Monitor 1.0.2 to
-[AOS/SUMX 7.2.2](https://www.se.com/us/en/download/document/APC_SUMX_EN/)
-and Boot Monitor 1.0.9 with the official
-apc_hw05_aos722_sumx722_bootmon109.exe package.
+- Adds climate power, HVAC mode, target and room temperature, fan mode, swing,
+  and preset control.
+- Adds quiet and display switches plus selectable fixed vertical and horizontal
+  louvre positions. Read-only automatic louvre states remain visible but cannot
+  be selected as commands.
+- Exposes command status, status age, a low-word-first 32-bit packet counter,
+  transport flags, and Haier-link state.
+- Reads the diagnostic Input 4…8 block independently so it remains available
+  when stale primary telemetry returns Modbus exception 0x0B.
+- Serializes every write on the physical Modbus client, waits for controller
+  confirmation, and performs an exact FC01 or FC03 readback before publishing
+  the state in Home Assistant.
+- Treats exception 0x06 Busy and protocol, timeout, confirmation, or readback
+  failures as terminal; it never converts an unconfirmed write into optimistic
+  success.
 
-## Owen TRM-138
-
-- Uses each channel's IEEE-754 measurement words as the published temperature,
-  avoiding unstable legacy decimal-point/INT16 representations observed on
-  real hardware.
-- Preserves channel status handling and rejects non-finite measurements.
-- Adds C.dr 1 through C.dr 8 configuration number entities.
-- Reads registers 65 through 72 together with FC03.
-- Writes one selected value with FC06 and strictly validates the returned
-  function, slave identity, register address, and mirrored value.
-- Accepts only documented integral values from 0 through 8.
-
-The IEEE-754 temperature path was confirmed on a physical TRM-138. Direct
-FC03/FC06 access to the C.dr registers and its physical output effect were
-confirmed during hardware investigation.
+The basic YCJ-A002 communication and operating path was validated with physical
+equipment on the development test bench. Full hardware validation of the new
+Haier-ESP32 registers, confirmation state machine, louvre functions, quiet and
+display controls is deferred until the production PCB is available.
 
 ## Upgrade
 

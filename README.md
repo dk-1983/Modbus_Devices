@@ -8,16 +8,21 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
-## New in 1.2.0 — APC UPS monitoring and TRM-138 control
+## New in 1.3.0 — 4VRS Haier-ESP32 climate control
 
-This release adds hardware-validated, read-only **APC Smart-UPS 3000 RM XL**
-monitoring over Modbus TCP, including power/battery states, electrical values,
-load, runtime, temperature, AVR states, and diagnostics.
+This release adds the dedicated **4VRS Haier-ESP32** equipment profile for
+[Haier-ESP32-Modbus](https://github.com/dk-1983/Haier-ESP32-Modbus). It exposes
+climate control, quiet/display switches, fixed louvre positions, and command
+and link diagnostics while preserving the existing Haier YCJ-A002 profile.
 
-**Owen TRM-138** now uses its stable IEEE-754 measurements for all eight
-temperature channels and exposes the documented `C.dr 1` … `C.dr 8`
-configuration values. Each value is read through FC03 and may be written as an
-integer from 0 to 8 through a strictly validated FC06 command.
+Its register map uses the factory YCJ-A002 register set as a compatible base
+and adds project-specific registers for the expanded functionality.
+
+Writes are physically serialized, confirmed through the controller command
+state, and verified by exact readback before Home Assistant state is updated.
+The basic YCJ-A002 communication and operating path has been validated on a
+physical test bench. Full validation of the expanded controller functions is
+planned with the production PCB.
 
 Existing configurations require no migration. Update the integration and
 restart Home Assistant.
@@ -25,8 +30,8 @@ restart Home Assistant.
 ## Key features
 
 - Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, Modbus RTU over UDP, and Modbus RTU over TCP.
-- Explicit equipment models from APC, Bolid, Daikin, Dyna Drive, Haier, Owen,
-  and Zuked.
+- Explicit equipment models from 4VRS, APC, Bolid, Daikin, Dyna Drive, Haier,
+  Owen, and Zuked.
 - Direct Modbus devices and equipment connected through supported gateways.
 - Bolid S2000-PP, Orion, KDL, DPLS, and S2000R-ARR topologies.
 - Model-appropriate climate controls, sensors, binary sensors, switches, and
@@ -167,6 +172,28 @@ from the
 Both models are covered by automated protocol, entity, presentation, and full
 regression tests. YCJ-A002 is hardware-validated on the 4VRS RAW TCP setup above;
 RTD-RA has not yet been hardware-validated.
+
+### 4VRS
+
+| Model | Connection | Main capabilities |
+|---|---|---|
+| [Haier-ESP32](https://github.com/dk-1983/Haier-ESP32-Modbus) | Modbus RTU or Modbus TCP | Power, HVAC mode, target/current temperature, fan, swing, preset, fixed louvre positions, quiet/display switches, link and command diagnostics |
+
+Haier-ESP32 is a separate 4VRS profile; the existing Haier YCJ-A002 profile is
+unchanged. During development, the factory YCJ-A002 register set was used as
+the compatible base. Haier-ESP32-Modbus extends that base with additional
+registers required by its expanded functionality, as documented in the
+[Haier-ESP32 register map](https://github.com/dk-1983/Haier-ESP32-Modbus/blob/main/docs/REGISTERS.md).
+It is a separate 4VRS device, not firmware or an extension for a physical
+YCJ-A002 controller.
+Accepted writes are serialized until Input 7 reports confirmation and the
+requested coil or holding register is then read back. Home Assistant state is
+not updated optimistically. Read-only AUTO louvre values remain visible as
+current states but are not offered as selectable commands.
+
+Diagnostic Input registers 4…8 are read separately so status age, the low-word-
+first 32-bit packet count, command status, and RTU/TCP link flags remain visible
+when stale main telemetry causes exception 0x0B.
 
 ### APC
 

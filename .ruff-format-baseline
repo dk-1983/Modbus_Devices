@@ -4,7 +4,6 @@
 # changed, CI also requires that complete file to be formatted and removed from
 # this baseline. The list must only shrink.
 custom_components/modbus_devices/binary_sensor.py
-custom_components/modbus_devices/coordinator.py
 custom_components/modbus_devices/equipment/bolid.py
 custom_components/modbus_devices/equipment/equipment.py
 custom_components/modbus_devices/gateway.py

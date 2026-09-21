@@ -63,10 +63,7 @@ class ModbusDeviceCoordinator(
             ):
                 inputs = await self.device.get_inputs()
 
-                data["inputs"] = {
-                    inp["input_number"]: inp
-                    for inp in inputs
-                }
+                data["inputs"] = {inp["input_number"]: inp for inp in inputs}
 
             # ---------------------------------
             # Relay outputs
@@ -77,10 +74,7 @@ class ModbusDeviceCoordinator(
             ):
                 outputs = await self.device.get_outputs()
 
-                data["outputs"] = {
-                    out["out_number"]: out
-                    for out in outputs
-                }
+                data["outputs"] = {out["out_number"]: out for out in outputs}
 
             # ---------------------------------
             # Analog channels / sensors
@@ -89,14 +83,9 @@ class ModbusDeviceCoordinator(
                 self.device,
                 "get_chanels",
             ):
-                chanels = (
-                    await self.device.get_chanels()
-                )
+                chanels = await self.device.get_chanels()
 
-                data["chanels"] = {
-                    ch["chanel_number"]: ch
-                    for ch in chanels
-                }
+                data["chanels"] = {ch["chanel_number"]: ch for ch in chanels}
 
             # ---------------------------------
             # Device time
@@ -105,22 +94,16 @@ class ModbusDeviceCoordinator(
                 self.device,
                 "get_time",
             ):
-                data["time"] = (
-                    await self.device.get_time()
-                )
+                data["time"] = await self.device.get_time()
 
             self._reconcile_pending_writes(data, update_generation)
             return data
 
         except ConnectionException as exc:
-            raise UpdateFailed(
-                f"Modbus update failed: {exc}"
-            ) from exc
+            raise UpdateFailed(f"Modbus update failed: {exc}") from exc
 
         except Exception as exc:
-            raise UpdateFailed(
-                f"Unexpected error: {exc}"
-            ) from exc
+            raise UpdateFailed(f"Unexpected error: {exc}") from exc
 
     def async_apply_optimistic_write(self, path: tuple, value: object) -> None:
         """Publish a successful write while protecting it from an older poll."""
@@ -130,15 +113,20 @@ class ModbusDeviceCoordinator(
         data = self._copy_and_patch(self.data or {}, path, value)
         self.async_set_updated_data(data)
 
+    def async_apply_confirmed_write(self, path: tuple, value: object) -> None:
+        """Publish readback-confirmed state behind the stale-poll barrier."""
+        self._write_generation += 1
+        self._pending_write_patches[path] = (self._write_generation, value)
+        data = self._copy_and_patch(self.data or {}, path, value)
+        self.async_set_updated_data(data)
+
     def _reconcile_pending_writes(
         self,
         data: dict,
         update_generation: int,
     ) -> None:
         """Keep writes newer than this poll and retire writes it can verify."""
-        for path, (generation, value) in list(
-            self._pending_write_patches.items()
-        ):
+        for path, (generation, value) in list(self._pending_write_patches.items()):
             if generation > update_generation:
                 self._patch_in_place(data, path, value)
             else:

@@ -60,6 +60,12 @@ class ModbusClimateEntity(CoordinatorEntity, ClimateEntity):
         if description.get("swing_modes"):
             self._attr_swing_modes = description["swing_modes"]
             features |= ClimateEntityFeature.SWING_MODE
+        if description.get("preset_modes"):
+            self._attr_preset_modes = description["preset_modes"]
+            features |= ClimateEntityFeature.PRESET_MODE
+        self._writes_are_readback_confirmed = description.get(
+            "writes_are_readback_confirmed", False
+        )
         self._attr_supported_features = features
 
     @property
@@ -88,6 +94,16 @@ class ModbusClimateEntity(CoordinatorEntity, ClimateEntity):
         return self._current.get("swing_mode")
 
     @property
+    def preset_mode(self) -> str | None:
+        return self._current.get("preset_mode")
+
+    def _publish_write(self, path: tuple, value: object) -> None:
+        if self._writes_are_readback_confirmed:
+            self.coordinator.async_apply_confirmed_write(path, value)
+        else:
+            self.coordinator.async_apply_optimistic_write(path, value)
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose raw protocol diagnostics without creating control entities."""
         return dict(self._current.get("diagnostics", {}))
@@ -96,23 +112,26 @@ class ModbusClimateEntity(CoordinatorEntity, ClimateEntity):
         """Set the operating mode."""
         patch = await self._device.async_set_hvac_mode(hvac_mode)
         for key, value in patch.items():
-            self.coordinator.async_apply_optimistic_write(("climate", key), value)
+            self._publish_write(("climate", key), value)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set the target temperature."""
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
         value = await self._device.async_set_target_temperature(temperature)
-        self.coordinator.async_apply_optimistic_write(
-            ("climate", "target_temperature"), value
-        )
+        self._publish_write(("climate", "target_temperature"), value)
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set the fan mode."""
         value = await self._device.async_set_fan_mode(fan_mode)
-        self.coordinator.async_apply_optimistic_write(("climate", "fan_mode"), value)
+        self._publish_write(("climate", "fan_mode"), value)
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         """Set the louvre mode."""
         value = await self._device.async_set_swing_mode(swing_mode)
-        self.coordinator.async_apply_optimistic_write(("climate", "swing_mode"), value)
+        self._publish_write(("climate", "swing_mode"), value)
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set the equipment preset."""
+        value = await self._device.async_set_preset_mode(preset_mode)
+        self._publish_write(("climate", "preset_mode"), value)

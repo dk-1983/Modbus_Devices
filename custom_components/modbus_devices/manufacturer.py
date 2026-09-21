@@ -17,6 +17,7 @@ class Manufacturer:
 
 
 MANUFACTURERS: tuple[Manufacturer, ...] = (
+    Manufacturer("4VRS", "fourvrs"),
     Manufacturer("APC", "apc"),
     Manufacturer("Bolid", "bolid"),
     Manufacturer("Daikin", "daikin"),

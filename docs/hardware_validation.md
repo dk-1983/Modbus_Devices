@@ -582,3 +582,19 @@ Registers 65 through 72 were confirmed as the eight C.dr parameters. Direct
 FC03/FC06 testing confirmed that changing C.dr between 0 and its configured
 output assignment immediately disables and restores the corresponding
 comparator output.
+
+## 4VRS Haier-ESP32 development validation
+
+The 1.3.0 candidate adds a separate 4VRS profile for
+[Haier-ESP32-Modbus](https://github.com/dk-1983/Haier-ESP32-Modbus); the existing
+Haier YCJ-A002 profile remains unchanged. The register map uses the factory
+YCJ-A002 register set as its compatible base and adds project-specific
+registers for the expanded Haier-ESP32 functionality.
+
+The basic YCJ-A002 communication and operating path was validated with physical
+equipment on the development test bench. The expanded register map, serialized
+command-confirmation workflow, exact readback policy, and diagnostic decoding
+are covered by automated protocol and entity tests. Full physical validation
+of the expanded controls—including quiet/display, preset and louvre
+behavior—requires the production printed circuit board and is deferred to that
+hardware stage.

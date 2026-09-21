@@ -42,6 +42,18 @@ async def async_setup_entry(
             )
         )
 
+    description_reader = getattr(device, "get_switch_descriptions", None)
+    if callable(description_reader):
+        for description in description_reader():
+            entities.append(
+                ModBusDescribedSwitchEntity(
+                    coordinator=coordinator,
+                    device=device,
+                    entry=entry,
+                    description=description,
+                )
+            )
+
     async_add_entities(entities)
 
 
@@ -148,3 +160,38 @@ class ModBusSwitchEntity(
             ("outputs", self._output_number, "state"),
             False,
         )
+
+
+class ModBusDescribedSwitchEntity(CoordinatorEntity, SwitchEntity):
+    """Representation of a readback-confirmed equipment switch."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, coordinator, device, entry: ConfigEntry, description) -> None:
+        super().__init__(coordinator)
+        self._device = device
+        self._switch_id = description["switch_id"]
+        self._attr_name = description["name"]
+        self._attr_icon = description.get("icon")
+        self._attr_entity_category = description.get("entity_category")
+        self._attr_unique_id = f"{entry.entry_id}_{self._switch_id}"
+        self._attr_device_info = device_info_for_entry(device, entry)
+
+    @property
+    def is_on(self) -> bool | None:
+        current = (self.coordinator.data or {}).get("switches", {}).get(self._switch_id)
+        return None if current is None else current.get("state")
+
+    async def _async_set(self, value: bool) -> None:
+        confirmed = await self._device.async_set_switch(self._switch_id, value)
+        self.coordinator.async_apply_confirmed_write(
+            ("switches", self._switch_id, "state"),
+            confirmed,
+        )
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._async_set(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._async_set(False)
