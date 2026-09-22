@@ -10,6 +10,7 @@ from homeassistant.const import EntityCategory
 from custom_components.modbus_devices.equipment.owen import TRM138
 from custom_components.modbus_devices.number import ModBusNumberEntity
 from custom_components.modbus_devices.sensor import ModBusSensorEntity
+from custom_components.modbus_devices.switch import ModBusDescribedSwitchEntity
 
 
 class Response:
@@ -22,6 +23,7 @@ class Response:
         address: int | None = None,
         value: int | None = None,
         dev_id: int | None = None,
+        bits: list[bool] | None = None,
     ) -> None:
         self.registers = registers
         self.function_code = function_code
@@ -29,6 +31,7 @@ class Response:
         self.address = address
         self.value = value
         self.dev_id = dev_id
+        self.bits = bits
 
     def isError(self) -> bool:
         return self.error
@@ -36,13 +39,20 @@ class Response:
 
 class Client:
     def __init__(
-        self, registers: list[int], comparator_outputs: list[int] | None = None
+        self,
+        registers: list[int],
+        comparator_outputs: list[int] | None = None,
+        output_states: list[bool] | None = None,
     ) -> None:
         self.registers = registers
         self.comparator_outputs = comparator_outputs or [0] * 8
         self.calls: list[dict] = []
         self.holding_calls: list[dict] = []
         self.write_calls: list[dict] = []
+        self.output_states = output_states or [False] * 8
+        self.coil_calls: list[dict] = []
+        self.coil_write_calls: list[dict] = []
+        self.logical_operations = 0
 
     async def read_input_registers(self, **kwargs):
         self.calls.append(kwargs)
@@ -66,6 +76,31 @@ class Client:
             value=kwargs["value"],
             dev_id=kwargs["device_id"],
         )
+
+    async def read_coils(self, **kwargs):
+        self.coil_calls.append(kwargs)
+        address = kwargs["address"] - TRM138.OUTPUT_BASE_ADDRESS
+        count = kwargs["count"]
+        return Response(
+            function_code=1,
+            bits=self.output_states[address : address + count],
+            dev_id=kwargs["device_id"],
+        )
+
+    async def write_coil(self, **kwargs):
+        self.coil_write_calls.append(kwargs)
+        address = kwargs["address"] - TRM138.OUTPUT_BASE_ADDRESS
+        self.output_states[address] = kwargs["value"]
+        return Response(
+            function_code=5,
+            address=kwargs["address"],
+            value=kwargs["value"],
+            dev_id=kwargs["device_id"],
+        )
+
+    async def async_execute_serialized(self, operation):
+        self.logical_operations += 1
+        return await operation(self)
 
 
 def float_words(value: float) -> list[int]:
@@ -431,3 +466,129 @@ async def test_number_entity_does_not_update_after_failed_write():
     with pytest.raises(ModbusException, match="write failed"):
         await entity.async_set_native_value(4)
     assert patches == []
+
+
+@pytest.mark.asyncio
+async def test_output_states_use_documented_grouped_fc01_map():
+    states = [False, True, False, True, True, False, False, True]
+    client = Client([], output_states=states)
+
+    outputs = await TRM138(client, 8).get_output_states()
+
+    assert outputs == dict(enumerate(states, start=1))
+    assert client.coil_calls == [{"address": 0, "count": 8, "device_id": 8}]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_exposes_all_output_switch_states():
+    states = [True, False, True, False, True, False, True, False]
+    snapshot = await TRM138(
+        Client(channel_payload(1) * 8, output_states=states), 8
+    ).async_get_snapshot()
+
+    assert snapshot["switches"] == {
+        f"output_{number}": {"state": state}
+        for number, state in enumerate(states, start=1)
+    }
+
+
+@pytest.mark.asyncio
+async def test_unassigned_output_write_uses_one_serialized_fc05_and_fc01_readback():
+    client = Client([], comparator_outputs=[0] * 8)
+    device = TRM138(client, 8)
+
+    confirmed = await device.async_set_switch("output_3", True)
+
+    assert confirmed is True
+    assert client.logical_operations == 1
+    assert client.holding_calls == [{"address": 65, "count": 8, "device_id": 8}]
+    assert client.coil_write_calls == [{"address": 2, "value": True, "device_id": 8}]
+    assert client.coil_calls == [{"address": 2, "count": 1, "device_id": 8}]
+
+
+@pytest.mark.asyncio
+async def test_output_assigned_to_comparator_rejects_manual_fc05():
+    client = Client([], comparator_outputs=[0, 3, 0, 0, 0, 0, 0, 0])
+
+    with pytest.raises(ModbusException, match=r"output 3.*C\.dr 2"):
+        await TRM138(client, 8).async_set_switch("output_3", True)
+
+    assert client.logical_operations == 1
+    assert client.coil_write_calls == []
+    assert client.coil_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        Response(function_code=5, address=1, value=True, dev_id=8),
+        Response(function_code=5, address=0, value=False, dev_id=8),
+        Response(function_code=1, address=0, value=True, dev_id=8),
+        Response(function_code=5, address=0, value=True, dev_id=9),
+        Response(function_code=5, address=0, value=True, dev_id=8, error=True),
+    ],
+)
+async def test_output_write_rejects_invalid_fc05_echo_without_readback(response):
+    client = Client([])
+
+    async def write_coil(**kwargs):
+        client.coil_write_calls.append(kwargs)
+        return response
+
+    client.write_coil = write_coil
+
+    with pytest.raises(ModbusException):
+        await TRM138(client, 8).async_set_switch("output_1", True)
+
+    assert client.coil_calls == []
+
+
+@pytest.mark.asyncio
+async def test_output_write_rejects_fc01_readback_mismatch():
+    client = Client([])
+
+    async def write_coil(**kwargs):
+        client.coil_write_calls.append(kwargs)
+        return Response(
+            function_code=5,
+            address=kwargs["address"],
+            value=kwargs["value"],
+            dev_id=kwargs["device_id"],
+        )
+
+    client.write_coil = write_coil
+
+    with pytest.raises(ModbusException, match="readback mismatch"):
+        await TRM138(client, 8).async_set_switch("output_1", True)
+
+
+@pytest.mark.asyncio
+async def test_output_switch_entity_publishes_only_confirmed_state():
+    client = Client([])
+    device = TRM138(client, 8)
+    patches = []
+    coordinator = SimpleNamespace(
+        data={"switches": {"output_1": {"state": False}}},
+        last_update_success=True,
+    )
+
+    def apply(path, value):
+        patches.append((path, value))
+        coordinator.data[path[0]][path[1]][path[2]] = value
+
+    coordinator.async_apply_confirmed_write = apply
+    entity = ModBusDescribedSwitchEntity(
+        coordinator,
+        device,
+        SimpleNamespace(entry_id="trm138"),
+        device.get_switch_descriptions()[0],
+    )
+
+    assert entity.name == "Состояние ВУ 1"
+    assert entity.is_on is False
+
+    await entity.async_turn_on()
+
+    assert patches == [(("switches", "output_1", "state"), True)]
+    assert entity.is_on is True

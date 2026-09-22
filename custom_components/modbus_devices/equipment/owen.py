@@ -37,6 +37,8 @@ class TRM138:
     COMPARATOR_OUTPUT_COUNT = CHANNEL_COUNT
     COMPARATOR_OUTPUT_MIN = 0
     COMPARATOR_OUTPUT_MAX = 8
+    OUTPUT_BASE_ADDRESS = 0
+    OUTPUT_COUNT = 8
     VALID_DECIMAL_POINTS = frozenset(range(4))
     STATUS_DESCRIPTIONS = {
         0: "ok",
@@ -77,6 +79,7 @@ class TRM138:
         self.attr_platforms: list[Platform] = [
             Platform.SENSOR,
             Platform.NUMBER,
+            Platform.SWITCH,
         ]
         self._channels = {
             number: self._channel_description(number)
@@ -176,12 +179,17 @@ class TRM138:
         return [await self.get_chanel(number) for number in selected]
 
     async def async_get_snapshot(self) -> dict[str, dict[int, dict[str, Any]]]:
-        """Read the measurement channels and comparator output assignments."""
+        """Read measurements, comparator assignments, and physical outputs."""
         channels = await self.get_chanels()
         comparator_outputs = await self.get_comparator_outputs()
+        output_states = await self.get_output_states()
         return {
             "chanels": {item["chanel_number"]: item for item in channels},
             "comparator_outputs": comparator_outputs,
+            "switches": {
+                f"output_{number}": {"state": state}
+                for number, state in output_states.items()
+            },
         }
 
     @classmethod
@@ -200,6 +208,139 @@ class TRM138:
             }
             for channel in range(1, cls.CHANNEL_COUNT + 1)
         ]
+
+    @classmethod
+    def get_switch_descriptions(cls) -> list[dict[str, Any]]:
+        """Return the documented FC01/FC05 output controls."""
+        return [
+            {
+                "switch_id": f"output_{number}",
+                "name": f"Состояние ВУ {number}",
+                "icon": "mdi:electric-switch",
+            }
+            for number in range(1, cls.OUTPUT_COUNT + 1)
+        ]
+
+    async def get_output_states(self) -> dict[int, bool]:
+        """Read all eight output-unit states through one FC01 request."""
+        response = await self.attr_client.read_coils(
+            address=self.OUTPUT_BASE_ADDRESS,
+            count=self.OUTPUT_COUNT,
+            device_id=self.attr_device_id,
+        )
+        self._validate_response_device_id(response, "read TRM-138 output states")
+        bits = validated_bits(
+            response,
+            self.OUTPUT_COUNT,
+            "read TRM-138 output states",
+            expected_function=1,
+        )
+        return dict(enumerate(bits, start=1))
+
+    async def async_set_switch(self, switch_id: str, value: bool) -> bool:
+        """Set one unassigned output through strict FC05 and FC01 readback."""
+        prefix = "output_"
+        if not switch_id.startswith(prefix):
+            raise ValueError(f"Unknown TRM-138 switch: {switch_id}")
+        try:
+            output = int(switch_id.removeprefix(prefix))
+        except ValueError as exc:
+            raise ValueError(f"Unknown TRM-138 switch: {switch_id}") from exc
+        if not 1 <= output <= self.OUTPUT_COUNT:
+            raise ValueError(f"Unknown TRM-138 output: {output}")
+        if type(value) is not bool:
+            raise ValueError("TRM-138 output state must be boolean")
+
+        address = self.OUTPUT_BASE_ADDRESS + output - 1
+
+        async def execute(client) -> bool:
+            assignments_response = await client.read_holding_registers(
+                address=self.COMPARATOR_OUTPUT_BASE_ADDRESS,
+                count=self.COMPARATOR_OUTPUT_COUNT,
+                device_id=self.attr_device_id,
+            )
+            self._validate_response_device_id(
+                assignments_response,
+                f"check TRM-138 output {output} assignment",
+            )
+            assignments = validated_registers(
+                assignments_response,
+                self.COMPARATOR_OUTPUT_COUNT,
+                f"check TRM-138 output {output} assignment",
+                expected_function=3,
+            )
+            for channel, assigned in enumerate(assignments, start=1):
+                if (
+                    not self.COMPARATOR_OUTPUT_MIN
+                    <= assigned
+                    <= self.COMPARATOR_OUTPUT_MAX
+                ):
+                    raise ModbusException(
+                        f"Invalid TRM-138 channel {channel} comparator output: "
+                        f"{assigned}"
+                    )
+            if output in assignments:
+                channels = [
+                    str(channel)
+                    for channel, assigned in enumerate(assignments, start=1)
+                    if assigned == output
+                ]
+                raise ModbusException(
+                    f"Cannot manually control TRM-138 output {output}: "
+                    f"assigned to C.dr {', '.join(channels)}"
+                )
+
+            response = await client.write_coil(
+                address=address,
+                value=value,
+                device_id=self.attr_device_id,
+            )
+            validate_fc05_response(
+                response,
+                address=address,
+                value=value,
+                operation=f"set TRM-138 output {output}",
+                device_id=self.attr_device_id,
+            )
+
+            readback_response = await client.read_coils(
+                address=address,
+                count=1,
+                device_id=self.attr_device_id,
+            )
+            self._validate_response_device_id(
+                readback_response,
+                f"verify TRM-138 output {output}",
+            )
+            readback = validated_bits(
+                readback_response,
+                1,
+                f"verify TRM-138 output {output}",
+                expected_function=1,
+            )[0]
+            if readback != value:
+                raise ModbusException(
+                    f"TRM-138 output {output} readback mismatch: "
+                    f"requested {value}, got {readback}"
+                )
+            return readback
+
+        serialized_executor = getattr(
+            self.attr_client, "async_execute_serialized", None
+        )
+        if callable(serialized_executor):
+            return await serialized_executor(execute)
+        return await execute(self.attr_client)
+
+    def _validate_response_device_id(self, response: Any, operation: str) -> None:
+        """Correlate a read response when its transport exposes device identity."""
+        for attribute in ("dev_id", "device_id", "slave_id", "unit_id"):
+            actual = getattr(response, attribute, None)
+            if actual is not None and actual != self.attr_device_id:
+                raise ModbusException(
+                    f"Wrong Modbus device id for {operation}: "
+                    f"expected {self.attr_device_id}, got {actual}"
+                )
 
     async def get_comparator_outputs(self) -> dict[int, int]:
         """Read all eight C.dr output assignments through one FC03 request."""

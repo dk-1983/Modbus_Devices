@@ -218,12 +218,18 @@ and Boot Monitor 1.0.9 before the hardware validation.
 | Model | Connection | Main capabilities |
 |---|---|---|
 | ПЛК110-24.60.К-М | Direct Modbus | 36 user-mapped binary inputs and 24 output switches |
-| TRM-138 | Direct Modbus | Eight IEEE-754 temperature channels, diagnostics, and `C.dr 1…8` output-assignment configuration |
+| TRM-138 | Direct Modbus | Eight IEEE-754 temperature channels, `C.dr 1…8` assignments, and `Состояние ВУ 1…8` output-state controls |
 
 TRM-138 measurements are read as one grouped FC04 snapshot. The `C.dr` values
 use documented holding registers 65…72, are read together through FC03, and are
 written individually through FC06 with strict function, device, address, and
 value-echo validation. Only integral values from 0 to 8 are accepted.
+
+The switches named exactly as the manual parameters `Состояние ВУ 1…8` read
+coils 0…7 together through FC01. A manual FC05 command is accepted only when
+the selected output is not assigned to any `C.dr`; its mirrored response and
+an exact FC01 readback are both validated before Home Assistant publishes the
+new state. The integration never clears a `C.dr` assignment automatically.
 
 ### Zuked
 
