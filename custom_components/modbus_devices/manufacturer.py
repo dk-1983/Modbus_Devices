@@ -22,6 +22,7 @@ MANUFACTURERS: tuple[Manufacturer, ...] = (
     Manufacturer("Bolid", "bolid"),
     Manufacturer("Daikin", "daikin"),
     Manufacturer("Dyna Drive", "dyna_drive"),
+    Manufacturer("ERMAN", "erman"),
     Manufacturer("Haier", "haier"),
     Manufacturer("Owen", "owen"),
     Manufacturer("Zuked", "zuked"),

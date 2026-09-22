@@ -9,6 +9,7 @@ from custom_components.modbus_devices.equipment import (
     bolid,
     daikin,
     dyna_drive,
+    erman,
     fourvrs,
     haier,
     owen,
@@ -61,6 +62,7 @@ EXPECTED_CLASSES = {
     ],
     "Daikin": ["RTDRA"],
     "Dyna Drive": ["DN310"],
+    "ERMAN": ["ERG22005"],
     "Haier": ["YCJA002"],
     "Owen": ["PLC110_24_60_K_M", "TRM138"],
     "Zuked": ["Zuked3104S1"],
@@ -102,6 +104,7 @@ EXPECTED_MODELS = {
     ],
     "Daikin": ["RTD-RA"],
     "Dyna Drive": ["DN310"],
+    "ERMAN": ["ER-G-220-05"],
     "Haier": ["YCJ-A002"],
     "Owen": ["ПЛК110-24.60.К-М", "TRM-138"],
     "Zuked": ["310-4.0S1"],
@@ -110,7 +113,7 @@ EXPECTED_MODELS = {
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 37
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 38
 
 
 def test_module_exports_are_the_single_registry_source():
@@ -119,6 +122,7 @@ def test_module_exports_are_the_single_registry_source():
     assert bolid.EQUIPMENT_CLASSES == _get_equipment_classes("Bolid")
     assert daikin.EQUIPMENT_CLASSES == _get_equipment_classes("Daikin")
     assert dyna_drive.EQUIPMENT_CLASSES == _get_equipment_classes("Dyna Drive")
+    assert erman.EQUIPMENT_CLASSES == _get_equipment_classes("ERMAN")
     assert haier.EQUIPMENT_CLASSES == _get_equipment_classes("Haier")
     assert owen.EQUIPMENT_CLASSES == _get_equipment_classes("Owen")
     assert zuked.EQUIPMENT_CLASSES == _get_equipment_classes("Zuked")

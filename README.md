@@ -8,21 +8,17 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
-## New in 1.3.0 — 4VRS Haier-ESP32 climate control
+## New in 1.4.0 — ERMAN pump control and TRM-138 outputs
 
-This release adds the dedicated **4VRS Haier-ESP32** equipment profile for
-[Haier-ESP32-Modbus](https://github.com/dk-1983/Haier-ESP32-Modbus). It exposes
-climate control, quiet/display switches, fixed louvre positions, and command
-and link diagnostics while preserving the existing Haier YCJ-A002 profile.
+This release adds the document-derived **ERMAN ER-G-220-05** pump-drive profile
+with grouped runtime monitoring, operating and fault states, explicit command
+buttons, and guarded Y1/Y2 controls. The implementation has automated protocol
+coverage and is ready for validation by the requesting equipment owner.
 
-Its register map uses the factory YCJ-A002 register set as a compatible base
-and adds project-specific registers for the expanded functionality.
-
-Writes are physically serialized, confirmed through the controller command
-state, and verified by exact readback before Home Assistant state is updated.
-The basic YCJ-A002 communication and operating path has been validated on a
-physical test bench. Full validation of the expanded controller functions is
-planned with the production PCB.
+Owen TRM-138 gains the manual parameters `Состояние ВУ 1…8`. Each output is
+read through FC01 and written through a strictly validated FC05 transaction
+only while it is not assigned to a `C.dr` channel. An exact FC01 readback is
+required before Home Assistant publishes the requested state.
 
 Existing configurations require no migration. Update the integration and
 restart Home Assistant.
@@ -30,8 +26,8 @@ restart Home Assistant.
 ## Key features
 
 - Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, Modbus RTU over UDP, and Modbus RTU over TCP.
-- Explicit equipment models from 4VRS, APC, Bolid, Daikin, Dyna Drive, Haier,
-  Owen, and Zuked.
+- Explicit equipment models from 4VRS, APC, Bolid, Daikin, Dyna Drive, ERMAN,
+  Haier, Owen, and Zuked.
 - Direct Modbus devices and equipment connected through supported gateways.
 - Bolid S2000-PP, Orion, KDL, DPLS, and S2000R-ARR topologies.
 - Model-appropriate climate controls, sensors, binary sensors, switches, and
@@ -243,6 +239,25 @@ new state. The integration never clears a `C.dr` assignment automatically.
 |---|---|---|
 | DN310 | Direct Modbus | Experimental drive monitoring, diagnostics, and explicit command buttons |
 
+### ERMAN
+
+| Model | Connection | Main capabilities |
+|---|---|---|
+| ER-G-220-05 | Direct Modbus | Pump-drive frequency, current, voltage, temperature, pressure and analog-input monitoring; operating/fault status; start, stop, emergency stop, fault reset, parameter save/load, and Y1/Y2 controls |
+
+The initial ER-G-220-05 profile follows the
+[MODBUS protocol document v1.2](https://github.com/user-attachments/files/32493266/protocol_modbus_erg-220-05.pdf)
+for software 01.25. It reads Input registers 2000…2009 as one FC04 block. Pressure
+is exposed in `atm`, as specified by that document; this intentionally differs
+from user configurations that may label the same raw value as `bar`.
+
+Only the documented non-reserved command coils are exposed. FC05 responses are
+strictly validated. Y1/Y2 writes additionally require P118/P120 respectively to
+equal `4`, execute inside one serialized physical operation, and must pass an
+exact FC01 readback before Home Assistant publishes the new state. The profile
+has automated protocol coverage but awaits validation on a physical drive by
+the requesting user.
+
 ## Installation
 
 ### HACS (recommended)
@@ -396,6 +411,7 @@ Equipment implementations are manufacturer- and model-specific. Validation uses 
 - [Bolid](https://bolid.ru/)
 - [Daikin RTD-RA](https://www.daikin.eu/en_us/products/product.html/RTD-RA.html)
 - [Dyna Drive](https://www.dninno.com/)
+- [ERMAN](https://www.erman.ru/)
 - [Haier YCJ-A002](https://haier-rus.ru/product/ycj-a002-soglasovatel/)
 - [Owen](https://owen.ru/)
 

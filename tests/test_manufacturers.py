@@ -37,6 +37,7 @@ def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
         "Bolid",
         "Daikin",
         "Dyna Drive",
+        "ERMAN",
         "Haier",
         "Owen",
         "Zuked",
@@ -50,6 +51,7 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
         ("Bolid", "bolid"),
         ("Daikin", "daikin"),
         ("Dyna Drive", "dyna_drive"),
+        ("ERMAN", "erman"),
         ("Haier", "haier"),
         ("Owen", "owen"),
         ("Zuked", "zuked"),
@@ -60,6 +62,7 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
     assert manufacturer_module_name("Daikin") == "daikin"
     assert manufacturer_module_name("Owen") == "owen"
     assert manufacturer_module_name("Dyna Drive") == "dyna_drive"
+    assert manufacturer_module_name("ERMAN") == "erman"
     assert manufacturer_module_name("Haier") == "haier"
     assert manufacturer_module_name("bolid") == "bolid"
     assert manufacturer_module_name("owen") == "owen"
@@ -70,7 +73,17 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
 
 @pytest.mark.parametrize(
     "stored_name",
-    ["4VRS", "APC", "Bolid", "Daikin", "Owen", "Dyna Drive", "Haier", "Zuked"],
+    [
+        "4VRS",
+        "APC",
+        "Bolid",
+        "Daikin",
+        "Owen",
+        "Dyna Drive",
+        "ERMAN",
+        "Haier",
+        "Zuked",
+    ],
 )
 def test_canonical_entry_options_remain_stable(stored_name):
     options = {
@@ -170,11 +183,12 @@ def test_zuked_310_4_0s1_is_canonical_and_discoverable():
     assert get_equipment_classes_by_manufacturer()["Zuked"] == ["Zuked3104S1"]
 
 
-def test_dn310_is_the_only_canonical_equipment_loading_button_platform():
+def test_only_documented_command_equipment_loads_button_platform():
+    expected = {("Dyna Drive", "DN310"), ("ERMAN", "ERG22005")}
     for manufacturer, class_names in get_equipment_classes_by_manufacturer().items():
         for class_name in class_names:
             instance = get_class(manufacturer, class_name)(None, 1)
-            if (manufacturer, class_name) == ("Dyna Drive", "DN310"):
+            if (manufacturer, class_name) in expected:
                 assert Platform.BUTTON in instance.attr_platforms
             else:
                 assert Platform.BUTTON not in instance.attr_platforms
