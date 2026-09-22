@@ -1,41 +1,50 @@
-# Modbus Devices 1.3.0 — 4VRS Haier-ESP32 climate control
+# Modbus Devices 1.4.0 — ERMAN pump control and TRM-138 outputs
 
-Modbus Devices 1.3.0 adds a dedicated equipment profile for the
-[Haier-ESP32-Modbus](https://github.com/dk-1983/Haier-ESP32-Modbus) controller
-under the new 4VRS manufacturer.
+Modbus Devices 1.4.0 adds the ERMAN ER-G-220-05 pump-drive profile and manual
+output-state control for Owen TRM-138.
 
-## Haier-ESP32
+## ERMAN ER-G-220-05
 
-Haier-ESP32 is a separate 4VRS device. Its register map was developed from the
-factory YCJ-A002 register set as a compatible base and extended with additional
-registers required by the new functionality. The existing Haier YCJ-A002
-equipment profile remains unchanged.
+The new equipment profile follows the
+[MODBUS protocol document v1.2](https://github.com/user-attachments/files/32493266/protocol_modbus_erg-220-05.pdf)
+for device software 01.25.
 
-- Adds climate power, HVAC mode, target and room temperature, fan mode, swing,
-  and preset control.
-- Adds quiet and display switches plus selectable fixed vertical and horizontal
-  louvre positions. Read-only automatic louvre states remain visible but cannot
-  be selected as commands.
-- Exposes command status, status age, a low-word-first 32-bit packet counter,
-  transport flags, and Haier-link state.
-- Reads the diagnostic Input 4…8 block independently so it remains available
-  when stale primary telemetry returns Modbus exception 0x0B.
-- Serializes every write on the physical Modbus client, waits for controller
-  confirmation, and performs an exact FC01 or FC03 readback before publishing
-  the state in Home Assistant.
-- Treats exception 0x06 Busy and protocol, timeout, confirmation, or readback
-  failures as terminal; it never converts an unconfirmed write into optimistic
-  success.
+- Reads Input registers 2000…2009 as one FC04 runtime block.
+- Exposes output frequency, motor current, input voltage, drive temperature,
+  current pressure, and analog inputs A1/A2.
+- Preserves documented, reserved, and unknown drive/fault codes losslessly.
+- Provides explicit FC05 buttons for start, stop, emergency stop, fault reset,
+  and parameter save/load commands. Reserved coils are not exposed.
+- Exposes Y1/Y2 as switches only after checking that P118/P120 respectively
+  select function `4`.
+- Serializes the function check, FC05 write, and exact FC01 readback as one
+  physical operation. Home Assistant state changes only after confirmed
+  readback.
 
-The basic YCJ-A002 communication and operating path was validated with physical
-equipment on the development test bench. Full hardware validation of the new
-Haier-ESP32 registers, confirmation state machine, louvre functions, quiet and
-display controls is deferred until the production PCB is available.
+Pressure is exposed in `atm`, matching the protocol document rather than
+third-party YAML examples that may label the same value as `bar`.
+
+The profile has comprehensive synthetic protocol and entity tests. Physical
+hardware was not available during development; the requesting user will
+validate it and provide logs for any required compatibility corrections.
+
+## Owen TRM-138
+
+- Adds switches named exactly as the manual parameters `Состояние ВУ 1…8`.
+- Reads all eight output coils together through FC01.
+- Before a manual write, reads C.dr 1…8 and refuses to take control of an
+  output assigned to any comparator channel.
+- Validates the mirrored FC05 response and an exact FC01 readback in one
+  physical-client critical section.
+- Never clears or changes a C.dr assignment automatically.
+
+The TRM-138 output-state path is covered by automated protocol, rejection,
+readback, entity, and regression tests.
 
 ## Upgrade
 
 No configuration or entity migration is required. Update the integration and
 restart Home Assistant. Existing configurations remain compatible.
 
-Equipment details and official references are documented in the
+Equipment details and source references are documented in the
 [English README](../README.md) and [Russian README](../README_RU.md).
