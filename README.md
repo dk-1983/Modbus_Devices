@@ -281,11 +281,19 @@ Configuration is performed entirely in the Home Assistant UI.
 
 1. Add **Modbus Devices** and choose **Add a new hub**.
 2. Select TCP, UDP, serial RTU, RTU over UDP, or RTU over TCP.
-3. Select the manufacturer and exact model.
-4. Enter the host/port or serial settings and Modbus unit ID.
-5. Finish setup; one Home Assistant device is created for the physical instrument.
+3. Select the functional equipment category.
+4. Select the manufacturer and exact model.
+5. Enter the host/port or serial settings and Modbus unit ID.
+6. Finish setup; one Home Assistant device is created for the physical instrument.
+
+Categories keep the growing equipment catalog navigable. They belong to the
+physical model rather than to a manufacturer: one manufacturer may therefore
+appear in several sections. Technical model names and protocol parameter names
+remain identical to the manufacturer documentation.
 
 <p align="center"><img src="pictures/config-flow/modbus_transport_selection.png" alt="Choose a Modbus transport" width="78%"></p>
+
+<p align="center"><img src="pictures/config-flow/equipment_category_selection.png" alt="Choose an equipment category" width="78%"></p>
 
 <p align="center"><img src="pictures/config-flow/MD_menu_step2.jpg" alt="Choose a manufacturer" width="78%"></p>
 
@@ -299,11 +307,12 @@ Configuration is performed entirely in the Home Assistant UI.
 
 Add and verify the S2000-PP gateway first. Then add **Modbus Devices** again and choose **Via existing S2000-PP**.
 
-1. Select the correct S2000-PP gateway.
-2. Select the downstream physical model.
-3. Enter the KDL Orion address and the device's DPLS base address.
-4. Use configuration-assisted mapping when available, or select the PP row manually.
-5. Repeat the flow for each additional physical device.
+1. Select the functional equipment category.
+2. Select the correct S2000-PP gateway.
+3. Select the downstream physical model.
+4. Enter the KDL Orion address and the device's DPLS base address.
+5. Use configuration-assisted mapping when available, or select the PP row manually.
+6. Repeat the flow for each additional physical device.
 
 Configuration-assisted mapping reads the selected S2000-PP configuration table and offers compatible unused rows. It does not identify the physical model automatically, so always select the actual model first. If no single compatible mapping is found, manual mapping lets you enter the known zone/relay table row and required capability details; the integration still validates them against the chosen model.
 

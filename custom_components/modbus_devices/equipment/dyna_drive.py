@@ -10,6 +10,8 @@ from ..modbus_validation import validate_fc06_response, validated_registers
 
 from homeassistant.const import EntityCategory, Platform
 
+from .category import EquipmentCategory
+
 
 class DN310Command(IntEnum):
     """Documented volatile commands for register 0x2000."""
@@ -83,6 +85,7 @@ class DN310:
 
     equipment_manufacturer = "Dyna Drive"
     equipment_model = "DN310"
+    equipment_category = EquipmentCategory.VARIABLE_FREQUENCY_DRIVES
 
     uses_stable_entry_identity = True
     protocol = "Modbus RTU slave; FC03/FC06 word operations"

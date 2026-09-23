@@ -28,6 +28,7 @@ from homeassistant.const import (
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
 
+from .category import EquipmentCategory
 from ..gateway import (
     CapabilityRequirement,
     GatewayCapabilitySpec,
@@ -58,7 +59,6 @@ from ..s2000_pp import (
 from .equipment import canonical_equipment_class_name
 
 _LOGGER = getLogger(__name__)
-
 
 
 def _handle_optional_numeric_protocol_error(
@@ -109,6 +109,7 @@ class M3000BB1020:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "M3000-BB-1020"
+    equipment_category = EquipmentCategory.BUILDING_AUTOMATION
 
     CLOCK_SYNC_MAX_DRIFT_SECONDS = 10
     CLOCK_SYNC_RETRY_COOLDOWN_SECONDS = 60
@@ -649,6 +650,7 @@ class S2000PP:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-ПП"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
 
     SERVICE_INFO_ADDRESS = 46152
     DEVICE_TYPE = 36
@@ -658,10 +660,7 @@ class S2000PP:
         """Initialize documented gateway metadata and diagnostics."""
         self.attr_device_id: int = device_id
         self.attr_client: (
-            AsyncModbusSerialClient
-            | AsyncModbusTcpClient
-            | AsyncModbusUdpClient
-            | None
+            AsyncModbusSerialClient | AsyncModbusTcpClient | AsyncModbusUdpClient | None
         ) = client
         self.attr_manufactures_name = "Bolid"
         self.attr_model_name = "С2000-ПП"
@@ -751,9 +750,7 @@ class S2000PP:
                 f"Unexpected device type at S2000-PP endpoint: {registers[0]}"
             )
         self.attr_device_type = registers[0]
-        self.attr_software_version = (
-            f"{registers[1] // 100}.{registers[1] % 100:02d}"
-        )
+        self.attr_software_version = f"{registers[1] // 100}.{registers[1] % 100:02d}"
         return {
             "device_type": self.attr_device_type,
             "software_version": self.attr_software_version,
@@ -787,47 +784,53 @@ class C2000KPB:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-КПБ"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
 
     required_gateway = GatewayType.S2000_PP
 
-    capability_requirements = tuple(
-        GatewayCapabilitySpec(
-            key=f"output_{number}",
-            name=f"Output {number}",
-            object_kind=ObjectKind.RELAY,
-            local_object_number=number,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+    capability_requirements = (
+        tuple(
+            GatewayCapabilitySpec(
+                key=f"output_{number}",
+                name=f"Output {number}",
+                object_kind=ObjectKind.RELAY,
+                local_object_number=number,
+                requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            )
+            for number in range(1, 7)
         )
-        for number in range(1, 7)
-    ) + tuple(
-        GatewayCapabilitySpec(
-            key=f"output_{number}_circuit",
-            name=f"Output {number} circuit state",
-            object_kind=ObjectKind.ZONE,
-            local_object_number=number,
-            zone_type=2,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        + tuple(
+            GatewayCapabilitySpec(
+                key=f"output_{number}_circuit",
+                name=f"Output {number} circuit state",
+                object_kind=ObjectKind.ZONE,
+                local_object_number=number,
+                zone_type=2,
+                requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            )
+            for number in range(1, 7)
         )
-        for number in range(1, 7)
-    ) + tuple(
-        GatewayCapabilitySpec(
-            key=f"technological_input_{number}",
-            name=f"Technological input {number}",
-            object_kind=ObjectKind.ZONE,
-            local_object_number=number,
-            zone_type=1,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+        + tuple(
+            GatewayCapabilitySpec(
+                key=f"technological_input_{number}",
+                name=f"Technological input {number}",
+                object_kind=ObjectKind.ZONE,
+                local_object_number=number,
+                zone_type=1,
+                requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            )
+            for number in range(1, 3)
         )
-        for number in range(1, 3)
-    ) + (
-        GatewayCapabilitySpec(
-            key="device_state",
-            name="Device state",
-            object_kind=ObjectKind.ZONE,
-            local_object_number=0,
-            zone_type=3,
-            requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
-        ),
+        + (
+            GatewayCapabilitySpec(
+                key="device_state",
+                name="Device state",
+                object_kind=ObjectKind.ZONE,
+                local_object_number=0,
+                zone_type=3,
+                requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
+            ),
+        )
     )
 
     STATE_NAMES = {
@@ -935,10 +938,7 @@ class C2000KPB:
         self.attr_device_id: int = device_id
 
         self.attr_client: (
-            AsyncModbusSerialClient
-            | AsyncModbusTcpClient
-            | AsyncModbusUdpClient
-            | None
+            AsyncModbusSerialClient | AsyncModbusTcpClient | AsyncModbusUdpClient | None
         ) = client
 
         self.attr_manufactures_name: str = "Bolid"
@@ -968,7 +968,6 @@ class C2000KPB:
         #
 
         for num in range(1, 7):
-
             setattr(
                 self,
                 f"attr_out{num}",
@@ -1006,7 +1005,9 @@ class C2000KPB:
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
             if spec is None:
                 raise ValueError("Mapping contains an unsupported C2000-KPB object")
@@ -1038,7 +1039,9 @@ class C2000KPB:
             if key.startswith("output_") and not key.endswith("_circuit")
         }
         self._zone_mappings = {
-            key: item for key, item in resolved.items() if item.object_kind is ObjectKind.ZONE
+            key: item
+            for key, item in resolved.items()
+            if item.object_kind is ObjectKind.ZONE
         }
 
         for number, item in self._relay_mappings.items():
@@ -1215,7 +1218,6 @@ class C2000KPB:
         outputs = outputs or list(self._relay_mappings)
 
         for output, value in zip(outputs, values):
-
             result = await self.set_output(
                 output,
                 value,
@@ -1246,6 +1248,7 @@ class C20002:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-2"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     documented_firmware = "2.75"
     capability_requirements = (
@@ -1325,7 +1328,10 @@ class C20002:
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Validate and apply the configured Orion state subset."""
-        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+        if (
+            canonical_equipment_class_name(mapping.identity.model)
+            != self.__class__.__name__
+        ):
             raise ValueError("Gateway mapping model does not match C2000-2")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match C2000-2")
@@ -1338,7 +1344,9 @@ class C20002:
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
             if spec is None:
                 raise ValueError("Mapping contains an unsupported C2000-2 object")
@@ -1423,6 +1431,7 @@ class C20004:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-4"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     documented_firmware = "3.85"
     capability_requirements = (
@@ -1502,7 +1511,10 @@ class C20004:
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Validate and apply the configured Orion state subset."""
-        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+        if (
+            canonical_equipment_class_name(mapping.identity.model)
+            != self.__class__.__name__
+        ):
             raise ValueError("Gateway mapping model does not match C2000-4")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match C2000-4")
@@ -1515,7 +1527,9 @@ class C20004:
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
             if spec is None:
                 raise ValueError("Mapping contains an unsupported C2000-4 object")
@@ -1600,6 +1614,7 @@ class C2000BKI:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-БКИ"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     documented_firmware = "2.45"
     capability_requirements = (
@@ -1647,7 +1662,10 @@ class C2000BKI:
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Validate and apply the configured Orion device-state mapping."""
-        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+        if (
+            canonical_equipment_class_name(mapping.identity.model)
+            != self.__class__.__name__
+        ):
             raise ValueError("Gateway mapping model does not match C2000-BKI")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match C2000-BKI")
@@ -1656,7 +1674,9 @@ class C2000BKI:
 
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             if (
                 item.object_kind is not ObjectKind.ZONE
                 or item.local_object_number != 0
@@ -1744,6 +1764,7 @@ class Signal20M:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "Сигнал-20М"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     documented_firmware = "2.13"
     capability_requirements = (
@@ -1803,7 +1824,10 @@ class Signal20M:
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Validate and apply the configured Orion state subset."""
-        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+        if (
+            canonical_equipment_class_name(mapping.identity.model)
+            != self.__class__.__name__
+        ):
             raise ValueError("Gateway mapping model does not match Signal-20M")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match Signal-20M")
@@ -1816,7 +1840,9 @@ class Signal20M:
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
             if spec is None:
                 raise ValueError("Mapping contains an unsupported Signal-20M object")
@@ -1826,7 +1852,9 @@ class Signal20M:
                 raise ValueError("Duplicate Signal-20M capability mapping")
             resolved[spec.key] = item
         if not resolved:
-            raise ValueError("Signal-20M mapping must configure at least one state object")
+            raise ValueError(
+                "Signal-20M mapping must configure at least one state object"
+            )
 
         self.attr_gateway_mapping = mapping
         self.attr_device_identifier = mapping.identity.stable_id
@@ -1901,6 +1929,7 @@ class MIP24Isp20:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "МИП-24 исп.20"
+    equipment_category = EquipmentCategory.POWER_AND_BACKUP
     required_gateway = GatewayType.S2000_PP
     full_designation = "МИП-24-2/П5-Р-RS"
     documented_target_firmware = "5.10"
@@ -2133,7 +2162,10 @@ class MIP24Isp20:
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Validate and apply the configured Orion object subset."""
-        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+        if (
+            canonical_equipment_class_name(mapping.identity.model)
+            != self.__class__.__name__
+        ):
             raise ValueError("Gateway mapping model does not match MIP-24 isp.20")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match MIP-24 isp.20")
@@ -2146,7 +2178,9 @@ class MIP24Isp20:
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
             if spec is None and zone_type == 1 and 1 <= item.local_object_number <= 5:
                 # Preserve already-stored mappings created by the pre-type-8 model.
@@ -2158,7 +2192,9 @@ class MIP24Isp20:
             if spec is None:
                 raise ValueError("Mapping contains an unsupported MIP-24 isp.20 object")
             if item.data_area is not ModbusDataArea.HOLDING_REGISTER:
-                raise ValueError("MIP-24 isp.20 state mapping must use holding registers")
+                raise ValueError(
+                    "MIP-24 isp.20 state mapping must use holding registers"
+                )
             if spec.key in resolved:
                 raise ValueError("Duplicate MIP-24 isp.20 capability mapping")
             resolved[spec.key] = item
@@ -2176,8 +2212,7 @@ class MIP24Isp20:
             for state_key, numeric_key in self._NUMERIC_STATE_KEYS.items()
             if state_key in resolved
             for item in (resolved[state_key],)
-            if item.zone_details is not None
-            and item.zone_details.zone_type == 8
+            if item.zone_details is not None and item.zone_details.zone_type == 8
         }
         self._numeric_values = {}
         self._numeric_cursor = 0
@@ -2222,13 +2257,15 @@ class MIP24Isp20:
 
     def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
         """Describe the documented enclosure tamper derived from input 0."""
-        return [{
-            "sensor_id": "tamper",
-            "name": "Enclosure tamper",
-            "device_class": BinarySensorDeviceClass.TAMPER,
-            "entity_category": EntityCategory.DIAGNOSTIC,
-            "icon": "mdi:shield-lock-open",
-        }]
+        return [
+            {
+                "sensor_id": "tamper",
+                "name": "Enclosure tamper",
+                "device_class": BinarySensorDeviceClass.TAMPER,
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "icon": "mdi:shield-lock-open",
+            }
+        ]
 
     async def async_get_snapshot(self) -> dict[str, dict]:
         """Read all mapped state objects into one atomic snapshot."""
@@ -2263,17 +2300,21 @@ class MIP24Isp20:
             key: self._state_sensor_value(key, states[item.gateway_object_number])
             for key, item in self._state_mappings.items()
         }
-        device_state = states[self._state_mappings["device_state"].gateway_object_number]
+        device_state = states[
+            self._state_mappings["device_state"].gateway_object_number
+        ]
         return {
             "numeric_sensors": {
                 key: dict(value) for key, value in self._numeric_values.items()
             },
             "state_sensors": state_snapshot,
-            "binary_sensors": {"tamper": {
-                "state": self._tamper_state(device_state),
-                "primary_code": device_state.primary_state,
-                "expanded_codes": device_state.expanded_states,
-            }},
+            "binary_sensors": {
+                "tamper": {
+                    "state": self._tamper_state(device_state),
+                    "primary_code": device_state.primary_state,
+                    "expanded_codes": device_state.expanded_states,
+                }
+            },
         }
 
     async def data_init(self) -> bool:
@@ -2287,9 +2328,7 @@ class MIP24Isp20:
         return cls.STATE_NAMES.get(code, f"unknown_{code}")
 
     @classmethod
-    def _state_sensor_value(
-        cls, key: str, state: S2000PPZoneState
-    ) -> dict[str, Any]:
+    def _state_sensor_value(cls, key: str, state: S2000PPZoneState) -> dict[str, Any]:
         expanded_codes = state.expanded_states
         return {
             "sensor_id": key,
@@ -2322,6 +2361,7 @@ class C2000KDL:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-КДЛ"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     gateway_transport_limitation = (
         "S2000-PP does not expose documented Modbus requests for C2000-KDL "
@@ -2389,9 +2429,7 @@ class C2000KDL:
             or device_state.zone_details.zone_type != 3
             or device_state.data_area is not ModbusDataArea.HOLDING_REGISTER
         ):
-            raise ValueError(
-                "C2000-KDL requires S2000-PP zone type 3, local object 0"
-            )
+            raise ValueError("C2000-KDL requires S2000-PP zone type 3, local object 0")
 
         identity = mapping.identity
         self.attr_gateway_mapping = mapping
@@ -2481,6 +2519,7 @@ class C2000RARR125:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-АРР125"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 1
@@ -2641,13 +2680,15 @@ class C2000RARR125:
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
         if self._device_state_mapping is None:
             return []
-        return [{
-            "sensor_id": "device_state",
-            "name": "ARR125 state",
-            "device_class": None,
-            "entity_category": EntityCategory.DIAGNOSTIC,
-            "icon": "mdi:radio-tower",
-        }]
+        return [
+            {
+                "sensor_id": "device_state",
+                "name": "ARR125 state",
+                "device_class": None,
+                "entity_category": EntityCategory.DIAGNOSTIC,
+                "icon": "mdi:radio-tower",
+            }
+        ]
 
     async def async_get_snapshot(self) -> dict[str, dict]:
         if self._device_state_mapping is None:
@@ -2657,13 +2698,19 @@ class C2000RARR125:
         ).async_read_zone_states((self._device_state_mapping,))
         state = states[self._device_state_mapping.gateway_object_number]
         active_codes = tuple(code for code in state.expanded_states if code != 0)
-        return {"state_sensors": {"device_state": {
-            "sensor_id": "device_state",
-            "state": self._state_name(state.primary_state),
-            "primary_code": state.primary_state,
-            "expanded_codes": state.expanded_states,
-            "expanded_states": tuple(self._state_name(code) for code in active_codes),
-        }}}
+        return {
+            "state_sensors": {
+                "device_state": {
+                    "sensor_id": "device_state",
+                    "state": self._state_name(state.primary_state),
+                    "primary_code": state.primary_state,
+                    "expanded_codes": state.expanded_states,
+                    "expanded_states": tuple(
+                        self._state_name(code) for code in active_codes
+                    ),
+                }
+            }
+        }
 
     @classmethod
     def _state_name(cls, code: int) -> str:
@@ -2732,7 +2779,10 @@ class BolidDPLSDetectorBase:
         return cls.capability_requirements
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
-        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+        if (
+            canonical_equipment_class_name(mapping.identity.model)
+            != self.__class__.__name__
+        ):
             raise ValueError("Gateway mapping model does not match detector")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match detector")
@@ -2758,7 +2808,10 @@ class BolidDPLSDetectorBase:
             spec = None
             if state_mapping.zone_details is not None:
                 spec = accepted.get(
-                    (state_mapping.local_object_number, state_mapping.zone_details.zone_type)
+                    (
+                        state_mapping.local_object_number,
+                        state_mapping.zone_details.zone_type,
+                    )
                 )
             if (
                 state_mapping.object_kind is not ObjectKind.ZONE
@@ -2772,18 +2825,21 @@ class BolidDPLSDetectorBase:
             resolved[spec.key] = state_mapping
 
         required = {
-            spec.key for spec in capabilities
+            spec.key
+            for spec in capabilities
             if spec.requirement is CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION
             and spec.alternative_group is None
         }
         if not required.issubset(resolved):
             raise ValueError("Detector mapping is missing a required own zone")
         for group in {
-            spec.alternative_group for spec in capabilities
+            spec.alternative_group
+            for spec in capabilities
             if spec.alternative_group is not None
         }:
             matches = [
-                spec.key for spec in capabilities
+                spec.key
+                for spec in capabilities
                 if spec.alternative_group == group and spec.key in resolved
             ]
             if len(matches) != 1:
@@ -2879,6 +2935,7 @@ class DIP34A05(BolidDPLSDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "ДИП-34А-05"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "ДИП-34А-05"
     documented_variant = "dip_34a_05"
     documented_target_firmware = "1.22"
@@ -2886,9 +2943,12 @@ class DIP34A05(BolidDPLSDetectorBase):
     physical_capabilities = ("smoke_detection", "dust_compensation", "test")
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="detector_state", name="Detector state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=0, zone_type=1,
+            key="detector_state",
+            name="Detector state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
@@ -2941,36 +3001,44 @@ class BolidRadioDetectorDiagnosticsMixin:
         descriptions[0]["state_icons"] = dict(self.detector_state_icons)
         descriptions[0]["unknown_state_icon"] = "mdi:help-circle-outline"
         for sensor_id, name, _ in self.battery_state_channels:
-            descriptions.append({
-                "sensor_id": sensor_id,
-                "name": name,
-                "device_class": None,
-                "icon": "mdi:battery",
-                "entity_category": EntityCategory.DIAGNOSTIC,
-                "state_icons": {
-                    "battery_restored": "mdi:battery-check",
-                    "battery_low": "mdi:battery-alert",
-                    "battery_fault": "mdi:battery-alert",
-                    "reserve_battery_restored": "mdi:battery-check",
-                    "reserve_battery_low": "mdi:battery-alert",
-                },
-                "unknown_state_icon": "mdi:help-circle-outline",
-            })
+            descriptions.append(
+                {
+                    "sensor_id": sensor_id,
+                    "name": name,
+                    "device_class": None,
+                    "icon": "mdi:battery",
+                    "entity_category": EntityCategory.DIAGNOSTIC,
+                    "state_icons": {
+                        "battery_restored": "mdi:battery-check",
+                        "battery_low": "mdi:battery-alert",
+                        "battery_fault": "mdi:battery-alert",
+                        "reserve_battery_restored": "mdi:battery-check",
+                        "reserve_battery_low": "mdi:battery-alert",
+                    },
+                    "unknown_state_icon": "mdi:help-circle-outline",
+                }
+            )
         return descriptions
 
     def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
         """Expose documented tamper without treating code absence as restored."""
-        return [] if self._state_mapping is None else [{
-            "sensor_id": "enclosure_tamper",
-            "name": "Enclosure tamper",
-            "device_class": BinarySensorDeviceClass.TAMPER,
-            "entity_category": EntityCategory.DIAGNOSTIC,
-            "enabled_default": True,
-            "icon": "mdi:shield-question",
-            "icon_on": "mdi:shield-lock-open",
-            "icon_off": "mdi:shield-check",
-            "unknown_icon": "mdi:shield-question",
-        }]
+        return (
+            []
+            if self._state_mapping is None
+            else [
+                {
+                    "sensor_id": "enclosure_tamper",
+                    "name": "Enclosure tamper",
+                    "device_class": BinarySensorDeviceClass.TAMPER,
+                    "entity_category": EntityCategory.DIAGNOSTIC,
+                    "enabled_default": True,
+                    "icon": "mdi:shield-question",
+                    "icon_on": "mdi:shield-lock-open",
+                    "icon_off": "mdi:shield-check",
+                    "unknown_icon": "mdi:shield-question",
+                }
+            ]
+        )
 
     @classmethod
     def _battery_state(
@@ -3011,11 +3079,13 @@ class BolidRadioDetectorDiagnosticsMixin:
                 "battery_code": code,
             }
 
-        snapshot["binary_sensors"] = {"enclosure_tamper": {
-            "state": self._enclosure_tamper_state,
-            "primary_code": detector["primary_code"],
-            "expanded_codes": expanded_codes,
-        }}
+        snapshot["binary_sensors"] = {
+            "enclosure_tamper": {
+                "state": self._enclosure_tamper_state,
+                "primary_code": detector["primary_code"],
+                "expanded_codes": expanded_codes,
+            }
+        }
         return snapshot
 
 
@@ -3037,12 +3107,17 @@ class C2000RDIP(BolidRadioFireDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-ДИП"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "С2000Р-ДИП"
     documented_target_firmware = "1.29"
     supported_kdl_input_types = (1, 6, 8, 21)
     physical_capabilities = (
-        "smoke_detection", "dust_compensation", "radio_supervision",
-        "main_and_reserve_battery", "tamper", "test",
+        "smoke_detection",
+        "dust_compensation",
+        "radio_supervision",
+        "main_and_reserve_battery",
+        "tamper",
+        "test",
     )
     capability_requirements = DIP34A05.capability_requirements
     detector_state_icons = {
@@ -3063,6 +3138,7 @@ class C2000IP03(BolidDPLSDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-ИП-03"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "С2000-ИП-03"
     documented_variant = "s2000_ip_03"
     documented_target_firmware = "1.15"
@@ -3070,16 +3146,22 @@ class C2000IP03(BolidDPLSDetectorBase):
     physical_capabilities = ("temperature_measurement", "fire_detection", "test")
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="state_only", name="Detector state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=0, zone_type=1,
+            key="state_only",
+            name="Detector state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
             alternative_group="detector_mapping",
         ),
         GatewayCapabilitySpec(
-            key="state_and_temperature", name="Detector state + temperature",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=0, zone_type=6,
+            key="state_and_temperature",
+            name="Detector state + temperature",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=6,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
             alternative_group="detector_mapping",
         ),
@@ -3100,14 +3182,16 @@ class C2000IP03(BolidDPLSDetectorBase):
     def get_numeric_sensor_descriptions(self) -> list[dict[str, Any]]:
         if not self._temperature_enabled:
             return []
-        return [{
-            "sensor_id": "temperature",
-            "name": "Temperature",
-            "device_class": SensorDeviceClass.TEMPERATURE,
-            "state_class": SensorStateClass.MEASUREMENT,
-            "unit": UnitOfTemperature.CELSIUS,
-            "precision": 2,
-        }]
+        return [
+            {
+                "sensor_id": "temperature",
+                "name": "Temperature",
+                "device_class": SensorDeviceClass.TEMPERATURE,
+                "state_class": SensorStateClass.MEASUREMENT,
+                "unit": UnitOfTemperature.CELSIUS,
+                "precision": 2,
+            }
+        ]
 
     async def async_get_snapshot(self) -> dict[str, dict]:
         snapshot = await super().async_get_snapshot()
@@ -3136,7 +3220,8 @@ class C2000IP03(BolidDPLSDetectorBase):
                 result,
             )
         snapshot["numeric_sensors"] = (
-            {} if self._temperature_value is None
+            {}
+            if self._temperature_value is None
             else {"temperature": dict(self._temperature_value)}
         )
         return snapshot
@@ -3147,12 +3232,17 @@ class C2000RIP(BolidRadioFireDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-ИП"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "С2000Р-ИП"
     documented_target_firmware = "1.30"
     supported_kdl_input_types = (3, 6, 9, 10, 21)
     physical_capabilities = (
-        "temperature_measurement", "fire_detection", "radio_supervision",
-        "main_and_reserve_battery", "tamper", "test",
+        "temperature_measurement",
+        "fire_detection",
+        "radio_supervision",
+        "main_and_reserve_battery",
+        "tamper",
+        "test",
     )
     gateway_transport_limitation = (
         BolidDPLSDetectorBase.gateway_transport_limitation
@@ -3182,17 +3272,19 @@ class C2000RIP(BolidRadioFireDetectorBase):
         """Expose independently restored enclosure and measuring-part faults."""
         descriptions = super().get_binary_sensor_descriptions()
         if self._state_mapping is not None:
-            descriptions.append({
-                "sensor_id": "measurement_fault",
-                "name": "Temperature measurement fault",
-                "device_class": BinarySensorDeviceClass.PROBLEM,
-                "entity_category": EntityCategory.DIAGNOSTIC,
-                "enabled_default": True,
-                "icon": "mdi:thermometer-question",
-                "icon_on": "mdi:thermometer-alert",
-                "icon_off": "mdi:thermometer-check",
-                "unknown_icon": "mdi:thermometer-question",
-            })
+            descriptions.append(
+                {
+                    "sensor_id": "measurement_fault",
+                    "name": "Temperature measurement fault",
+                    "device_class": BinarySensorDeviceClass.PROBLEM,
+                    "entity_category": EntityCategory.DIAGNOSTIC,
+                    "enabled_default": True,
+                    "icon": "mdi:thermometer-question",
+                    "icon_on": "mdi:thermometer-alert",
+                    "icon_off": "mdi:thermometer-check",
+                    "unknown_icon": "mdi:thermometer-question",
+                }
+            )
         return descriptions
 
     async def async_get_snapshot(self) -> dict[str, dict]:
@@ -3218,15 +3310,20 @@ class BolidGlassBreakDetectorMixin:
 
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="glass_break_state", name="Glass break detector state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=0, zone_type=1,
+            key="glass_break_state",
+            name="Glass break detector state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
     state_sensor_definitions = {
         "glass_break_state": (
-            "glass_break_state", "Glass break detector state", "mdi:glass-fragile"
+            "glass_break_state",
+            "Glass break detector state",
+            "mdi:glass-fragile",
         ),
     }
     detector_state_icons = {
@@ -3252,21 +3349,22 @@ class BolidGlassBreakDetectorMixin:
 
     def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
         """Expose the explicit intrusion-alarm lifecycle."""
-        parent_descriptions = getattr(
-            super(), "get_binary_sensor_descriptions", None
-        )
+        parent_descriptions = getattr(super(), "get_binary_sensor_descriptions", None)
         descriptions = [] if parent_descriptions is None else parent_descriptions()
         if self._state_mapping is not None:
-            descriptions.insert(0, {
-                "sensor_id": "glass_break",
-                "name": "Glass break",
-                "device_class": BinarySensorDeviceClass.SOUND,
-                "enabled_default": True,
-                "icon": "mdi:help-circle-outline",
-                "icon_on": "mdi:alarm-light",
-                "icon_off": "mdi:glass-fragile",
-                "unknown_icon": "mdi:help-circle-outline",
-            })
+            descriptions.insert(
+                0,
+                {
+                    "sensor_id": "glass_break",
+                    "name": "Glass break",
+                    "device_class": BinarySensorDeviceClass.SOUND,
+                    "enabled_default": True,
+                    "icon": "mdi:help-circle-outline",
+                    "icon_on": "mdi:alarm-light",
+                    "icon_off": "mdi:glass-fragile",
+                    "unknown_icon": "mdi:help-circle-outline",
+                },
+            )
         return descriptions
 
     async def async_get_snapshot(self) -> dict[str, dict]:
@@ -3296,12 +3394,17 @@ class C2000RST01(
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-СТ исп.01"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "С2000Р-СТ исп.01"
     detector_description = "Radio glass-break detector"
     documented_target_firmware = "1.03"
     supported_kdl_input_types = (5,)
     physical_capabilities = (
-        "glass_break_detection", "tamper", "radio_supervision", "battery", "test",
+        "glass_break_detection",
+        "tamper",
+        "radio_supervision",
+        "battery",
+        "test",
     )
     gateway_transport_limitation = (
         BolidDPLSDetectorBase.gateway_transport_limitation
@@ -3322,12 +3425,16 @@ class C2000ST04(BolidGlassBreakDetectorMixin, BolidDPLSDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-СТ исп.04"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "С2000-СТ исп.04"
     detector_description = "DPLS glass-break detector"
     documented_target_firmware = "1.24"
     supported_kdl_input_types = (4, 5, 6, 7, 11)
     physical_capabilities = (
-        "glass_break_detection", "tamper", "anti_masking", "test",
+        "glass_break_detection",
+        "tamper",
+        "anti_masking",
+        "test",
         "dpls_service_voltage",
     )
     gateway_transport_limitation = (
@@ -3335,6 +3442,7 @@ class C2000ST04(BolidGlassBreakDetectorMixin, BolidDPLSDetectorBase):
         + "; DPLS service voltage, sensitivity, acoustic level, and detector-local "
         "commands are not exposed through S2000-PP"
     )
+
     def __init__(self, client, device_id) -> None:
         super().__init__(client, device_id)
         self._enclosure_tamper_state: bool | None = None
@@ -3350,30 +3458,32 @@ class C2000ST04(BolidGlassBreakDetectorMixin, BolidDPLSDetectorBase):
         descriptions = super().get_binary_sensor_descriptions()
         if self._state_mapping is None:
             return descriptions
-        descriptions.extend((
-            {
-                "sensor_id": "enclosure_tamper",
-                "name": "Enclosure tamper",
-                "device_class": BinarySensorDeviceClass.TAMPER,
-                "entity_category": EntityCategory.DIAGNOSTIC,
-                "enabled_default": True,
-                "icon": "mdi:shield-question",
-                "icon_on": "mdi:shield-lock-open",
-                "icon_off": "mdi:shield-check",
-                "unknown_icon": "mdi:shield-question",
-            },
-            {
-                "sensor_id": "equipment_fault",
-                "name": "Equipment fault",
-                "device_class": BinarySensorDeviceClass.PROBLEM,
-                "entity_category": EntityCategory.DIAGNOSTIC,
-                "enabled_default": True,
-                "icon": "mdi:help-circle-outline",
-                "icon_on": "mdi:alert-circle",
-                "icon_off": "mdi:check-circle",
-                "unknown_icon": "mdi:help-circle-outline",
-            },
-        ))
+        descriptions.extend(
+            (
+                {
+                    "sensor_id": "enclosure_tamper",
+                    "name": "Enclosure tamper",
+                    "device_class": BinarySensorDeviceClass.TAMPER,
+                    "entity_category": EntityCategory.DIAGNOSTIC,
+                    "enabled_default": True,
+                    "icon": "mdi:shield-question",
+                    "icon_on": "mdi:shield-lock-open",
+                    "icon_off": "mdi:shield-check",
+                    "unknown_icon": "mdi:shield-question",
+                },
+                {
+                    "sensor_id": "equipment_fault",
+                    "name": "Equipment fault",
+                    "device_class": BinarySensorDeviceClass.PROBLEM,
+                    "entity_category": EntityCategory.DIAGNOSTIC,
+                    "enabled_default": True,
+                    "icon": "mdi:help-circle-outline",
+                    "icon_on": "mdi:alert-circle",
+                    "icon_off": "mdi:check-circle",
+                    "unknown_icon": "mdi:help-circle-outline",
+                },
+            )
+        )
         return descriptions
 
     async def async_get_snapshot(self) -> dict[str, dict]:
@@ -3395,18 +3505,20 @@ class C2000ST04(BolidGlassBreakDetectorMixin, BolidDPLSDetectorBase):
         elif fault_codes == {39}:
             self._equipment_fault_state = False
 
-        snapshot["binary_sensors"].update({
-            "enclosure_tamper": {
-                "state": self._enclosure_tamper_state,
-                "primary_code": detector["primary_code"],
-                "expanded_codes": detector["expanded_codes"],
-            },
-            "equipment_fault": {
-                "state": self._equipment_fault_state,
-                "primary_code": detector["primary_code"],
-                "expanded_codes": detector["expanded_codes"],
-            },
-        })
+        snapshot["binary_sensors"].update(
+            {
+                "enclosure_tamper": {
+                    "state": self._enclosure_tamper_state,
+                    "primary_code": detector["primary_code"],
+                    "expanded_codes": detector["expanded_codes"],
+                },
+                "equipment_fault": {
+                    "state": self._equipment_fault_state,
+                    "primary_code": detector["primary_code"],
+                    "expanded_codes": detector["expanded_codes"],
+                },
+            }
+        )
         return snapshot
 
 
@@ -3454,6 +3566,7 @@ class C2000RSMK(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-СМК"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "С2000Р-СМК"
     detector_description = "Radio magnetic-contact detector"
     dpls_address_count = 1
@@ -3470,14 +3583,17 @@ class C2000RSMK(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
         "contact_and_external_input": 2,
     }
     documented_target_firmware = "1.13"
-    documented_firmware_family = (
-        "1.04", "1.05", "1.06", "1.07", "1.12", "1.13"
-    )
+    documented_firmware_family = ("1.04", "1.05", "1.06", "1.07", "1.12", "1.13")
     supported_kdl_input_types = (4, 5, 6, 7, 11)
     external_input_kdl_types = (4, 5, 6, 7, 11, 17, 22)
     physical_capabilities = (
-        "magnetic_contact", "optional_external_dry_contact", "tamper",
-        "anti_sabotage", "radio_supervision", "battery", "test",
+        "magnetic_contact",
+        "optional_external_dry_contact",
+        "tamper",
+        "anti_sabotage",
+        "radio_supervision",
+        "battery",
+        "test",
     )
     gateway_transport_limitation = (
         BolidDPLSDetectorBase.gateway_transport_limitation
@@ -3486,22 +3602,30 @@ class C2000RSMK(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
     )
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="opening_state", name="Opening state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=0, zone_type=1,
+            key="opening_state",
+            name="Opening state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
-            key="external_input_state", name="External input state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=1, zone_type=1,
+            key="external_input_state",
+            name="External input state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=1,
+            zone_type=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
     state_sensor_definitions = {
         "opening_state": ("opening_state", "Opening state", "mdi:door"),
         "external_input_state": (
-            "external_input_state", "External input state", "mdi:electric-switch"
+            "external_input_state",
+            "External input state",
+            "mdi:electric-switch",
         ),
     }
     detector_state_icons = {
@@ -3569,16 +3693,19 @@ class C2000RSMK(BolidRadioDetectorDiagnosticsMixin, BolidDPLSDetectorBase):
         """Expose contact alarm and the shared explicit tamper lifecycle."""
         descriptions = super().get_binary_sensor_descriptions()
         if self._state_mapping is not None:
-            descriptions.insert(0, {
-                "sensor_id": "opening",
-                "name": "Opening",
-                "device_class": BinarySensorDeviceClass.OPENING,
-                "enabled_default": True,
-                "icon": "mdi:help-circle-outline",
-                "icon_on": "mdi:door-open",
-                "icon_off": "mdi:door-closed",
-                "unknown_icon": "mdi:help-circle-outline",
-            })
+            descriptions.insert(
+                0,
+                {
+                    "sensor_id": "opening",
+                    "name": "Opening",
+                    "device_class": BinarySensorDeviceClass.OPENING,
+                    "enabled_default": True,
+                    "icon": "mdi:help-circle-outline",
+                    "icon_on": "mdi:door-open",
+                    "icon_off": "mdi:door-closed",
+                    "unknown_icon": "mdi:help-circle-outline",
+                },
+            )
         return descriptions
 
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
@@ -3615,6 +3742,7 @@ class C2000SMK(BolidDPLSDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-СМК исп.04"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     detector_model = "С2000-СМК исп.04"
     detector_description = "DPLS magnetic-contact detector"
     documented_target_firmware = None
@@ -3622,7 +3750,9 @@ class C2000SMK(BolidDPLSDetectorBase):
     supported_kdl_input_types = (4, 5, 6, 7, 11)
     state_entity_category = EntityCategory.DIAGNOSTIC
     physical_capabilities = (
-        "magnetic_contact", "magnetic_test", "dpls_service_voltage",
+        "magnetic_contact",
+        "magnetic_test",
+        "dpls_service_voltage",
     )
     gateway_transport_limitation = (
         BolidDPLSDetectorBase.gateway_transport_limitation
@@ -3694,14 +3824,16 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
         self._water_value: dict[str, Any] | None = None
 
     def get_numeric_sensor_descriptions(self) -> list[dict[str, Any]]:
-        return [{
-            "sensor_id": "water_consumption",
-            "name": "Water consumption",
-            "device_class": SensorDeviceClass.WATER,
-            "state_class": SensorStateClass.TOTAL_INCREASING,
-            "unit": UnitOfVolume.CUBIC_METERS,
-            "precision": 3,
-        }]
+        return [
+            {
+                "sensor_id": "water_consumption",
+                "name": "Water consumption",
+                "device_class": SensorDeviceClass.WATER,
+                "state_class": SensorStateClass.TOTAL_INCREASING,
+                "unit": UnitOfVolume.CUBIC_METERS,
+                "precision": 3,
+            }
+        ]
 
     async def async_get_snapshot(self) -> dict[str, dict]:
         snapshot = await super().async_get_snapshot()
@@ -3710,7 +3842,8 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
             raise ValueError("Water meter counter mapping is not configured")
         if not self.automatic_counter_polling_enabled:
             snapshot["numeric_sensors"] = (
-                {} if self._water_value is None
+                {}
+                if self._water_value is None
                 else {"water_consumption": dict(self._water_value)}
             )
             return snapshot
@@ -3733,16 +3866,19 @@ class BolidDPLSWaterMeterBase(BolidDPLSDetectorBase):
         elif result.status is NumericResultStatus.PROTOCOL_ERROR:
             raise ModbusException(result.message or "counter protocol error")
         snapshot["numeric_sensors"] = (
-            {} if self._water_value is None
+            {}
+            if self._water_value is None
             else {"water_consumption": dict(self._water_value)}
         )
         return snapshot
+
 
 class SVK15_3_8_1_B3(BolidDPLSWaterMeterBase):
     """Radio water meter with integrated С2000Р-АСР1 исп.01."""
 
     equipment_manufacturer = "Bolid"
     equipment_model = "СВК15-3-8-1-Б3"
+    equipment_category = EquipmentCategory.METERING
     detector_model = "СВК15-3-8-1-Б3"
     detector_description = "Radio DPLS-visible water meter"
     documented_target_firmware = "1.07"
@@ -3769,6 +3905,7 @@ class SVK15_3_2_B(BolidDPLSWaterMeterBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "СВК15-3-2-Б"
+    equipment_category = EquipmentCategory.METERING
     detector_model = "СВК15-3-2-Б"
     detector_description = "Wired DPLS water meter"
     physical_capabilities = BolidDPLSWaterMeterBase.physical_capabilities + (
@@ -3851,7 +3988,9 @@ class BolidDPLSOutputBase:
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
             if spec is None:
                 raise ValueError("Mapping contains an unsupported output-device object")
@@ -3866,7 +4005,8 @@ class BolidDPLSOutputBase:
                 raise ValueError("Duplicate output-device capability mapping")
             resolved[spec.key] = item
         required = {
-            spec.key for spec in self.capability_requirements
+            spec.key
+            for spec in self.capability_requirements
             if spec.requirement is CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION
         }
         if not required <= resolved.keys():
@@ -3938,8 +4078,12 @@ class BolidDPLSOutputBase:
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
         names = {spec.key: spec.name for spec in self.capability_requirements}
         return [
-            {"sensor_id": key, "name": names[key], "device_class": None,
-             "icon": "mdi:state-machine"}
+            {
+                "sensor_id": key,
+                "name": names[key],
+                "device_class": None,
+                "icon": "mdi:state-machine",
+            }
             for key in self._zone_mappings
         ]
 
@@ -3993,7 +4137,9 @@ class BolidDPLSOutputBase:
         self._outputs[out] = output
         return output
 
-    async def get_outputs(self, outputs: list[int] | None = None) -> list[dict[str, Any]]:
+    async def get_outputs(
+        self, outputs: list[int] | None = None
+    ) -> list[dict[str, Any]]:
         selected = outputs or sorted(self._relay_mappings)
         if set(selected) - self._relay_mappings.keys():
             raise ValueError("Output is not configured")
@@ -4034,6 +4180,7 @@ class C2000RRM(BolidDPLSOutputBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-РМ"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     model_name = "С2000Р-РМ"
     description = "Radio relay module"
     dpls_address_count = 2
@@ -4045,23 +4192,44 @@ class C2000RRM(BolidDPLSOutputBase):
     }
     topology_dpls_address_counts = {"outputs_only": 2, "outputs_and_input": 3}
     supported_controlled_circuit_kdl_input_types = (
-        1, 2, 3, 4, 5, 6, 7, 11, 16, 17, 18, 21, 22
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        11,
+        16,
+        17,
+        18,
+        21,
+        22,
     )
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="relay_1", name="Relay 1", object_kind=ObjectKind.RELAY,
-            local_object_number=0, local_object_offset=0,
+            key="relay_1",
+            name="Relay 1",
+            object_kind=ObjectKind.RELAY,
+            local_object_number=0,
+            local_object_offset=0,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
-            key="relay_2", name="Relay 2", object_kind=ObjectKind.RELAY,
-            local_object_number=0, local_object_offset=1,
+            key="relay_2",
+            name="Relay 2",
+            object_kind=ObjectKind.RELAY,
+            local_object_number=0,
+            local_object_offset=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
-            key="controlled_circuit", name="Controlled circuit state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=2, zone_type=1,
+            key="controlled_circuit",
+            name="Controlled circuit state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=2,
+            zone_type=1,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
     )
@@ -4095,7 +4263,9 @@ class C2000RRM(BolidDPLSOutputBase):
     ) -> None:
         wants_input = mapping.identity.metadata.topology == "outputs_and_input"
         if ("controlled_circuit" in resolved) != wants_input:
-            raise ValueError("C2000RRM controlled-circuit mapping does not match topology")
+            raise ValueError(
+                "C2000RRM controlled-circuit mapping does not match topology"
+            )
 
     def _device_metadata(self, mapping: ResolvedDeviceMapping) -> dict[str, Any]:
         return {
@@ -4113,18 +4283,25 @@ class C2000RSirena(BolidDPLSOutputBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-Сирена"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     model_name = "С2000Р-Сирена"
     description = "Radio light and sound annunciator"
     dpls_address_count = 2
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="light", name="Light", object_kind=ObjectKind.RELAY,
-            local_object_number=0, local_object_offset=0,
+            key="light",
+            name="Light",
+            object_kind=ObjectKind.RELAY,
+            local_object_number=0,
+            local_object_offset=0,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
-            key="sound", name="Sound", object_kind=ObjectKind.RELAY,
-            local_object_number=0, local_object_offset=1,
+            key="sound",
+            name="Sound",
+            object_kind=ObjectKind.RELAY,
+            local_object_number=0,
+            local_object_offset=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
@@ -4146,12 +4323,19 @@ class BolidDPLSWaterDetectorBase:
     dpls_address_count = 1
     variants: dict[str, str] = {}
     variant_metadata: dict[str, dict[str, Any]] = {}
-    STATE_NAMES = {**C2000KPB.STATE_NAMES, 79: "water_alarm", 80: "water_alarm_restored"}
+    STATE_NAMES = {
+        **C2000KPB.STATE_NAMES,
+        79: "water_alarm",
+        80: "water_alarm_restored",
+    }
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="water_leak_state", name="Water leak state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=0, zone_type=1,
+            key="water_leak_state",
+            name="Water leak state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=1,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
     )
@@ -4274,27 +4458,39 @@ class BolidDPLSWaterDetectorBase:
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
         if self._state_mapping is None:
             return []
-        descriptions = [{
-            "sensor_id": "water_leak_state", "name": "Water leak state",
-            "device_class": None, "icon": "mdi:water-alert",
-            "entity_category": EntityCategory.DIAGNOSTIC,
-        }]
-        for key in self.battery_state_groups:
-            descriptions.append({
-                "sensor_id": key,
-                "name": key.replace("_", " ").title(),
+        descriptions = [
+            {
+                "sensor_id": "water_leak_state",
+                "name": "Water leak state",
                 "device_class": None,
-                "icon": "mdi:battery-check",
-            })
+                "icon": "mdi:water-alert",
+                "entity_category": EntityCategory.DIAGNOSTIC,
+            }
+        ]
+        for key in self.battery_state_groups:
+            descriptions.append(
+                {
+                    "sensor_id": key,
+                    "name": key.replace("_", " ").title(),
+                    "device_class": None,
+                    "icon": "mdi:battery-check",
+                }
+            )
         return descriptions
 
     def get_binary_sensor_descriptions(self) -> list[dict[str, Any]]:
         """Expose only the documented water alarm/restored binary semantic."""
-        return [] if self._state_mapping is None else [{
-            "sensor_id": "water_leak",
-            "name": "Water leak",
-            "device_class": BinarySensorDeviceClass.MOISTURE,
-        }]
+        return (
+            []
+            if self._state_mapping is None
+            else [
+                {
+                    "sensor_id": "water_leak",
+                    "name": "Water leak",
+                    "device_class": BinarySensorDeviceClass.MOISTURE,
+                }
+            ]
+        )
 
     async def async_get_snapshot(self) -> dict[str, dict]:
         if self._state_mapping is None:
@@ -4318,25 +4514,29 @@ class BolidDPLSWaterDetectorBase:
         for key, codes in self.battery_state_groups.items():
             code = next((item for item in active if item in codes), None)
             state_sensors[key] = {
-                "state": None if code is None else self.STATE_NAMES.get(
-                    code, f"unknown_{code}"
-                ),
+                "state": None
+                if code is None
+                else self.STATE_NAMES.get(code, f"unknown_{code}"),
                 "primary_code": state.primary_state,
                 "expanded_codes": state.expanded_states,
                 "expanded_states": raw_state["expanded_states"],
             }
         water_state = (
-            True if state.primary_state == 79
-            else False if state.primary_state == 80
+            True
+            if state.primary_state == 79
+            else False
+            if state.primary_state == 80
             else None
         )
         return {
             "state_sensors": state_sensors,
-            "binary_sensors": {"water_leak": {
-                "state": water_state,
-                "primary_code": state.primary_state,
-                "expanded_codes": state.expanded_states,
-            }},
+            "binary_sensors": {
+                "water_leak": {
+                    "state": water_state,
+                    "primary_code": state.primary_state,
+                    "expanded_codes": state.expanded_states,
+                }
+            },
         }
 
 
@@ -4345,6 +4545,7 @@ class C2000DZ(BolidDPLSWaterDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-ДЗ"
+    equipment_category = EquipmentCategory.ENGINEERING_MONITORING
     variant_optional = True
     variants = {
         "v1_06": "С2000-ДЗ 1.06",
@@ -4362,10 +4563,12 @@ class C2000DZ(BolidDPLSWaterDetectorBase):
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Keep wired-only static metadata without adding radio capabilities."""
         super().apply_gateway_mapping(mapping)
-        self.attr_device_metadata.update({
-            "supported_kdl_input_types": self.supported_kdl_input_types,
-            "documented_classic_kdl_minimum": self.documented_classic_kdl_minimum,
-        })
+        self.attr_device_metadata.update(
+            {
+                "supported_kdl_input_types": self.supported_kdl_input_types,
+                "documented_classic_kdl_minimum": self.documented_classic_kdl_minimum,
+            }
+        )
 
 
 class C2000RDZ(BolidDPLSWaterDetectorBase):
@@ -4373,9 +4576,16 @@ class C2000RDZ(BolidDPLSWaterDetectorBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-ДЗ"
+    equipment_category = EquipmentCategory.ENGINEERING_MONITORING
     description = "Radio water leak detector"
     documented_firmware_family = (
-        "1.00", "1.01", "1.02", "1.03", "1.04", "1.05", "1.06"
+        "1.00",
+        "1.01",
+        "1.02",
+        "1.03",
+        "1.04",
+        "1.05",
+        "1.06",
     )
     battery_state_groups = {
         "main_battery_state": (200, 211, 202),
@@ -4385,12 +4595,14 @@ class C2000RDZ(BolidDPLSWaterDetectorBase):
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Attach documented metadata without guessing actual runtime versions."""
         super().apply_gateway_mapping(mapping)
-        self.attr_device_metadata.update({
-            "battery_topology": "main_and_reserve_cr2450",
-            "documented_firmware_family": self.documented_firmware_family,
-            "tamper_capability": "documented_pp_routing_deferred",
-            "radio_supervision": "documented_product_specific_routing_deferred",
-        })
+        self.attr_device_metadata.update(
+            {
+                "battery_topology": "main_and_reserve_cr2450",
+                "documented_firmware_family": self.documented_firmware_family,
+                "tamper_capability": "documented_pp_routing_deferred",
+                "radio_supervision": "documented_product_specific_routing_deferred",
+            }
+        )
 
 
 class BolidDPLSNumericDeviceBase:
@@ -4471,7 +4683,9 @@ class BolidDPLSNumericDeviceBase:
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.local_object_number, zone_type))
             if (
                 spec is None
@@ -4483,7 +4697,9 @@ class BolidDPLSNumericDeviceBase:
                 raise ValueError("Duplicate numeric capability mapping")
             resolved[spec.key] = item
         if not resolved:
-            raise ValueError("Numeric DPLS mapping must configure at least one capability")
+            raise ValueError(
+                "Numeric DPLS mapping must configure at least one capability"
+            )
 
         self.attr_gateway_mapping = mapping
         self.attr_device_identifier = identity.stable_id
@@ -4596,14 +4812,20 @@ class BolidDPLSThermohygrometerBase(BolidDPLSNumericDeviceBase):
 
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="temperature", name="Temperature", object_kind=ObjectKind.ZONE,
-            local_object_number=0, local_object_offset=0,
+            key="temperature",
+            name="Temperature",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
             zone_type=6,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
         GatewayCapabilitySpec(
-            key="humidity", name="Humidity", object_kind=ObjectKind.ZONE,
-            local_object_number=0, local_object_offset=1,
+            key="humidity",
+            name="Humidity",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=1,
             zone_type=6,
             requirement=CapabilityRequirement.REQUIRED_FOR_BASE_OPERATION,
         ),
@@ -4636,7 +4858,8 @@ class BolidDPLSThermohygrometerBase(BolidDPLSNumericDeviceBase):
         resolved = []
         for address in (dpls.base_address, dpls.base_address + 1):
             matches = [
-                row for row in rows
+                row
+                for row in rows
                 if row.local_zone_number == address and row.zone_type == 6
             ]
             if len(matches) != 1:
@@ -4731,6 +4954,7 @@ class C2000VT(BolidDPLSThermohygrometerBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-ВТ"
+    equipment_category = EquipmentCategory.ENGINEERING_MONITORING
     dpls_address_count = 2
 
     class Variant(str, Enum):
@@ -4772,6 +4996,7 @@ class C2000VTI(C2000VT):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-ВТИ"
+    equipment_category = EquipmentCategory.ENGINEERING_MONITORING
     dpls_address_count = 3
     unsupported_variants = {
         "vti_01": "С2000-ВТИ исп.01 CO channel is not hardware validated"
@@ -4810,9 +5035,12 @@ class C2000VTI(C2000VT):
     variant_dpls_address_counts = {"vti": 2, "vti_01": 3}
     capability_requirements = C2000VT.capability_requirements + (
         GatewayCapabilitySpec(
-            key="co_concentration", name="CO concentration",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=2, zone_type=6,
+            key="co_concentration",
+            name="CO concentration",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=2,
+            zone_type=6,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
     )
@@ -4858,6 +5086,7 @@ class C2000RVTI(BolidDPLSThermohygrometerBase):
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000Р-ВТИ"
+    equipment_category = EquipmentCategory.ENGINEERING_MONITORING
     dpls_address_count = 2
 
     class Variant(str, Enum):
@@ -4946,9 +5175,7 @@ class C2000RVTI(BolidDPLSThermohygrometerBase):
             "state": (
                 None
                 if battery_code is None
-                else self.STATE_NAMES.get(
-                    battery_code, f"unknown_{battery_code}"
-                )
+                else self.STATE_NAMES.get(battery_code, f"unknown_{battery_code}")
             ),
             "primary_code": battery_code,
             "expanded_codes": expanded_codes,
@@ -4962,6 +5189,7 @@ class C2000SP2:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-СП2"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 2
@@ -5028,7 +5256,10 @@ class C2000SP2:
 
     def apply_gateway_mapping(self, mapping: ResolvedDeviceMapping) -> None:
         """Validate and apply exact DPLS relay ownership."""
-        if canonical_equipment_class_name(mapping.identity.model) != self.__class__.__name__:
+        if (
+            canonical_equipment_class_name(mapping.identity.model)
+            != self.__class__.__name__
+        ):
             raise ValueError("Gateway mapping model does not match C2000-SP2")
         if mapping.identity.gateway.gateway_type is not self.required_gateway:
             raise ValueError("Gateway mapping type does not match C2000-SP2")
@@ -5137,6 +5368,7 @@ class C2000SP4:
 
     equipment_manufacturer = "Bolid"
     equipment_model = "С2000-СП4/24(220)"
+    equipment_category = EquipmentCategory.FIRE_AND_SECURITY
     required_gateway = GatewayType.S2000_PP
     uses_dpls_identity = True
     dpls_address_count = 5
@@ -5157,19 +5389,31 @@ class C2000SP4:
 
     variants = {
         Variant.SP4_24: VariantMetadata(
-            "С2000-СП4/24", "10.2–28.4 V DC / 12–24 V AC", "3 A", False,
+            "С2000-СП4/24",
+            "10.2–28.4 V DC / 12–24 V AC",
+            "3 A",
+            False,
             "open circuit and short circuit",
         ),
         Variant.SP4_24_01: VariantMetadata(
-            "С2000-СП4/24 исп.01", "10.2–28.4 V DC / 12–24 V AC", "3 A", True,
+            "С2000-СП4/24 исп.01",
+            "10.2–28.4 V DC / 12–24 V AC",
+            "3 A",
+            True,
             "open circuit and short circuit",
         ),
         Variant.SP4_220: VariantMetadata(
-            "С2000-СП4/220", "230 V AC ±10%", "3 A", False,
+            "С2000-СП4/220",
+            "230 V AC ±10%",
+            "3 A",
+            False,
             "open circuit and short circuit",
         ),
         Variant.SP4_220_01: VariantMetadata(
-            "С2000-СП4/220 исп.01", "230 V AC ±10%", "3 A", True,
+            "С2000-СП4/220 исп.01",
+            "230 V AC ±10%",
+            "3 A",
+            True,
             "open circuit and short circuit",
         ),
     }
@@ -5177,39 +5421,56 @@ class C2000SP4:
 
     capability_requirements = (
         GatewayCapabilitySpec(
-            key="actuator_control", name="Working position",
-            object_kind=ObjectKind.RELAY, local_object_number=0,
+            key="actuator_control",
+            name="Working position",
+            object_kind=ObjectKind.RELAY,
+            local_object_number=0,
             local_object_offset=0,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
         GatewayCapabilitySpec(
-            key="actuator_state", name="Actuator state",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=0, zone_type=1,
+            key="actuator_state",
+            name="Actuator state",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=0,
+            zone_type=1,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
         GatewayCapabilitySpec(
-            key="working_output_circuit", name="Working output circuit",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=1, zone_type=2,
+            key="working_output_circuit",
+            name="Working output circuit",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=1,
+            zone_type=2,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
         GatewayCapabilitySpec(
-            key="initial_output_circuit", name="Initial output circuit",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=2, zone_type=2,
+            key="initial_output_circuit",
+            name="Initial output circuit",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=2,
+            zone_type=2,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
         GatewayCapabilitySpec(
-            key="working_limit_switch", name="Working-position limit switch",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=3, zone_type=1,
+            key="working_limit_switch",
+            name="Working-position limit switch",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=3,
+            zone_type=1,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
         GatewayCapabilitySpec(
-            key="initial_limit_switch", name="Initial-position limit switch",
-            object_kind=ObjectKind.ZONE, local_object_number=0,
-            local_object_offset=4, zone_type=1,
+            key="initial_limit_switch",
+            name="Initial-position limit switch",
+            object_kind=ObjectKind.ZONE,
+            local_object_number=0,
+            local_object_offset=4,
+            zone_type=1,
             requirement=CapabilityRequirement.OPTIONAL_IF_CONFIGURED,
         ),
     )
@@ -5234,10 +5495,7 @@ class C2000SP4:
         self.attr_device_id: int = device_id
 
         self.attr_client: (
-            AsyncModbusSerialClient
-            | AsyncModbusTcpClient
-            | AsyncModbusUdpClient
-            | None
+            AsyncModbusSerialClient | AsyncModbusTcpClient | AsyncModbusUdpClient | None
         ) = client
 
         self.attr_manufactures_name: str = "Bolid"
@@ -5281,7 +5539,10 @@ class C2000SP4:
     def get_variant_options(cls) -> dict[str, str]:
         """Return supported variants plus an explicit rejected option for the UI."""
         return {
-            **{variant.value: metadata.display_name for variant, metadata in cls.variants.items()},
+            **{
+                variant.value: metadata.display_name
+                for variant, metadata in cls.variants.items()
+            },
             **cls.unsupported_variants,
         }
 
@@ -5293,7 +5554,10 @@ class C2000SP4:
             raise ValueError("Gateway mapping type does not match C2000-SP4")
 
         identity = mapping.identity
-        if identity.dpls is None or identity.dpls.address_count != self.dpls_address_count:
+        if (
+            identity.dpls is None
+            or identity.dpls.address_count != self.dpls_address_count
+        ):
             raise ValueError("C2000-SP4 requires a five-address DPLS identity")
         try:
             variant = self.Variant(identity.metadata.variant)
@@ -5301,18 +5565,26 @@ class C2000SP4:
             raise ValueError("Unsupported or missing C2000-SP4 variant") from exc
         metadata = self.variants[variant]
         specs = {
-            (spec.object_kind,
-             spec.resolved_local_object_number(identity.dpls.base_address),
-             spec.zone_type): spec
+            (
+                spec.object_kind,
+                spec.resolved_local_object_number(identity.dpls.base_address),
+                spec.zone_type,
+            ): spec
             for spec in self.capability_requirements
         }
         resolved: dict[str, ResolvedObjectMapping] = {}
         for item in mapping.objects:
-            zone_type = None if item.zone_details is None else item.zone_details.zone_type
+            zone_type = (
+                None if item.zone_details is None else item.zone_details.zone_type
+            )
             spec = specs.get((item.object_kind, item.local_object_number, zone_type))
             if spec is None:
                 raise ValueError("Mapping contains an unsupported C2000-SP4 object")
-            expected = ModbusDataArea.COIL if item.object_kind is ObjectKind.RELAY else ModbusDataArea.HOLDING_REGISTER
+            expected = (
+                ModbusDataArea.COIL
+                if item.object_kind is ObjectKind.RELAY
+                else ModbusDataArea.HOLDING_REGISTER
+            )
             if item.data_area is not expected:
                 raise ValueError("C2000-SP4 mapping uses an invalid Modbus data area")
             if spec.key in resolved:
@@ -5336,7 +5608,9 @@ class C2000SP4:
         }
         self._relay_mapping = resolved.get("actuator_control")
         self._zone_mappings = {
-            key: item for key, item in resolved.items() if item.object_kind is ObjectKind.ZONE
+            key: item
+            for key, item in resolved.items()
+            if item.object_kind is ObjectKind.ZONE
         }
         if self._relay_mapping is not None:
             self.attr_out1["address"] = self._relay_mapping.modbus_address
@@ -5369,8 +5643,12 @@ class C2000SP4:
     def get_state_sensor_descriptions(self) -> list[dict[str, Any]]:
         specs = {spec.key: spec for spec in self.capability_requirements}
         return [
-            {"sensor_id": key, "name": specs[key].name, "device_class": None,
-             "icon": "mdi:state-machine"}
+            {
+                "sensor_id": key,
+                "name": specs[key].name,
+                "device_class": None,
+                "icon": "mdi:state-machine",
+            }
             for key in self._zone_mappings
         ]
 
@@ -5378,7 +5656,9 @@ class C2000SP4:
         reader = S2000PPRuntimeReader(self.attr_client, self.attr_device_id)
         snapshot: dict[str, dict] = {}
         if self._relay_mapping is not None:
-            states = await reader.async_read_coils((self._relay_mapping.modbus_address,))
+            states = await reader.async_read_coils(
+                (self._relay_mapping.modbus_address,)
+            )
             output = dict(self.attr_out1)
             output["state"] = states[self._relay_mapping.modbus_address]
             self.attr_out1 = output
@@ -5391,9 +5671,7 @@ class C2000SP4:
             }
         return snapshot
 
-    def _state_sensor_value(
-        self, key: str, state: S2000PPZoneState
-    ) -> dict[str, Any]:
+    def _state_sensor_value(self, key: str, state: S2000PPZoneState) -> dict[str, Any]:
         active = tuple(code for code in state.expanded_states if code != 0)
         names = (
             {**self.STATE_NAMES, **self.ACTUATOR_STATE_NAMES}
@@ -5417,7 +5695,9 @@ class C2000SP4:
 
         if out != 1 or self._relay_mapping is None:
             raise ValueError("C2000-SP4 actuator control is not configured")
-        states = await S2000PPRuntimeReader(self.attr_client, self.attr_device_id).async_read_coils((self._relay_mapping.modbus_address,))
+        states = await S2000PPRuntimeReader(
+            self.attr_client, self.attr_device_id
+        ).async_read_coils((self._relay_mapping.modbus_address,))
         self.attr_out1["state"] = states[self._relay_mapping.modbus_address]
         return self.attr_out1
 
@@ -5466,7 +5746,10 @@ class C2000SP4:
         if values is None:
             return []
         selected = outputs or [1]
-        return [await self.set_output(output, value) for output, value in zip(selected, values)]
+        return [
+            await self.set_output(output, value)
+            for output, value in zip(selected, values)
+        ]
 
     def __repr__(self) -> str:
         """Representation info of object."""

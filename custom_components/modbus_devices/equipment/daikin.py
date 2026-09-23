@@ -9,6 +9,7 @@ from homeassistant.components.climate import HVACMode
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import EntityCategory, Platform, UnitOfTemperature
 
+from .category import EquipmentCategory
 from ..modbus_validation import validate_fc06_response, validated_registers
 
 
@@ -21,6 +22,7 @@ class RTDRA:
 
     equipment_manufacturer = "Daikin"
     equipment_model = "RTD-RA"
+    equipment_category = EquipmentCategory.CLIMATE_CONTROL
 
     _MODE_TO_REGISTER = {
         HVACMode.AUTO: 0,

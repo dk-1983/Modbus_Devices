@@ -16,6 +16,8 @@ from homeassistant.const import (
     UnitOfTime,
 )
 
+from .category import EquipmentCategory
+
 
 @dataclass(frozen=True, slots=True)
 class U0Register:
@@ -177,6 +179,7 @@ class Zuked3104S1:
 
     equipment_manufacturer = "Zuked"
     equipment_model = "310-4.0S1"
+    equipment_category = EquipmentCategory.VARIABLE_FREQUENCY_DRIVES
     uses_stable_entry_identity = True
     documented_register_base = 0x7000
     monitoring_read_contract_verified = True

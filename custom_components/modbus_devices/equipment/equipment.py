@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from ..gateway import GatewayCapabilitySpec, ResolvedDeviceMapping
-from ..manufacturer import MANUFACTURERS, canonical_manufacturer_name, manufacturer_module_name
+from ..manufacturer import (
+    MANUFACTURERS,
+    canonical_manufacturer_name,
+    manufacturer_module_name,
+)
+from .category import EquipmentCategory
 
 LEGACY_EQUIPMENT_CLASS_ALIASES: dict[str, str] = {
     "C2000DIP": "DIP34A05",
@@ -30,9 +35,7 @@ def get_class(module: str, cls_name: str) -> type[Any]:
     for equipment_class in _get_equipment_classes(canonical_name):
         if equipment_class.__name__ == target_name:
             return equipment_class
-    raise ValueError(
-        f"Unsupported equipment class {cls_name!r} for {canonical_name}"
-    )
+    raise ValueError(f"Unsupported equipment class {cls_name!r} for {canonical_name}")
 
 
 def get_equipment_display_name(module: str, cls_name: str) -> str:
@@ -48,9 +51,7 @@ def get_gateway_requirement(module: str, cls_name: str):
 
 def get_manual_io_mapping_spec(module: str, cls_name: str) -> dict[str, Any] | None:
     """Return an equipment-owned direct Modbus I/O mapping specification."""
-    specification = getattr(
-        get_class(module, cls_name), "manual_io_mapping_spec", None
-    )
+    specification = getattr(get_class(module, cls_name), "manual_io_mapping_spec", None)
     return None if specification is None else dict(specification)
 
 
@@ -80,9 +81,7 @@ def get_gateway_device_metadata(module: str, cls_name: str) -> dict[str, Any]:
         ),
         "dpls_address_count": getattr(equipment_class, "dpls_address_count", None),
         "variants": dict(variant_reader()) if callable(variant_reader) else {},
-        "variant_optional": bool(
-            getattr(equipment_class, "variant_optional", False)
-        ),
+        "variant_optional": bool(getattr(equipment_class, "variant_optional", False)),
         "unsupported_variants": dict(
             getattr(equipment_class, "unsupported_variants", {})
         ),
@@ -121,12 +120,22 @@ def get_equipment_classes_by_manufacturer() -> dict[str, list[str]]:
     return {
         manufacturer.canonical_name: [
             equipment_class.__name__
-            for equipment_class in _get_equipment_classes(
-                manufacturer.canonical_name
-            )
+            for equipment_class in _get_equipment_classes(manufacturer.canonical_name)
         ]
         for manufacturer in MANUFACTURERS
     }
+
+
+def get_equipment_catalog() -> dict[str, dict[str, list[str]]]:
+    """Return equipment classes grouped by category and manufacturer."""
+    catalog: dict[str, dict[str, list[str]]] = {}
+    for manufacturer in MANUFACTURERS:
+        for equipment_class in _get_equipment_classes(manufacturer.canonical_name):
+            category = equipment_class.equipment_category.value
+            catalog.setdefault(category, {}).setdefault(
+                manufacturer.canonical_name, []
+            ).append(equipment_class.__name__)
+    return catalog
 
 
 def _get_equipment_classes(manufacturer: str) -> tuple[type[Any], ...]:
@@ -185,6 +194,9 @@ def _validate_equipment_classes(
         model = getattr(entry, "equipment_model", None)
         if not isinstance(model, str) or not model:
             raise ValueError(f"{entry.__name__} has no canonical equipment_model")
+        category = getattr(entry, "equipment_category", None)
+        if not isinstance(category, EquipmentCategory):
+            raise ValueError(f"{entry.__name__} has no canonical equipment_category")
         if model in seen_models:
             raise ValueError(f"Duplicate equipment model: {model}")
 

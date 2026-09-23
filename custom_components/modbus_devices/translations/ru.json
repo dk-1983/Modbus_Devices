@@ -2,6 +2,7 @@
   "config": {
     "step": {
       "user": {"title": "Тип подключения", "description": "Выберите прямой транспорт Modbus или существующий шлюз.", "data": {"modbus_mode": "Подключение"}},
+      "category": {"title": "Раздел оборудования", "description": "Выберите функциональный раздел физического прибора.", "data": {"equipment_category": "Раздел оборудования"}},
       "existing_gateway": {"title": "Существующий шлюз С2000-ПП", "description": "Выберите загруженный С2000-ПП. Будет использовано его существующее Modbus-подключение.", "data": {"gateway_entry_id": "Шлюз"}},
       "gateway_child_model": {"title": "Подключённый прибор", "description": "Выберите поддерживаемую модель за этим С2000-ПП.", "data": {"device_class": "Модель прибора"}},
       "discovered_device": {"title": "Настроенные приборы Orion", "description": "Выберите один настроенный адрес Orion. Приборы не импортируются автоматически.", "data": {"discovered_address": "Адрес Orion"}},
@@ -56,6 +57,19 @@
         "rtu_over_tcp": "Modbus RTU через TCP",
         "serial": "SerialPort",
         "existing_gateway": "Через существующий С2000-ПП"
+      }
+    },
+    "equipment_category": {
+      "options": {
+        "building_automation": "Автоматизация зданий",
+        "climate_control": "Кондиционирование и охлаждение",
+        "engineering_monitoring": "Инженерный мониторинг и защита",
+        "fire_and_security": "Противопожарное и охранное оборудование",
+        "industrial_automation": "Промышленная автоматизация",
+        "measurement_and_control": "Контрольно-измерительные приборы",
+        "metering": "Приборы учёта",
+        "power_and_backup": "Электропитание и ИБП",
+        "variable_frequency_drives": "Частотные преобразователи"
       }
     }
   },

@@ -19,6 +19,8 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 
+from .category import EquipmentCategory
+
 from ..modbus_validation import (
     validate_fc05_response,
     validated_bits,
@@ -175,6 +177,7 @@ class ERG22005:
 
     equipment_manufacturer = "ERMAN"
     equipment_model = "ER-G-220-05"
+    equipment_category = EquipmentCategory.VARIABLE_FREQUENCY_DRIVES
     uses_stable_entry_identity = True
 
     def __init__(self, client, device_id) -> None:

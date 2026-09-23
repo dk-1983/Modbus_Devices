@@ -2,6 +2,7 @@
   "config": {
     "step": {
       "user": {"title": "Connection type", "description": "Select a direct Modbus transport or an existing gateway.", "data": {"modbus_mode": "Connection"}},
+      "category": {"title": "Equipment category", "description": "Select the functional category of the physical equipment.", "data": {"equipment_category": "Equipment category"}},
       "existing_gateway": {"title": "Existing S2000-PP gateway", "description": "Select a loaded S2000-PP. Its existing Modbus connection will be shared.", "data": {"gateway_entry_id": "Gateway"}},
       "gateway_child_model": {"title": "Downstream equipment", "description": "Select a supported model behind this S2000-PP.", "data": {"device_class": "Equipment model"}},
       "discovered_device": {"title": "Configured Orion devices", "description": "Select one configured Orion address. Devices are never imported automatically.", "data": {"discovered_address": "Orion address"}},
@@ -56,6 +57,19 @@
         "rtu_over_tcp": "Modbus RTU over TCP",
         "serial": "SerialPort",
         "existing_gateway": "Via existing S2000-PP"
+      }
+    },
+    "equipment_category": {
+      "options": {
+        "building_automation": "Building automation",
+        "climate_control": "Climate control and cooling",
+        "engineering_monitoring": "Engineering monitoring and protection",
+        "fire_and_security": "Fire and security equipment",
+        "industrial_automation": "Industrial automation",
+        "measurement_and_control": "Measurement and control equipment",
+        "metering": "Metering equipment",
+        "power_and_backup": "Power supplies and UPS",
+        "variable_frequency_drives": "Variable frequency drives"
       }
     }
   },

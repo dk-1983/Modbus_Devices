@@ -17,6 +17,7 @@ from homeassistant.helpers.selector import selector
 from .const import Config
 from .equipment.equipment import (
     get_equipment_classes_by_manufacturer,
+    get_equipment_catalog,
     get_equipment_display_name,
     get_gateway_capabilities,
     get_gateway_device_metadata,
@@ -74,6 +75,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         self._data: dict[str, Any] = {}
 
         self._device_classes: dict[str, list[str]] = {}
+        self._equipment_catalog: dict[str, dict[str, list[str]]] = {}
+        self._selected_category: str = ""
+        self._via_existing_gateway = False
 
         self._serial_ports: list[str] = []
         self._selected_manufacturer: str = ""
@@ -101,6 +105,10 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             self._device_classes = await self.hass.async_add_executor_job(
                 get_equipment_classes_by_manufacturer
             )
+        if not self._equipment_catalog:
+            self._equipment_catalog = await self.hass.async_add_executor_job(
+                get_equipment_catalog
+            )
 
         if not self._serial_ports:
             self._serial_ports = await self.hass.async_add_executor_job(
@@ -109,12 +117,12 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         if user_input is not None:
             selected = user_input[Config.CONF_MODBUS_MODE]
-            if selected == _VIA_EXISTING_GATEWAY:
-                return await self.async_step_existing_gateway()
-            self._data[Config.CONF_MODBUS_MODE] = _TRANSPORT_CHOICES.get(
-                selected, selected
-            )
-            return await self.async_step_manufacturer()
+            self._via_existing_gateway = selected == _VIA_EXISTING_GATEWAY
+            if not self._via_existing_gateway:
+                self._data[Config.CONF_MODBUS_MODE] = _TRANSPORT_CHOICES.get(
+                    selected, selected
+                )
+            return await self.async_step_category()
 
         schema = vol.Schema(
             {
@@ -137,6 +145,57 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
 
         return self.async_show_form(step_id="user", data_schema=schema)
 
+    async def _available_categories(self) -> list[str]:
+        """Return categories valid for the selected connection route."""
+        if not self._via_existing_gateway:
+            return sorted(self._equipment_catalog)
+
+        eligible: list[str] = []
+        for category, manufacturers in self._equipment_catalog.items():
+            for name in manufacturers.get("Bolid", []):
+                requirement = await self.hass.async_add_executor_job(
+                    get_gateway_requirement, "Bolid", name
+                )
+                metadata = await self.hass.async_add_executor_job(
+                    get_gateway_device_metadata, "Bolid", name
+                )
+                if (
+                    requirement is GatewayType.S2000_PP
+                    and metadata["gateway_transport_supported"]
+                ):
+                    eligible.append(category)
+                    break
+        return sorted(eligible)
+
+    async def async_step_category(self, user_input=None):
+        """Select the functional equipment category."""
+        categories = await self._available_categories()
+        if user_input is not None:
+            selected = user_input[Config.CONF_EQUIPMENT_CATEGORY]
+            if selected not in categories:
+                return self.async_abort(reason="no_devices")
+            self._selected_category = selected
+            if self._via_existing_gateway:
+                return await self.async_step_existing_gateway()
+            return await self.async_step_manufacturer()
+
+        return self.async_show_form(
+            step_id="category",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(Config.CONF_EQUIPMENT_CATEGORY): selector(
+                        {
+                            "select": {
+                                "mode": "dropdown",
+                                "options": categories,
+                                "translation_key": "equipment_category",
+                            }
+                        }
+                    )
+                }
+            ),
+        )
+
     # ---------------------------------------------------------
     # STEP 2 - MANUFACTURER
     # ---------------------------------------------------------
@@ -151,13 +210,20 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 user_input[Config.CONF_MANUFACTURER]
             )
 
-            self._manufacturer_devices = self._device_classes.get(
-                self._selected_manufacturer, []
+            category_devices = self._equipment_catalog.get(self._selected_category)
+            source = (
+                category_devices
+                if category_devices is not None
+                else self._device_classes
             )
+            self._manufacturer_devices = source.get(self._selected_manufacturer, [])
 
             return await self.async_step_device()
 
-        manufacturers = sorted(self._device_classes.keys())
+        category_devices = self._equipment_catalog.get(self._selected_category)
+        manufacturers = sorted(
+            category_devices if category_devices is not None else self._device_classes
+        )
 
         if not manufacturers:
             return self.async_abort(reason="no_manufacturers")
@@ -304,7 +370,11 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
     async def async_step_gateway_child_model(self, user_input=None):
         """Select a model explicitly supported behind С2000-ПП."""
         devices = []
-        for name in self._device_classes.get("Bolid", []):
+        category_devices = self._equipment_catalog.get(self._selected_category, {})
+        candidates = category_devices.get(
+            "Bolid", self._device_classes.get("Bolid", [])
+        )
+        for name in candidates:
             requirement = await self.hass.async_add_executor_job(
                 get_gateway_requirement, "Bolid", name
             )

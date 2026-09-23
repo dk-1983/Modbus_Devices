@@ -11,6 +11,7 @@ class Config:
 
     CONF_MODBUS_MODE: str = "modbus_mode"
     CONF_DEVICE_CLASS: str = "device_class"
+    CONF_EQUIPMENT_CATEGORY: str = "equipment_category"
     CONF_GATEWAY_MAPPING: str = "gateway_mapping"
     CONF_GATEWAY_ID: str = "gateway_id"
     CONF_GATEWAY_ENTRY_ID: str = "gateway_entry_id"

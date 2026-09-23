@@ -15,6 +15,7 @@ from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.equipment.equipment import (
     get_equipment_classes_by_manufacturer,
 )
+from custom_components.modbus_devices.equipment.category import EquipmentCategory
 
 
 class FakeHass:
@@ -97,6 +98,13 @@ async def test_flow_order_continues_through_manufacturer_model_and_rtu_form():
     assert (
         await flow.async_step_user(
             {Config.CONF_MODBUS_MODE: Config.MODBUS_RTU_OVER_UDP}
+        )
+    )["step_id"] == "category"
+    assert (
+        await flow.async_step_category(
+            {
+                Config.CONF_EQUIPMENT_CATEGORY: EquipmentCategory.VARIABLE_FREQUENCY_DRIVES
+            }
         )
     )["step_id"] == "manufacturer"
     assert (

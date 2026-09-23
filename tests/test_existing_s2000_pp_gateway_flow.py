@@ -12,6 +12,7 @@ from homeassistant.const import CONF_DEVICE_ID, CONF_NAME, Platform
 import custom_components.modbus_devices as integration
 from custom_components.modbus_devices.config_flow import ModbusDevicesConfigFlow
 from custom_components.modbus_devices.const import Config
+from custom_components.modbus_devices.equipment.category import EquipmentCategory
 from custom_components.modbus_devices.gateway import (
     DownstreamDeviceIdentity,
     GatewayContext,
@@ -129,7 +130,14 @@ def bypass_duplicates(flow: ModbusDevicesConfigFlow) -> None:
 async def prepare_gateway_flow(flow: ModbusDevicesConfigFlow, gateway: FakeEntry):
     flow.hass = FakeHass([gateway])
     flow._device_classes = {"Bolid": ["S2000PP", "C2000KPB"]}
+    flow._equipment_catalog = {
+        EquipmentCategory.FIRE_AND_SECURITY: {"Bolid": ["S2000PP", "C2000KPB"]}
+    }
     result = await flow.async_step_user({Config.CONF_MODBUS_MODE: "existing_gateway"})
+    assert result["step_id"] == "category"
+    result = await flow.async_step_category(
+        {Config.CONF_EQUIPMENT_CATEGORY: EquipmentCategory.FIRE_AND_SECURITY}
+    )
     assert result["step_id"] == "existing_gateway"
     result = await flow.async_step_existing_gateway(
         {Config.CONF_GATEWAY_ENTRY_ID: gateway.entry_id}
@@ -148,6 +156,10 @@ async def test_direct_serial_tcp_and_direct_s2000_pp_routes_remain_available(
     flow = ModbusDevicesConfigFlow()
     flow.hass = FakeHass([gateway])
     flow._device_classes = {"Bolid": ["S2000PP"], "Owen": ["TRM138"]}
+    flow._equipment_catalog = {
+        EquipmentCategory.FIRE_AND_SECURITY: {"Bolid": ["S2000PP"]},
+        EquipmentCategory.MEASUREMENT_AND_CONTROL: {"Owen": ["TRM138"]},
+    }
     flow._serial_ports = ["COM7"]
 
     result = await flow.async_step_user()
@@ -160,9 +172,12 @@ async def test_direct_serial_tcp_and_direct_s2000_pp_routes_remain_available(
         "serial",
         "existing_gateway",
     ]
-    assert (await flow.async_step_user({Config.CONF_MODBUS_MODE: Config.MODBUS_TCP}))[
-        "step_id"
-    ] == "manufacturer"
+    result = await flow.async_step_user({Config.CONF_MODBUS_MODE: Config.MODBUS_TCP})
+    assert result["step_id"] == "category"
+    result = await flow.async_step_category(
+        {Config.CONF_EQUIPMENT_CATEGORY: EquipmentCategory.FIRE_AND_SECURITY}
+    )
+    assert result["step_id"] == "manufacturer"
 
     direct = ModbusDevicesConfigFlow()
     direct.hass = FakeHass([gateway])

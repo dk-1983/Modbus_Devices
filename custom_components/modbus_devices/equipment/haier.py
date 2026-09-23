@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.components.climate import HVACMode
 from homeassistant.const import Platform
 
+from .category import EquipmentCategory
 from ..modbus_validation import (
     validate_fc05_response,
     validate_fc06_response,
@@ -21,6 +22,7 @@ class YCJA002:
 
     equipment_manufacturer = "Haier"
     equipment_model = "YCJ-A002"
+    equipment_category = EquipmentCategory.CLIMATE_CONTROL
 
     _MODE_TO_REGISTER = {
         HVACMode.COOL: 1,

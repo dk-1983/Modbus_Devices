@@ -1,50 +1,63 @@
-# Modbus Devices 1.4.0 — ERMAN pump control and TRM-138 outputs
+# Modbus Devices 1.5.0 — equipment categories and scalable navigation
 
-Modbus Devices 1.4.0 adds the ERMAN ER-G-220-05 pump-drive profile and manual
-output-state control for Owen TRM-138.
+Modbus Devices 1.5.0 adds a functional equipment-category level to the setup
+flow so the growing device catalog remains easy to navigate.
 
-## ERMAN ER-G-220-05
+## Equipment categories
 
-The new equipment profile follows the
-[MODBUS protocol document v1.2](https://github.com/user-attachments/files/32493266/protocol_modbus_erg-220-05.pdf)
-for device software 01.25.
+The setup sequence is now:
 
-- Reads Input registers 2000…2009 as one FC04 runtime block.
-- Exposes output frequency, motor current, input voltage, drive temperature,
-  current pressure, and analog inputs A1/A2.
-- Preserves documented, reserved, and unknown drive/fault codes losslessly.
-- Provides explicit FC05 buttons for start, stop, emergency stop, fault reset,
-  and parameter save/load commands. Reserved coils are not exposed.
-- Exposes Y1/Y2 as switches only after checking that P118/P120 respectively
-  select function `4`.
-- Serializes the function check, FC05 write, and exact FC01 readback as one
-  physical operation. Home Assistant state changes only after confirmed
-  readback.
+```text
+connection type
+  -> equipment category
+    -> manufacturer
+      -> model
+        -> connection settings
+```
 
-Pressure is exposed in `atm`, matching the protocol document rather than
-third-party YAML examples that may label the same value as `bar`.
+Nine localized categories cover the current catalog:
 
-The profile has comprehensive synthetic protocol and entity tests. Physical
-hardware was not available during development; the requesting user will
-validate it and provide logs for any required compatibility corrections.
+- Building automation
+- Climate control and cooling
+- Engineering monitoring and protection
+- Fire and security equipment
+- Industrial automation
+- Measurement and control equipment
+- Metering equipment
+- Power supplies and UPS
+- Variable frequency drives
 
-## Owen TRM-138
+Each of the 38 supported equipment classes now declares one canonical category.
+Categories belong to physical models, not manufacturers, transports, or Python
+modules, so the same manufacturer can correctly appear in several sections.
 
-- Adds switches named exactly as the manual parameters `Состояние ВУ 1…8`.
-- Reads all eight output coils together through FC01.
-- Before a manual write, reads C.dr 1…8 and refuses to take control of an
-  output assigned to any comparator channel.
-- Validates the mirrored FC05 response and an exact FC01 readback in one
-  physical-client critical section.
-- Never clears or changes a C.dr assignment automatically.
+The Bolid Orion family uses a combined Fire and security equipment category
+because its shared infrastructure serves both purposes. Bolid M3000-BB-1020 is
+classified as Building automation, water meters as Metering equipment, and
+environmental/leak detectors as Engineering monitoring and protection.
 
-The TRM-138 output-state path is covered by automated protocol, rejection,
-readback, entity, and regression tests.
+## Compatibility and validation
+
+- Categories are transient setup navigation and are not persisted in Home
+  Assistant config entries.
+- Existing configured devices require no migration and keep their entity IDs.
+- The existing S2000-PP route shows only categories containing compatible
+  downstream equipment.
+- Registry validation rejects any future equipment class without a canonical
+  category, making documentation-based classification mandatory for new models.
+- English and Russian labels are included for the complete menu.
+
+The release was validated with the complete automated test suite, Ruff,
+compileall, JSON/localization checks, `git diff --check`, official Home Assistant
+hassfest, and live Home Assistant UI verification.
+
+The complete reviewed inventory and classification basis are recorded in
+[`equipment_category_audit.md`](equipment_category_audit.md).
 
 ## Upgrade
 
 No configuration or entity migration is required. Update the integration and
 restart Home Assistant. Existing configurations remain compatible.
 
-Equipment details and source references are documented in the
-[English README](../README.md) and [Russian README](../README_RU.md).
+Setup instructions and the new category-selection screenshot are available in
+the [English README](../README.md) and [Russian README](../README_RU.md).

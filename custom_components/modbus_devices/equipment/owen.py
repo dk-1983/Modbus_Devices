@@ -17,6 +17,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchDeviceClass
 from homeassistant.const import Platform, UnitOfTemperature
 
+from .category import EquipmentCategory
 from ..modbus_validation import (
     validate_fc05_response,
     validate_fc06_response,
@@ -30,6 +31,7 @@ class TRM138:
 
     equipment_manufacturer = "Owen"
     equipment_model = "TRM-138"
+    equipment_category = EquipmentCategory.MEASUREMENT_AND_CONTROL
     CHANNEL_COUNT = 8
     REGISTERS_PER_CHANNEL = 5
     REGISTER_COUNT = CHANNEL_COUNT * REGISTERS_PER_CHANNEL
@@ -468,6 +470,7 @@ class PLC110_24_60_K_M:
 
     equipment_manufacturer = "Owen"
     equipment_model = "ПЛК110-24.60.К-М"
+    equipment_category = EquipmentCategory.INDUSTRIAL_AUTOMATION
     uses_stable_entry_identity = True
     input_count = 36
     output_count = 24

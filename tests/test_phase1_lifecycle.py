@@ -27,6 +27,7 @@ from custom_components.modbus_devices.binary_sensor import (
 )
 from custom_components.modbus_devices.config_flow import ModbusDevicesConfigFlow
 from custom_components.modbus_devices.const import Config
+from custom_components.modbus_devices.equipment.category import EquipmentCategory
 from custom_components.modbus_devices.gateway import (
     DPLSSubIdentity,
     DownstreamDeviceIdentity,
@@ -128,6 +129,17 @@ async def test_config_flow_transport_manufacturer_and_real_model_steps(monkeypat
         },
     )
     monkeypatch.setattr(
+        "custom_components.modbus_devices.config_flow.get_equipment_catalog",
+        lambda: {
+            EquipmentCategory.FIRE_AND_SECURITY: {"Bolid": ["C2000KDL"]},
+            EquipmentCategory.MEASUREMENT_AND_CONTROL: {"Owen": ["TRM138"]},
+            EquipmentCategory.VARIABLE_FREQUENCY_DRIVES: {
+                "Dyna Drive": ["DN310"],
+                "Zuked": ["Zuked3104S1"],
+            },
+        },
+    )
+    monkeypatch.setattr(
         "custom_components.modbus_devices.config_flow.get_serial_ports",
         lambda: ["COM7"],
     )
@@ -137,14 +149,13 @@ async def test_config_flow_transport_manufacturer_and_real_model_steps(monkeypat
     assert form_fields(result) == {Config.CONF_MODBUS_MODE}
 
     result = await flow.async_step_user({Config.CONF_MODBUS_MODE: Config.MODBUS_TCP})
+    assert result["step_id"] == "category"
+    result = await flow.async_step_category(
+        {Config.CONF_EQUIPMENT_CATEGORY: (EquipmentCategory.VARIABLE_FREQUENCY_DRIVES)}
+    )
     assert result["step_id"] == "manufacturer"
     manufacturer_schema = next(iter(result["data_schema"].schema.values()))
-    assert manufacturer_schema.config["options"] == [
-        "Bolid",
-        "Dyna Drive",
-        "Owen",
-        "Zuked",
-    ]
+    assert manufacturer_schema.config["options"] == ["Dyna Drive", "Zuked"]
 
     result = await flow.async_step_manufacturer(
         {Config.CONF_MANUFACTURER: "Dyna Drive"}
@@ -700,6 +711,7 @@ def test_config_flow_localization_catalogs_have_identical_keys():
     assert shape(strings) == shape(russian)
     assert set(strings["config"]["step"]) == {
         "user",
+        "category",
         "manufacturer",
         "device",
         "io_mapping",

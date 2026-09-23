@@ -18,6 +18,8 @@ from homeassistant.const import (
     UnitOfTime,
 )
 
+from .category import EquipmentCategory
+
 from ..modbus_validation import (
     validate_fc05_response,
     validate_fc06_response,
@@ -64,6 +66,7 @@ class HaierESP32:
 
     equipment_manufacturer = "4VRS"
     equipment_model = "Haier-ESP32"
+    equipment_category = EquipmentCategory.CLIMATE_CONTROL
 
     COMMAND_CONFIRM_TIMEOUT = 30.0
     COMMAND_POLL_INTERVAL = 0.25

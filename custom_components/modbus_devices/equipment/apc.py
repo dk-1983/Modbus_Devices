@@ -17,6 +17,8 @@ from homeassistant.const import (
     UnitOfTime,
 )
 
+from .category import EquipmentCategory
+
 from ..modbus_validation import validated_registers
 
 
@@ -25,6 +27,7 @@ class SmartUPS3000RMXL:
 
     equipment_manufacturer = "APC"
     equipment_model = "Smart-UPS 3000 RM XL"
+    equipment_category = EquipmentCategory.POWER_AND_BACKUP
     STATUS_WORD_3_ADDRESS = 0x0003
     PRIMARY_MEASUREMENTS_ADDRESS = 0x0005
     PRIMARY_MEASUREMENTS_COUNT = 10
