@@ -63,7 +63,33 @@
     "sensor": {
       "device_time": {
         "name": "Время прибора"
+      },
+      "erman_output_frequency": {"name": "Выходная частота"},
+      "erman_motor_current": {"name": "Ток двигателя"},
+      "erman_input_voltage": {"name": "Входное напряжение"},
+      "erman_drive_temperature": {"name": "Температура ПЧ"},
+      "erman_current_pressure": {"name": "Текущее давление"},
+      "erman_analog_input_1": {"name": "Токовый вход A1"},
+      "erman_analog_input_2": {"name": "Токовый вход A2"},
+      "erman_software_version": {"name": "Версия ПО"},
+      "erman_drive_state": {
+        "name": "Состояние ПЧ",
+        "state": {
+          "initializing": "Инициализация ПЧ", "off": "Выключен", "motor_starting": "Запуск двигателя", "moving_to_setpoint": "Движение к уставке", "maintaining_setpoint": "Поддержание уставки", "detecting_flow": "Определение расхода", "sleep": "Сон", "stopping": "Остановка", "running_at_set_frequency": "Работа на заданной частоте", "fault": "Авария", "start_delay": "Задержка перед пуском", "relay_test_before_start": "Тест реле перед пуском"
+        }
+      },
+      "erman_fault_code": {
+        "name": "Код ошибки",
+        "state": {
+          "no_fault": "Нет ошибки", "reserved_fault_1": "Зарезервированный код 1", "reserved_fault_2": "Зарезервированный код 2", "reserved_fault_3": "Зарезервированный код 3", "err1": "Err1", "e_p1": "E P1", "e_fa": "E FA", "e_th": "E tH", "e_c1": "E C1", "e_c2": "E C2", "e_ul": "E UL - Низкое напряжение", "e_er": "E Er - Внешняя авария", "e_uh": "E UH", "e_u3": "E U3", "e_u4": "E U4", "e_u5": "E U5", "e_u6": "E U6", "e_u7": "E U7", "e_u8": "E U8", "e_u9": "E U9", "e_s1": "E S1", "e_sh": "E SH", "e_s2": "E S2", "e_rf": "E rF", "e_c3": "E C3", "e_af": "E AF", "e_cf": "E CF"
+        }
       }
+    },
+    "button": {
+      "erman_start": {"name": "Пуск"}, "erman_stop": {"name": "Стоп"}, "erman_emergency_stop": {"name": "Аварийная остановка"}, "erman_save_parameters": {"name": "Сохранение параметров в ПЗУ"}, "erman_load_parameters": {"name": "Загрузка параметров из ПЗУ"}, "erman_reset_fault": {"name": "Сброс аварии"}
+    },
+    "switch": {
+      "erman_output_y1": {"name": "Состояние / Команда - Y1"}, "erman_output_y2": {"name": "Состояние / Команда - Y2"}
     }
   }
 }

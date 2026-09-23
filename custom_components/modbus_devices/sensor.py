@@ -188,8 +188,13 @@ class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator, device, entry: ConfigEntry, description) -> None:
         super().__init__(coordinator)
         self._sensor_id = description["sensor_id"]
-        self._attr_name = description["name"]
+        translation_key = description.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+        else:
+            self._attr_name = description["name"]
         self._attr_device_class = description.get("device_class")
+        self._base_options = tuple(description.get("options", ()))
         self._attr_icon = description.get("icon")
         self._state_icons = dict(description.get("state_icons", {}))
         self._unknown_state_icon = description.get("unknown_state_icon")
@@ -197,6 +202,17 @@ class ModBusStateSensorEntity(CoordinatorEntity, SensorEntity):
         identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
         self._attr_unique_id = f"{identity}_{self._sensor_id}"
         self._attr_device_info = device_info_for_entry(device, entry)
+
+    @property
+    def options(self) -> list[str] | None:
+        """Return documented enum states plus a lossless unknown current state."""
+        if not self._base_options:
+            return None
+        options = list(self._base_options)
+        current = self._current
+        if current is not None and current["state"] not in options:
+            options.append(current["state"])
+        return options
 
     @property
     def _current(self) -> dict | None:
@@ -239,7 +255,11 @@ class ModBusNumericSensorEntity(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator, device, entry: ConfigEntry, description) -> None:
         super().__init__(coordinator)
         self._sensor_id = description["sensor_id"]
-        self._attr_name = description["name"]
+        translation_key = description.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+        else:
+            self._attr_name = description["name"]
         self._attr_device_class = description["device_class"]
         self._attr_state_class = description["state_class"]
         self._attr_native_unit_of_measurement = description["unit"]

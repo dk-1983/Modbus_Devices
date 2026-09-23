@@ -39,7 +39,11 @@ class ModBusCommandButtonEntity(CoordinatorEntity, ButtonEntity):
         super().__init__(coordinator)
         self._device = device
         self._command = description["command"]
-        self._attr_name = description["name"]
+        translation_key = description.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+        else:
+            self._attr_name = description["name"]
         self._attr_entity_category = description.get("entity_category")
         identity = getattr(device, "attr_unique_id_prefix", None) or entry.entry_id
         self._attr_unique_id = f"{identity}_{description['button_id']}"

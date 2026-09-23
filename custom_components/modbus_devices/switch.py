@@ -172,7 +172,11 @@ class ModBusDescribedSwitchEntity(CoordinatorEntity, SwitchEntity):
         super().__init__(coordinator)
         self._device = device
         self._switch_id = description["switch_id"]
-        self._attr_name = description["name"]
+        translation_key = description.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+        else:
+            self._attr_name = description["name"]
         self._attr_icon = description.get("icon")
         self._attr_entity_category = description.get("entity_category")
         self._attr_unique_id = f"{entry.entry_id}_{self._switch_id}"

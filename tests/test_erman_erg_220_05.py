@@ -114,7 +114,7 @@ RUNTIME_VECTOR = [
     8,
     0,
     245,
-    0x0119,
+    125,
     37,
     82,
 ]
@@ -182,7 +182,11 @@ def test_decode_runtime_applies_documented_scales_and_states_losslessly():
     }
     assert states["fault_code"]["state"] == "no_fault"
     assert states["software_version"]["state"] == "01.25"
-    assert states["software_version"]["primary_code"] == 0x0119
+    assert states["software_version"]["primary_code"] == 125
+
+
+def test_software_version_uses_documented_decimal_mmyy_encoding():
+    assert ERG22005.decode_software_version(0x01AA) == "04.26"
 
 
 @pytest.mark.parametrize(
@@ -293,6 +297,7 @@ def test_generic_sensor_entities_publish_decoded_values_and_evidence():
         numeric_description,
     )
     assert numeric.native_value == 2.45
+    assert numeric.translation_key == "erman_current_pressure"
     assert numeric.native_unit_of_measurement == "atm"
     assert numeric.extra_state_attributes["raw_register"] == 245
     assert numeric.extra_state_attributes["register_address"] == 2006
@@ -309,24 +314,26 @@ def test_generic_sensor_entities_publish_decoded_values_and_evidence():
         state_description,
     )
     assert state.native_value == "no_fault"
+    assert state.translation_key == "erman_fault_code"
+    assert "e_er" in state.options
     assert state.extra_state_attributes["primary_code"] == 0
 
 
 @pytest.mark.parametrize(
-    ("button_id", "name", "address"),
+    ("button_id", "translation_key", "address"),
     [
-        ("start", "Пуск", 0),
-        ("stop", "Стоп", 1),
-        ("emergency_stop", "Аварийная остановка", 2),
-        ("save_parameters", "Сохранение параметров в ПЗУ", 5),
-        ("load_parameters", "Загрузка параметров из ПЗУ", 7),
-        ("reset_fault", "Сброс аварии", 9),
+        ("start", "erman_start", 0),
+        ("stop", "erman_stop", 1),
+        ("emergency_stop", "erman_emergency_stop", 2),
+        ("save_parameters", "erman_save_parameters", 5),
+        ("load_parameters", "erman_load_parameters", 7),
+        ("reset_fault", "erman_reset_fault", 9),
     ],
 )
 @pytest.mark.asyncio
 async def test_documented_command_buttons_use_only_non_reserved_fc05_addresses(
     button_id,
-    name,
+    translation_key,
     address,
 ):
     client = Client(Response(RUNTIME_VECTOR))
@@ -337,7 +344,7 @@ async def test_documented_command_buttons_use_only_non_reserved_fc05_addresses(
         if item["button_id"] == button_id
     )
 
-    assert description["name"] == name
+    assert description["translation_key"] == translation_key
     await device.async_send_command(description["command"])
 
     assert client.write_calls == [{"address": address, "value": True, "device_id": 3}]
@@ -454,6 +461,9 @@ async def test_generic_button_and_switch_entities_use_equipment_contracts():
         entry,
         device.get_switch_descriptions()[0],
     )
+
+    assert button.translation_key == "erman_start"
+    assert output.translation_key == "erman_output_y1"
 
     await button.async_press()
     assert client.write_calls[-1] == {"address": 0, "value": True, "device_id": 6}

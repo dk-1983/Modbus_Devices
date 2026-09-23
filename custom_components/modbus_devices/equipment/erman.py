@@ -226,6 +226,7 @@ class ERG22005:
                 "unit": item.unit,
                 "precision": item.precision,
                 "icon": item.icon,
+                "translation_key": f"erman_{item.sensor_id}",
             }
             for item in NUMERIC_REGISTERS
         ]
@@ -237,12 +238,24 @@ class ERG22005:
             {
                 "sensor_id": "drive_state",
                 "name": "Drive state",
+                "translation_key": "erman_drive_state",
+                "device_class": SensorDeviceClass.ENUM,
+                "options": list(DRIVE_STATES.values()),
                 "icon": "mdi:engine",
                 "unknown_state_icon": "mdi:help-circle-outline",
             },
             {
                 "sensor_id": "fault_code",
                 "name": "Fault code",
+                "translation_key": "erman_fault_code",
+                "device_class": SensorDeviceClass.ENUM,
+                "options": [
+                    "no_fault",
+                    "reserved_fault_1",
+                    "reserved_fault_2",
+                    "reserved_fault_3",
+                    *[FAULTS[code] for code in sorted(FAULTS) if code != 0],
+                ],
                 "icon": "mdi:alert-circle-outline",
                 "unknown_state_icon": "mdi:help-circle-outline",
                 "entity_category": EntityCategory.DIAGNOSTIC,
@@ -250,6 +263,7 @@ class ERG22005:
             {
                 "sensor_id": "software_version",
                 "name": "Software version",
+                "translation_key": "erman_software_version",
                 "icon": "mdi:chip",
                 "entity_category": EntityCategory.DIAGNOSTIC,
             },
@@ -259,28 +273,42 @@ class ERG22005:
     def get_button_descriptions() -> list[dict[str, Any]]:
         """Describe only non-reserved command coils from the manual."""
         return [
-            {"button_id": "start", "name": "Пуск", "command": ERGCommand.START},
-            {"button_id": "stop", "name": "Стоп", "command": ERGCommand.STOP},
+            {
+                "button_id": "start",
+                "name": "Start",
+                "translation_key": "erman_start",
+                "command": ERGCommand.START,
+            },
+            {
+                "button_id": "stop",
+                "name": "Stop",
+                "translation_key": "erman_stop",
+                "command": ERGCommand.STOP,
+            },
             {
                 "button_id": "emergency_stop",
-                "name": "Аварийная остановка",
+                "name": "Emergency stop",
+                "translation_key": "erman_emergency_stop",
                 "command": ERGCommand.EMERGENCY_STOP,
             },
             {
                 "button_id": "save_parameters",
-                "name": "Сохранение параметров в ПЗУ",
+                "name": "Save parameters to EEPROM",
+                "translation_key": "erman_save_parameters",
                 "command": ERGCommand.SAVE_PARAMETERS,
                 "entity_category": EntityCategory.CONFIG,
             },
             {
                 "button_id": "load_parameters",
-                "name": "Загрузка параметров из ПЗУ",
+                "name": "Load parameters from EEPROM",
+                "translation_key": "erman_load_parameters",
                 "command": ERGCommand.LOAD_PARAMETERS,
                 "entity_category": EntityCategory.CONFIG,
             },
             {
                 "button_id": "reset_fault",
-                "name": "Сброс аварии",
+                "name": "Reset fault",
+                "translation_key": "erman_reset_fault",
                 "command": ERGCommand.RESET_FAULT,
                 "entity_category": EntityCategory.CONFIG,
             },
@@ -292,12 +320,14 @@ class ERG22005:
         return [
             {
                 "switch_id": "output_y1",
-                "name": "Состояние / Команда — Y1",
+                "name": "State / command - Y1",
+                "translation_key": "erman_output_y1",
                 "icon": "mdi:electric-switch",
             },
             {
                 "switch_id": "output_y2",
-                "name": "Состояние / Команда — Y2",
+                "name": "State / command - Y2",
+                "translation_key": "erman_output_y2",
                 "icon": "mdi:electric-switch",
             },
         ]
@@ -487,11 +517,10 @@ class ERG22005:
 
     @staticmethod
     def decode_software_version(value: int) -> str:
-        """Decode the documented MM:YY two-byte software-version word."""
-        major = value >> 8
-        minor = value & 0xFF
-        if major <= 99 and minor <= 99:
-            return f"{major:02d}.{minor:02d}"
+        """Decode the documented decimal MM:YY software-version value."""
+        month, year = divmod(value, 100)
+        if 1 <= month <= 12:
+            return f"{month:02d}.{year:02d}"
         return f"raw_0x{value:04X}"
 
     @staticmethod

@@ -63,7 +63,33 @@
     "sensor": {
       "device_time": {
         "name": "Device time"
+      },
+      "erman_output_frequency": {"name": "Output frequency"},
+      "erman_motor_current": {"name": "Motor current"},
+      "erman_input_voltage": {"name": "Input voltage"},
+      "erman_drive_temperature": {"name": "Drive temperature"},
+      "erman_current_pressure": {"name": "Current pressure"},
+      "erman_analog_input_1": {"name": "Analog input A1"},
+      "erman_analog_input_2": {"name": "Analog input A2"},
+      "erman_software_version": {"name": "Software version"},
+      "erman_drive_state": {
+        "name": "Drive state",
+        "state": {
+          "initializing": "Initializing", "off": "Off", "motor_starting": "Motor starting", "moving_to_setpoint": "Moving to setpoint", "maintaining_setpoint": "Maintaining setpoint", "detecting_flow": "Detecting flow", "sleep": "Sleep", "stopping": "Stopping", "running_at_set_frequency": "Running at set frequency", "fault": "Fault", "start_delay": "Start delay", "relay_test_before_start": "Relay test before start"
+        }
+      },
+      "erman_fault_code": {
+        "name": "Fault code",
+        "state": {
+          "no_fault": "No fault", "reserved_fault_1": "Reserved code 1", "reserved_fault_2": "Reserved code 2", "reserved_fault_3": "Reserved code 3", "err1": "Err1", "e_p1": "E P1", "e_fa": "E FA", "e_th": "E tH", "e_c1": "E C1", "e_c2": "E C2", "e_ul": "E UL - Low voltage", "e_er": "E Er - External fault", "e_uh": "E UH", "e_u3": "E U3", "e_u4": "E U4", "e_u5": "E U5", "e_u6": "E U6", "e_u7": "E U7", "e_u8": "E U8", "e_u9": "E U9", "e_s1": "E S1", "e_sh": "E SH", "e_s2": "E S2", "e_rf": "E rF", "e_c3": "E C3", "e_af": "E AF", "e_cf": "E CF"
+        }
       }
+    },
+    "button": {
+      "erman_start": {"name": "Start"}, "erman_stop": {"name": "Stop"}, "erman_emergency_stop": {"name": "Emergency stop"}, "erman_save_parameters": {"name": "Save parameters to EEPROM"}, "erman_load_parameters": {"name": "Load parameters from EEPROM"}, "erman_reset_fault": {"name": "Reset fault"}
+    },
+    "switch": {
+      "erman_output_y1": {"name": "State / command - Y1"}, "erman_output_y2": {"name": "State / command - Y2"}
     }
   }
 }
