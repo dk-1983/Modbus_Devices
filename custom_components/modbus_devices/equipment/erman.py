@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import IntEnum
+import math
+import time
 from typing import Any
 
 from pymodbus.exceptions import ModbusException
@@ -23,6 +25,7 @@ from .category import EquipmentCategory
 
 from ..modbus_validation import (
     validate_fc05_response,
+    validate_fc06_response,
     validated_bits,
     validated_registers,
 )
@@ -42,8 +45,168 @@ class RuntimeRegister:
     icon: str
 
 
+@dataclass(frozen=True, slots=True)
+class NumberParameter:
+    parameter: str
+    name: str
+    address: int
+    scale: float
+    minimum: float
+    maximum: float
+    unit: str | None = None
+    dynamic_max_parameter: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SelectParameter:
+    parameter: str
+    name: str
+    address: int
+    options: tuple[str, ...]
+
+
 RUNTIME_BASE_ADDRESS = 2000
 RUNTIME_REGISTER_COUNT = 10
+SETTINGS_REFRESH_INTERVAL = 30.0
+
+NUMBER_PARAMETERS = (
+    NumberParameter(
+        "p001", "P001 Pressure setpoint", 1001, 0.01, 0, 16, "kgf/cm²", "p006"
+    ),
+    NumberParameter("p002", "P002 Proportional coefficient", 1002, 0.01, 0, 10),
+    NumberParameter("p003", "P003 Integration time", 1003, 0.01, 0.1, 10, "s"),
+    NumberParameter("p004", "P004 Start duration", 1004, 1, 0, 30, "s"),
+    NumberParameter(
+        "p005",
+        "P005 Emergency pressure threshold",
+        1005,
+        0.01,
+        0,
+        16,
+        "kgf/cm²",
+        "p006",
+    ),
+    NumberParameter("p006", "P006 Pressure sensor limit", 1006, 0.01, 1, 16, "kgf/cm²"),
+    NumberParameter("p101", "P101 Manual frequency", 1101, 0.1, 0, 50, "Hz", "p102"),
+    NumberParameter("p102", "P102 Upper frequency limit", 1102, 0.1, 0, 50, "Hz"),
+    NumberParameter(
+        "p103", "P103 Lower frequency limit", 1103, 0.1, 0, 50, "Hz", "p102"
+    ),
+    NumberParameter("p104", "P104 Starting frequency", 1104, 0.1, 0, 60, "Hz"),
+    NumberParameter("p105", "P105 Starting-frequency voltage", 1105, 1, 0, 100, "%"),
+    NumberParameter("p106", "P106 Motor-start test frequency", 1106, 0.1, 0, 50, "Hz"),
+    NumberParameter("p107", "P107 Motor-start wait time", 1107, 1, 0, 120, "s"),
+    NumberParameter("p108", "P108 Leak-test period", 1108, 1, 0, 600, "s"),
+    NumberParameter(
+        "p109",
+        "P109 Leak-detection pressure difference",
+        1109,
+        0.01,
+        0,
+        16,
+        "kgf/cm²",
+        "p006",
+    ),
+    NumberParameter("p110", "P110 Flow-test period", 1110, 1, 1, 600, "s"),
+    NumberParameter(
+        "p111",
+        "P111 Flow-detection pressure difference",
+        1111,
+        0.01,
+        0,
+        16,
+        "kgf/cm²",
+        "p006",
+    ),
+    NumberParameter("p112", "P112 Test duration", 1112, 1, 10, 60, "s"),
+    NumberParameter(
+        "p113", "P113 Dry-run pressure threshold", 1113, 0.01, 0, 16, "kgf/cm²", "p006"
+    ),
+    NumberParameter("p114", "P114 Dry-run detection time", 1114, 1, 0, 600, "s"),
+    NumberParameter(
+        "p115", "P115 Start pressure difference", 1115, 0.01, 0, 16, "kgf/cm²", "p006"
+    ),
+    NumberParameter(
+        "p116",
+        "P116 Motor-start pressure difference",
+        1116,
+        0.01,
+        0,
+        16,
+        "kgf/cm²",
+        "p006",
+    ),
+    NumberParameter("p129", "P129 Current year", 1129, 1, 2001, 2101),
+    NumberParameter("p133", "P133 Channel 1 duration", 1133, 1, 1, 600, "min"),
+    NumberParameter("p136", "P136 Channel 2 duration", 1136, 1, 1, 600, "min"),
+)
+
+SELECT_PARAMETERS = (
+    SelectParameter("p008", "P008 Main-menu mode", 1008, ("pressure", "frequency")),
+    SelectParameter(
+        "p100",
+        "P100 Operating mode",
+        1100,
+        (
+            "pressure_control",
+            "manual_frequency",
+            "rs485_frequency",
+            "analog_input_frequency",
+        ),
+    ),
+    SelectParameter(
+        "p117", "P117 Start method", 1117, ("control_panel", "digital_input", "rs485")
+    ),
+    SelectParameter(
+        "p118",
+        "P118 Y1 function",
+        1118,
+        (
+            "unused",
+            "fault",
+            "running",
+            "set_frequency_reached",
+            "modbus_control",
+            "time_relay",
+        ),
+    ),
+    SelectParameter(
+        "p119", "P119 Y1 normal state", 1119, ("normally_open", "normally_closed")
+    ),
+    SelectParameter(
+        "p120",
+        "P120 Y2 function",
+        1120,
+        (
+            "unused",
+            "fault",
+            "running",
+            "set_frequency_reached",
+            "modbus_control",
+            "time_relay",
+        ),
+    ),
+    SelectParameter(
+        "p121", "P121 Y2 normal state", 1121, ("normally_open", "normally_closed")
+    ),
+    SelectParameter(
+        "p124", "P124 Current input", 1124, ("automatic", "an1", "an2", "an1_and_an2")
+    ),
+    SelectParameter(
+        "p125",
+        "P125 Power-on state",
+        1125,
+        ("stopped", "restore_previous", "start_pump"),
+    ),
+    SelectParameter("p126", "P126 Sleep mode", 1126, ("enabled", "disabled")),
+    SelectParameter("p130", "P130 Time relay", 1130, ("disabled", "enabled")),
+    SelectParameter(
+        "p131", "P131 Relay outputs on fault", 1131, ("keep_running", "turn_off")
+    ),
+)
+
+NUMBER_BY_ID = {item.parameter: item for item in NUMBER_PARAMETERS}
+SELECT_BY_ID = {item.parameter: item for item in SELECT_PARAMETERS}
 
 NUMERIC_REGISTERS = (
     RuntimeRegister(
@@ -193,9 +356,17 @@ class ERG22005:
         self.attr_hardware_version = None
         self.attr_software_version = None
         self.attr_init_time = None
-        self.attr_platforms = [Platform.SENSOR, Platform.BUTTON, Platform.SWITCH]
+        self.attr_platforms = [
+            Platform.SENSOR,
+            Platform.BUTTON,
+            Platform.SWITCH,
+            Platform.NUMBER,
+            Platform.SELECT,
+        ]
         self.attr_unique_id_prefix = None
         self.attr_device_identifier = None
+        self._settings_cache: dict[str, dict] | None = None
+        self._settings_refresh_at = 0.0
         self.attr_device_metadata = {
             "protocol_document": "MODBUS protocol v1.2 (2025-01-17)",
             "documented_software_version": "01.25",
@@ -336,9 +507,42 @@ class ERG22005:
             },
         ]
 
-    async def async_get_snapshot(self) -> dict[str, dict]:
-        """Read and decode one exact FC04 runtime block."""
-        response = await self.attr_client.read_input_registers(
+    @staticmethod
+    def get_number_descriptions() -> list[dict[str, Any]]:
+        """Describe protocol-scaled P parameters with manual-derived limits."""
+        return [
+            {
+                "number_id": item.parameter,
+                "name": item.name,
+                "translation_key": f"erman_{item.parameter}",
+                "native_min_value": item.minimum,
+                "native_max_value": item.maximum,
+                "native_step": item.scale,
+                "native_unit_of_measurement": item.unit,
+                "dynamic_max_id": item.dynamic_max_parameter,
+                "icon": "mdi:tune-variant",
+            }
+            for item in NUMBER_PARAMETERS
+        ]
+
+    @staticmethod
+    def get_select_descriptions() -> list[dict[str, Any]]:
+        """Describe enumerated P parameters from the current ER-G manual."""
+        return [
+            {
+                "select_id": item.parameter,
+                "name": item.name,
+                "translation_key": f"erman_{item.parameter}",
+                "options": list(item.options),
+                "entity_category": EntityCategory.CONFIG,
+                "icon": "mdi:tune-variant",
+            }
+            for item in SELECT_PARAMETERS
+        ]
+
+    async def _async_get_snapshot_on(self, client) -> dict[str, dict]:
+        """Read runtime and periodically refreshed configuration atomically."""
+        response = await client.read_input_registers(
             address=RUNTIME_BASE_ADDRESS,
             count=RUNTIME_REGISTER_COUNT,
             device_id=self.attr_device_id,
@@ -350,7 +554,7 @@ class ERG22005:
             "read ER-G-220-05 runtime",
             expected_function=4,
         )
-        outputs_response = await self.attr_client.read_coils(
+        outputs_response = await client.read_coils(
             address=13,
             count=2,
             device_id=self.attr_device_id,
@@ -370,7 +574,164 @@ class ERG22005:
             "output_y1": {"state": outputs[0]},
             "output_y2": {"state": outputs[1]},
         }
+        if (
+            self._settings_cache is None
+            or time.monotonic() >= self._settings_refresh_at
+        ):
+            self._settings_cache = await self._read_settings_on(client)
+            self._settings_refresh_at = time.monotonic() + SETTINGS_REFRESH_INTERVAL
+        snapshot.update(self._settings_cache)
         return snapshot
+
+    async def async_get_snapshot(self) -> dict[str, dict]:
+        """Read one serialized ER-G snapshot."""
+        executor = getattr(self.attr_client, "async_execute_serialized", None)
+        if callable(executor):
+            return await executor(self._async_get_snapshot_on)
+        return await self._async_get_snapshot_on(self.attr_client)
+
+    async def _read_settings_on(self, client) -> dict[str, dict]:
+        blocks = ((1001, 8), (1100, 38))
+        raw: dict[int, int] = {}
+        for address, count in blocks:
+            response = await client.read_holding_registers(
+                address=address,
+                count=count,
+                device_id=self.attr_device_id,
+            )
+            self._validate_response_device_id(response, "read ER-G-220-05 settings")
+            registers = validated_registers(
+                response,
+                count,
+                "read ER-G-220-05 settings",
+                expected_function=3,
+            )
+            raw.update(
+                (address + offset, value) for offset, value in enumerate(registers)
+            )
+        return {
+            "numbers": {
+                item.parameter: {
+                    "value": round(raw[item.address] * item.scale, 2),
+                    "raw_register": raw[item.address],
+                }
+                for item in NUMBER_PARAMETERS
+            },
+            "selects": {
+                item.parameter: {
+                    "state": (
+                        item.options[raw[item.address]]
+                        if raw[item.address] < len(item.options)
+                        else None
+                    ),
+                    "raw_register": raw[item.address],
+                }
+                for item in SELECT_PARAMETERS
+            },
+        }
+
+    async def async_set_number(self, number_id: str, value: float) -> float:
+        """Write one scaled P parameter and require exact FC03 readback."""
+        if number_id not in NUMBER_BY_ID:
+            raise ValueError(f"Unknown ER-G-220-05 number: {number_id}")
+        item = NUMBER_BY_ID[number_id]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{item.parameter.upper()} must be numeric")
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError(f"{item.parameter.upper()} must be finite")
+        raw = round(value / item.scale)
+        normalized = round(raw * item.scale, 2)
+        if not math.isclose(value, normalized, abs_tol=item.scale / 100):
+            raise ValueError(f"{item.parameter.upper()} must use step {item.scale}")
+
+        async def execute(client) -> float:
+            maximum = item.maximum
+            if item.dynamic_max_parameter is not None:
+                dependency = NUMBER_BY_ID[item.dynamic_max_parameter]
+                response = await client.read_holding_registers(
+                    address=dependency.address,
+                    count=1,
+                    device_id=self.attr_device_id,
+                )
+                self._validate_response_device_id(response, "read ER-G dependent limit")
+                maximum = min(
+                    maximum,
+                    validated_registers(
+                        response,
+                        1,
+                        "read ER-G dependent limit",
+                        expected_function=3,
+                    )[0]
+                    * dependency.scale,
+                )
+            if not item.minimum <= normalized <= maximum:
+                raise ValueError(
+                    f"{item.parameter.upper()} must be {item.minimum}..{maximum}"
+                )
+            await self._write_register_confirmed_on(
+                client, item.address, raw, item.parameter
+            )
+            return normalized
+
+        return await self._execute_serialized(execute)
+
+    async def async_set_select(self, select_id: str, option: str) -> str:
+        """Write one enumerated P parameter with exact readback."""
+        if select_id not in SELECT_BY_ID:
+            raise ValueError(f"Unknown ER-G-220-05 select: {select_id}")
+        item = SELECT_BY_ID[select_id]
+        if option not in item.options:
+            raise ValueError(f"Unsupported {item.parameter.upper()} option: {option}")
+        raw = item.options.index(option)
+
+        async def execute(client) -> str:
+            await self._write_register_confirmed_on(
+                client, item.address, raw, item.parameter
+            )
+            return option
+
+        return await self._execute_serialized(execute)
+
+    async def _write_register_confirmed_on(
+        self, client, address: int, value: int, parameter: str
+    ) -> None:
+        response = await client.write_register(
+            address=address,
+            value=value,
+            device_id=self.attr_device_id,
+        )
+        validate_fc06_response(
+            response,
+            address=address,
+            value=value,
+            operation=f"set ER-G-220-05 {parameter.upper()}",
+            device_id=self.attr_device_id,
+        )
+        readback_response = await client.read_holding_registers(
+            address=address,
+            count=1,
+            device_id=self.attr_device_id,
+        )
+        self._validate_response_device_id(readback_response, f"verify {parameter}")
+        actual = validated_registers(
+            readback_response,
+            1,
+            f"verify ER-G-220-05 {parameter.upper()}",
+            expected_function=3,
+        )[0]
+        if actual != value:
+            raise ModbusException(
+                f"ER-G-220-05 {parameter.upper()} readback mismatch: "
+                f"requested {value}, got {actual}"
+            )
+        self._settings_refresh_at = 0.0
+
+    async def _execute_serialized(self, operation):
+        executor = getattr(self.attr_client, "async_execute_serialized", None)
+        if callable(executor):
+            return await executor(operation)
+        return await operation(self.attr_client)
 
     async def async_send_command(self, command: ERGCommand | int) -> None:
         """Send one documented non-reserved command through strict FC05."""

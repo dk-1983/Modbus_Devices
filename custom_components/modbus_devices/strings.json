@@ -104,6 +104,25 @@
     },
     "switch": {
       "erman_output_y1": {"name": "State / command - Y1"}, "erman_output_y2": {"name": "State / command - Y2"}
+    },
+    "number": {
+      "erman_p001": {"name": "P001 Pressure setpoint"}, "erman_p002": {"name": "P002 Proportional coefficient"}, "erman_p003": {"name": "P003 Integration time"}, "erman_p004": {"name": "P004 Start duration"}, "erman_p005": {"name": "P005 Emergency pressure threshold"}, "erman_p006": {"name": "P006 Pressure sensor limit"},
+      "erman_p101": {"name": "P101 Manual frequency"}, "erman_p102": {"name": "P102 Upper frequency limit"}, "erman_p103": {"name": "P103 Lower frequency limit"}, "erman_p104": {"name": "P104 Starting frequency"}, "erman_p105": {"name": "P105 Starting-frequency voltage"}, "erman_p106": {"name": "P106 Motor-start test frequency"}, "erman_p107": {"name": "P107 Motor-start wait time"}, "erman_p108": {"name": "P108 Leak-test period"}, "erman_p109": {"name": "P109 Leak-detection pressure difference"}, "erman_p110": {"name": "P110 Flow-test period"}, "erman_p111": {"name": "P111 Flow-detection pressure difference"}, "erman_p112": {"name": "P112 Test duration"}, "erman_p113": {"name": "P113 Dry-run pressure threshold"}, "erman_p114": {"name": "P114 Dry-run detection time"}, "erman_p115": {"name": "P115 Start pressure difference"}, "erman_p116": {"name": "P116 Motor-start pressure difference"},
+      "erman_p129": {"name": "P129 Current year"}, "erman_p133": {"name": "P133 Channel 1 duration"}, "erman_p136": {"name": "P136 Channel 2 duration"}
+    },
+    "select": {
+      "erman_p008": {"name": "P008 Main-menu mode", "state": {"pressure": "Pressure", "frequency": "Frequency"}},
+      "erman_p100": {"name": "P100 Operating mode", "state": {"pressure_control": "Pressure control", "manual_frequency": "Manual frequency", "rs485_frequency": "RS-485 frequency", "analog_input_frequency": "Analog-input frequency"}},
+      "erman_p117": {"name": "P117 Start method", "state": {"control_panel": "Control panel", "digital_input": "Digital input", "rs485": "RS-485"}},
+      "erman_p118": {"name": "P118 Y1 function", "state": {"unused": "Unused", "fault": "Fault", "running": "Running", "set_frequency_reached": "Set frequency reached", "modbus_control": "Modbus control", "time_relay": "Time relay"}},
+      "erman_p119": {"name": "P119 Y1 normal state", "state": {"normally_open": "Normally open", "normally_closed": "Normally closed"}},
+      "erman_p120": {"name": "P120 Y2 function", "state": {"unused": "Unused", "fault": "Fault", "running": "Running", "set_frequency_reached": "Set frequency reached", "modbus_control": "Modbus control", "time_relay": "Time relay"}},
+      "erman_p121": {"name": "P121 Y2 normal state", "state": {"normally_open": "Normally open", "normally_closed": "Normally closed"}},
+      "erman_p124": {"name": "P124 Current input", "state": {"automatic": "Automatic", "an1": "AN1", "an2": "AN2", "an1_and_an2": "AN1 and AN2"}},
+      "erman_p125": {"name": "P125 Power-on state", "state": {"stopped": "Stopped", "restore_previous": "Restore previous state", "start_pump": "Start pump"}},
+      "erman_p126": {"name": "P126 Sleep mode", "state": {"enabled": "Enabled", "disabled": "Disabled"}},
+      "erman_p130": {"name": "P130 Time relay", "state": {"disabled": "Disabled", "enabled": "Enabled"}},
+      "erman_p131": {"name": "P131 Relay outputs on fault", "state": {"keep_running": "Keep running", "turn_off": "Turn off"}}
     }
   }
 }

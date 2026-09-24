@@ -43,6 +43,7 @@ class ModBusSelectEntity(CoordinatorEntity, SelectEntity):
         self._device = device
         self._select_id = description["select_id"]
         self._attr_name = description["name"]
+        self._attr_translation_key = description.get("translation_key")
         self._attr_options = list(description["options"])
         self._attr_icon = description.get("icon")
         self._attr_entity_category = description.get("entity_category")

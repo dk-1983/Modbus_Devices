@@ -8,6 +8,24 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
+## New in 1.6.0 — ERMAN configuration controls
+
+ERMAN ER-G-220-05 now exposes 25 numeric and 12 enumerated configuration
+parameters from protocol pages 8–9. Parameter names retain their documented
+`Pxxx` identifiers, values use the documented scales and limits, and dependent
+limits follow the live P006/P102 values.
+
+Configuration is refreshed with two grouped FC03 reads every 30 seconds,
+separately from the existing one-second runtime snapshot. Every change uses a
+serialized FC06 transaction, validates the mirrored response, and requires an
+exact FC03 readback before Home Assistant publishes the new value. Reserved
+registers are never written. P122 (slave ID) and P123 (baud rate) deliberately
+remain unavailable: change them on the drive and recreate its connection so a
+write cannot strand an active integration.
+
+Existing configurations require no migration. Update the integration and
+restart Home Assistant.
+
 ## New in 1.5.1 — faster ERMAN runtime monitoring
 
 The ERMAN ER-G-220-05 runtime block is now polled once per second instead of
@@ -258,7 +276,7 @@ new state. The integration never clears a `C.dr` assignment automatically.
 
 | Model | Connection | Main capabilities |
 |---|---|---|
-| ER-G-220-05 | Direct Modbus | Pump-drive frequency, current, voltage, temperature, pressure and analog-input monitoring; operating/fault status; start, stop, emergency stop, fault reset, parameter save/load, and Y1/Y2 controls |
+| ER-G-220-05 | Direct Modbus | Pump-drive monitoring and states; one-second runtime polling; start, stop and fault commands; Y1/Y2 control; guarded P001…P136 configuration controls |
 
 The initial ER-G-220-05 profile follows the
 [MODBUS protocol document v1.2](https://github.com/user-attachments/files/32493266/protocol_modbus_erg-220-05.pdf)
@@ -269,9 +287,9 @@ from user configurations that may label the same raw value as `bar`.
 Only the documented non-reserved command coils are exposed. FC05 responses are
 strictly validated. Y1/Y2 writes additionally require P118/P120 respectively to
 equal `4`, execute inside one serialized physical operation, and must pass an
-exact FC01 readback before Home Assistant publishes the new state. The profile
-has automated protocol coverage but awaits validation on a physical drive by
-the requesting user.
+exact FC01 readback before Home Assistant publishes the new state. Runtime
+monitoring, commands, Y1/Y2 outputs and software-version decoding have been
+confirmed by the requesting user on a physical drive.
 
 ## Installation
 

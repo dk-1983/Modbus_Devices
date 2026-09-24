@@ -20,9 +20,13 @@ from custom_components.modbus_devices.equipment.equipment import (
 )
 from custom_components.modbus_devices.equipment.erman import (
     ERG22005,
+    NUMBER_PARAMETERS,
     RUNTIME_BASE_ADDRESS,
     RUNTIME_REGISTER_COUNT,
+    SELECT_PARAMETERS,
 )
+from custom_components.modbus_devices.number import ModBusNumberEntity
+from custom_components.modbus_devices.select import ModBusSelectEntity
 from custom_components.modbus_devices.sensor import (
     ModBusNumericSensorEntity,
     ModBusStateSensorEntity,
@@ -70,6 +74,14 @@ class Client:
         self.calls = []
         self.output_states = output_states or [False, False]
         self.output_functions = output_functions or {1118: 4, 1120: 4}
+        self.settings = {
+            **{
+                item.address: round(item.minimum / item.scale)
+                for item in NUMBER_PARAMETERS
+            },
+            **{item.address: 0 for item in SELECT_PARAMETERS},
+            **(output_functions or {1118: 4, 1120: 4}),
+        }
         self.coil_calls = []
         self.holding_calls = []
         self.write_calls = []
@@ -91,8 +103,21 @@ class Client:
     async def read_holding_registers(self, **kwargs):
         self.holding_calls.append(kwargs)
         return Response(
-            [self.output_functions[kwargs["address"]]],
+            [
+                self.settings.get(kwargs["address"] + offset, 0)
+                for offset in range(kwargs["count"])
+            ],
             function_code=3,
+            dev_id=kwargs["device_id"],
+        )
+
+    async def write_register(self, **kwargs):
+        self.write_calls.append(kwargs)
+        self.settings[kwargs["address"]] = kwargs["value"]
+        return Response(
+            function_code=6,
+            address=kwargs["address"],
+            value=kwargs["value"],
             dev_id=kwargs["device_id"],
         )
 
@@ -137,6 +162,8 @@ def test_registry_and_metadata_are_canonical_and_mark_hardware_status():
         Platform.SENSOR,
         Platform.BUTTON,
         Platform.SWITCH,
+        Platform.NUMBER,
+        Platform.SELECT,
     ]
     assert device.attr_device_metadata["documented_software_version"] == "01.25"
     assert device.attr_device_metadata["writes"] == (
@@ -179,6 +206,84 @@ def test_runtime_description_set_matches_documented_engineering_values():
     assert descriptions["drive_temperature"]["unit"] == "°C"
     assert descriptions["current_pressure"]["unit"] == "atm"
     assert descriptions["current_pressure"]["precision"] == 2
+
+
+def test_configuration_descriptions_cover_safe_protocol_parameters():
+    device = ERG22005(None, 1)
+    numbers = {item["number_id"]: item for item in device.get_number_descriptions()}
+    selects = {item["select_id"]: item for item in device.get_select_descriptions()}
+
+    assert len(numbers) == 25
+    assert numbers["p109"]["native_step"] == 0.01
+    assert numbers["p109"]["dynamic_max_id"] == "p006"
+    assert numbers["p106"]["native_step"] == 0.1
+    assert numbers["p133"]["native_max_value"] == 600
+    assert len(selects) == 12
+    assert selects["p100"]["options"][-1] == "analog_input_frequency"
+    assert selects["p118"]["options"][-1] == "time_relay"
+    assert "p122" not in numbers
+    assert "p123" not in selects
+
+
+@pytest.mark.asyncio
+async def test_scaled_number_write_is_serialized_and_readback_confirmed():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=7))
+    client.settings[1006] = 600
+    device = ERG22005(client, 7)
+
+    confirmed = await device.async_set_number("p109", 1.25)
+
+    assert confirmed == 1.25
+    assert client.logical_operations == 1
+    assert client.write_calls == [{"address": 1109, "value": 125, "device_id": 7}]
+    assert client.holding_calls[0] == {"address": 1006, "count": 1, "device_id": 7}
+    assert client.holding_calls[-1] == {"address": 1109, "count": 1, "device_id": 7}
+
+
+@pytest.mark.asyncio
+async def test_dynamic_limit_and_decimal_step_are_enforced_before_write():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=1))
+    client.settings[1006] = 300
+    device = ERG22005(client, 1)
+
+    with pytest.raises(ValueError, match="P109 must be 0..3.0"):
+        await device.async_set_number("p109", 3.01)
+    with pytest.raises(ValueError, match="P106 must use step 0.1"):
+        await device.async_set_number("p106", 12.34)
+    assert client.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_select_write_uses_documented_code_and_exact_readback():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    device = ERG22005(client, 4)
+
+    confirmed = await device.async_set_select("p117", "rs485")
+
+    assert confirmed == "rs485"
+    assert client.write_calls == [{"address": 1117, "value": 2, "device_id": 4}]
+
+
+@pytest.mark.asyncio
+async def test_settings_are_grouped_and_cached_between_fast_runtime_polls():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=5))
+    client.settings[1006] = 600
+    client.settings[1109] = 125
+    device = ERG22005(client, 5)
+
+    first = await device.async_get_snapshot()
+    second = await device.async_get_snapshot()
+
+    assert first["numbers"]["p006"]["value"] == 6.0
+    assert first["numbers"]["p109"]["value"] == 1.25
+    assert second["numbers"] == first["numbers"]
+    setting_reads = [
+        call for call in client.holding_calls if call["address"] in (1001, 1100)
+    ]
+    assert setting_reads == [
+        {"address": 1001, "count": 8, "device_id": 5},
+        {"address": 1100, "count": 38, "device_id": 5},
+    ]
 
 
 def test_decode_runtime_applies_documented_scales_and_states_losslessly():
@@ -493,3 +598,64 @@ async def test_generic_button_and_switch_entities_use_equipment_contracts():
     await output.async_turn_on()
     assert patches == [(("switches", "output_y1", "state"), True)]
     assert output.is_on is True
+
+
+@pytest.mark.asyncio
+async def test_generic_number_and_select_entities_publish_confirmed_settings():
+    client = Client(Response(RUNTIME_VECTOR))
+    client.settings[1006] = 600
+    client.settings[1109] = 125
+    device = ERG22005(client, 6)
+    coordinator = SimpleNamespace(
+        data={
+            "numbers": {
+                "p006": {"value": 6.0},
+                "p109": {"value": 1.25},
+            },
+            "selects": {"p117": {"state": "control_panel"}},
+        },
+        device=device,
+        last_update_success=True,
+    )
+    patches = []
+
+    def apply(path, value):
+        patches.append((path, value))
+        coordinator.data[path[0]][path[1]][path[2]] = value
+
+    coordinator.async_apply_confirmed_write = apply
+    entry = SimpleNamespace(entry_id="erg")
+    number = ModBusNumberEntity(
+        coordinator,
+        device,
+        entry,
+        next(
+            item
+            for item in device.get_number_descriptions()
+            if item["number_id"] == "p109"
+        ),
+    )
+    select = ModBusSelectEntity(
+        coordinator,
+        device,
+        entry,
+        next(
+            item
+            for item in device.get_select_descriptions()
+            if item["select_id"] == "p117"
+        ),
+    )
+
+    assert number.native_value == 1.25
+    assert number.native_max_value == 6.0
+    assert number.translation_key == "erman_p109"
+    assert select.current_option == "control_panel"
+    assert select.translation_key == "erman_p117"
+
+    await number.async_set_native_value(1.5)
+    await select.async_select_option("rs485")
+
+    assert patches == [
+        (("numbers", "p109", "value"), 1.5),
+        (("selects", "p117", "state"), "rs485"),
+    ]

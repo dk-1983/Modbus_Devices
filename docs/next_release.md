@@ -1,32 +1,32 @@
-# Modbus Devices 1.5.1 — faster ERMAN runtime monitoring
+# Modbus Devices 1.6.0 — ERMAN configuration controls
 
-Modbus Devices 1.5.1 increases the ERMAN ER-G-220-05 runtime polling rate from
-the integration-wide five-second default to one update per second.
+Modbus Devices 1.6.0 adds guarded configuration controls for the ERMAN
+ER-G-220-05 pump drive.
 
 ## Scope
 
-- Only ER-G-220-05 receives the one-second interval.
-- Drive state, output frequency, current pressure, motor current, and the rest
-  of its existing grouped snapshot are refreshed together.
-- Other equipment retains the five-second default.
-- The interval is declared by the equipment profile and is not user
-  configurable.
-- A coordinator guard prevents any equipment profile from requesting a polling
-  rate faster than one cycle per second.
-- The existing single grouped FC04 runtime read, strict response validation,
-  serialization, entities, and configuration remain unchanged.
+- 25 numeric parameters and 12 enumerated parameters from protocol pages 8–9.
+- Documented `Pxxx` names, scales, steps, ranges, units, and English/Russian
+  localization.
+- Live dependent limits for parameters constrained by P006 or P102.
+- Two grouped FC03 configuration reads every 30 seconds, independent of the
+  existing one-second grouped runtime poll.
+- Serialized single-register FC06 writes with mirrored-response validation and
+  exact FC03 readback before publishing the new Home Assistant state.
+- Reserved register addresses are never written.
 
-## Important limitation
+## Connection safety
 
-ER-G-220-05 is a Modbus slave/server and cannot initiate a state update. Home
-Assistant, acting as the Modbus master/client, receives only the register values
-present at the instant of each request. One-second polling substantially
-improves runtime visibility but is not a real-time event recorder and cannot
-guarantee capture of a state that appears and disappears between polls. Safety
-and fault handling must continue to use the drive's latched fault code and its
-own diagnostics.
+P122 (Modbus slave ID) and P123 (baud rate) are intentionally not writable from
+Home Assistant. Change them locally on the drive, then recreate the Modbus
+Devices connection with the new values. This prevents a successful write from
+making the active connection unreachable before it can be verified.
+
+Calendar/time and weekday-mask registers require dedicated date/time controls
+and are not represented as misleading raw numeric values in this release.
 
 ## Upgrade
 
 No configuration or entity migration is required. Update the integration and
-restart Home Assistant.
+restart Home Assistant. Newly supported configuration entities appear under
+the device's Configuration section.
