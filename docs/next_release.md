@@ -1,28 +1,19 @@
-# Modbus Devices 1.7.0 — Samsung MIM-B19N(T)
+# Modbus Devices 1.7.1 — ERMAN device identity fix
 
-Modbus Devices 1.7.0 adds a shared Samsung MIM-B19N/MIM-B19NT Modbus interface
-profile, shown as **MIM-B19N(T)** under Climate control and cooling.
+Modbus Devices 1.7.1 fixes Home Assistant device grouping for ERMAN
+ER-G-220-05 configuration controls.
 
-## Scope
+## Fixed
 
-- Standard Samsung register map from manual DB68-07538A-03.
-- Climate control: power, Auto/Cool/Dry/Fan/Heat modes, 16–30 °C target,
-  Auto/Low/Medium/High fan and vertical airflow.
-- Current temperature plus gateway, outdoor-unit and selected-unit diagnostics.
-- Separate setup values for the MIM Modbus slave address and Samsung-side unit
-  address 0–47. Connected air-conditioner model selection is not required.
-- Strict FC04 payload/function/device validation and strict FC06 mirrored-write
-  validation.
-- English and Russian setup localization and protocol-level automated tests.
-
-## Hardware status
-
-The profile is derived from Samsung's common MIM-B19N/MIM-B19NT manual and is
-covered by an emulated register map. A physical board has not yet been tested;
-field feedback is welcome. The advanced custom MessageSet registration area at
-6000/7000 is deliberately outside this release.
+- The 25 numeric `Pxxx` configuration entities now use the same stable physical
+  device identifier as runtime sensors, selects, switches and buttons.
+- A newly configured ER-G-220-05 is represented by one Home Assistant device
+  instead of a main device plus a duplicate “Variable-frequency drive”.
+- A regression test now requires numeric and enumerated controls to resolve to
+  the same device-registry identifier.
 
 ## Upgrade
 
-Existing configurations require no migration. Update the integration and
-restart Home Assistant, then add the new Samsung device from the UI.
+No integration reconfiguration is required. Update and restart Home Assistant.
+The numeric entities will move to the main ERMAN device. If Home Assistant keeps
+an empty orphaned device-registry record, it can be removed safely from the UI.

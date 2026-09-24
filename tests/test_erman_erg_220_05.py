@@ -14,6 +14,7 @@ from custom_components.modbus_devices.coordinator import (
     MINIMUM_SCAN_INTERVAL,
     get_poll_interval,
 )
+from custom_components.modbus_devices.const import Config
 from custom_components.modbus_devices.equipment.equipment import (
     get_class,
     get_equipment_display_name,
@@ -606,6 +607,8 @@ async def test_generic_number_and_select_entities_publish_confirmed_settings():
     client.settings[1006] = 600
     client.settings[1109] = 125
     device = ERG22005(client, 6)
+    device.attr_device_identifier = "stable-erman-device"
+    device.attr_unique_id_prefix = "stable-erman-device"
     coordinator = SimpleNamespace(
         data={
             "numbers": {
@@ -647,6 +650,8 @@ async def test_generic_number_and_select_entities_publish_confirmed_settings():
     )
 
     assert number.native_value == 1.25
+    assert number.device_info["identifiers"] == {(Config.DOMAIN, "stable-erman-device")}
+    assert number.device_info["identifiers"] == select.device_info["identifiers"]
     assert number.native_max_value == 6.0
     assert number.translation_key == "erman_p109"
     assert select.current_option == "control_panel"

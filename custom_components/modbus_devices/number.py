@@ -57,11 +57,7 @@ class ModBusNumberEntity(CoordinatorEntity, NumberEntity):
             "native_unit_of_measurement"
         )
         self._dynamic_max_id = description.get("dynamic_max_id")
-        self._attr_device_info = device_info_for_entry(
-            device,
-            entry,
-            identifier=entry.entry_id,
-        )
+        self._attr_device_info = device_info_for_entry(device, entry)
 
     @property
     def native_value(self) -> float | None:

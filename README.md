@@ -8,6 +8,12 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
+## New in 1.7.1 — ERMAN device identity fix
+
+All ER-G-220-05 numeric configuration parameters now attach to the same Home
+Assistant device as its runtime sensors and other controls. This removes the
+spurious second “Variable-frequency drive” device introduced in 1.6.0.
+
 ## New in 1.7.0 — Samsung MIM-B19N(T)
 
 Samsung MIM-B19N and MIM-B19NT are now represented by one shared
