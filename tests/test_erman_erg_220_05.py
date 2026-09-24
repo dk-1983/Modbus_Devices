@@ -1,5 +1,6 @@
 """Document-derived tests for the ERMAN ER-G-220-05 drive."""
 
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,11 @@ from pymodbus.exceptions import ModbusException
 from homeassistant.const import Platform
 
 from custom_components.modbus_devices.button import ModBusCommandButtonEntity
+from custom_components.modbus_devices.coordinator import (
+    DEFAULT_SCAN_INTERVAL,
+    MINIMUM_SCAN_INTERVAL,
+    get_poll_interval,
+)
 from custom_components.modbus_devices.equipment.equipment import (
     get_class,
     get_equipment_display_name,
@@ -136,6 +142,21 @@ def test_registry_and_metadata_are_canonical_and_mark_hardware_status():
     assert device.attr_device_metadata["writes"] == (
         "documented FC05 commands exposed; hardware feedback pending"
     )
+    assert device.attr_poll_interval == timedelta(seconds=1)
+    assert get_poll_interval(device) == timedelta(seconds=1)
+
+
+def test_poll_interval_defaults_to_five_seconds_and_cannot_exceed_one_hertz():
+    assert get_poll_interval(SimpleNamespace()) == DEFAULT_SCAN_INTERVAL
+    assert (
+        get_poll_interval(
+            SimpleNamespace(attr_poll_interval=timedelta(milliseconds=100))
+        )
+        == MINIMUM_SCAN_INTERVAL
+    )
+
+    with pytest.raises(ValueError, match="positive timedelta"):
+        get_poll_interval(SimpleNamespace(attr_poll_interval=0.5))
 
 
 def test_runtime_description_set_matches_documented_engineering_values():

@@ -15,7 +15,16 @@ from homeassistant.helpers.update_coordinator import (
 
 _LOGGER = logging.getLogger(__name__)
 
-SCAN_INTERVAL = timedelta(seconds=5)
+DEFAULT_SCAN_INTERVAL = timedelta(seconds=5)
+MINIMUM_SCAN_INTERVAL = timedelta(seconds=1)
+
+
+def get_poll_interval(device) -> timedelta:
+    """Return a validated, load-safe model-specific polling interval."""
+    interval = getattr(device, "attr_poll_interval", DEFAULT_SCAN_INTERVAL)
+    if not isinstance(interval, timedelta) or interval <= timedelta(0):
+        raise ValueError("Equipment polling interval must be a positive timedelta")
+    return max(interval, MINIMUM_SCAN_INTERVAL)
 
 
 class ModbusDeviceCoordinator(
@@ -38,7 +47,7 @@ class ModbusDeviceCoordinator(
             hass,
             _LOGGER,
             name="modbus_device",
-            update_interval=SCAN_INTERVAL,
+            update_interval=get_poll_interval(device),
         )
 
     async def _async_update_data(self):

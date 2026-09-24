@@ -8,6 +8,21 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
+## New in 1.5.1 — faster ERMAN runtime monitoring
+
+The ERMAN ER-G-220-05 runtime block is now polled once per second instead of
+the integration-wide five-second default. This improves visibility of drive
+state, output frequency, current pressure, and motor current without increasing
+the polling rate of other equipment. The interval is model-owned and fixed;
+users cannot configure an unsafe sub-second rate.
+
+ER-G-220-05 is a Modbus slave/server and cannot initiate a state update. Home
+Assistant, acting as the Modbus master/client, receives only the register values
+that exist when each poll is performed. Polling is therefore not an event log:
+a transition that starts and ends between two one-second polls may still be
+missed. Safety events must continue to rely on the drive's latched fault code
+and its own diagnostics rather than only the instantaneous Home Assistant state.
+
 ## New in 1.4.0 — ERMAN pump control and TRM-138 outputs
 
 This release adds the document-derived **ERMAN ER-G-220-05** pump-drive profile

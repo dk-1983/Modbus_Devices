@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import IntEnum
 from typing import Any
 
@@ -179,6 +179,7 @@ class ERG22005:
     equipment_model = "ER-G-220-05"
     equipment_category = EquipmentCategory.VARIABLE_FREQUENCY_DRIVES
     uses_stable_entry_identity = True
+    attr_poll_interval = timedelta(seconds=1)
 
     def __init__(self, client, device_id) -> None:
         """Initialize a document-derived equipment profile."""
