@@ -307,6 +307,7 @@ def test_s2000_ethernet_is_not_an_equipment_model():
         1,
         2,
         1,
+        1,
     ]
     assert all(
         "Ethernet" not in model for models in equipment.values() for model in models

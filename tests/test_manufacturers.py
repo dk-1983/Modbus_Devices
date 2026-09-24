@@ -40,6 +40,7 @@ def test_manufacturer_discovery_has_one_canonical_group_per_manufacturer():
         "ERMAN",
         "Haier",
         "Owen",
+        "Samsung",
         "Zuked",
     ]
 
@@ -54,6 +55,7 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
         ("ERMAN", "erman"),
         ("Haier", "haier"),
         ("Owen", "owen"),
+        ("Samsung", "samsung"),
         ("Zuked", "zuked"),
     ]
     assert manufacturer_module_name("4VRS") == "fourvrs"
@@ -64,6 +66,7 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
     assert manufacturer_module_name("Dyna Drive") == "dyna_drive"
     assert manufacturer_module_name("ERMAN") == "erman"
     assert manufacturer_module_name("Haier") == "haier"
+    assert manufacturer_module_name("Samsung") == "samsung"
     assert manufacturer_module_name("bolid") == "bolid"
     assert manufacturer_module_name("owen") == "owen"
     assert manufacturer_module_name("dyna_drive") == "dyna_drive"
@@ -82,6 +85,7 @@ def test_registry_contains_only_canonical_manufacturers_and_modules():
         "Dyna Drive",
         "ERMAN",
         "Haier",
+        "Samsung",
         "Zuked",
     ],
 )

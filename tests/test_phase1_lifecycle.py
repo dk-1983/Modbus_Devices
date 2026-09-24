@@ -714,6 +714,7 @@ def test_config_flow_localization_catalogs_have_identical_keys():
         "category",
         "manufacturer",
         "device",
+        "subdevice_address",
         "io_mapping",
         "network",
         "rtu_over_udp",

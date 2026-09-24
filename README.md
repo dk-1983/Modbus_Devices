@@ -8,6 +8,20 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
+## New in 1.7.0 — Samsung MIM-B19N(T)
+
+Samsung MIM-B19N and MIM-B19NT are now represented by one shared
+**MIM-B19N(T)** profile under `Climate control and cooling → Samsung`. The
+profile uses the standard register map from Samsung's common interface manual,
+supports power, operating mode, target/current temperature, fan speed and
+vertical airflow, and exposes gateway/unit communication and error diagnostics.
+
+Setup distinguishes the Modbus slave address of the MIM board from the Samsung
+unit address behind it (0–47). No connected air-conditioner model is requested:
+the MIM maintains the Samsung R1/R2 connection and presents its unit slots to
+Modbus. The implementation is covered by protocol-level tests; physical-board
+validation is still pending.
+
 ## New in 1.6.0 — ERMAN configuration controls
 
 ERMAN ER-G-220-05 now exposes 25 numeric and 12 enumerated configuration
@@ -60,7 +74,7 @@ restart Home Assistant.
 
 - Modbus TCP/IP, native Modbus UDP/IP, serial Modbus RTU, Modbus RTU over UDP, and Modbus RTU over TCP.
 - Explicit equipment models from 4VRS, APC, Bolid, Daikin, Dyna Drive, ERMAN,
-  Haier, Owen, and Zuked.
+  Haier, Owen, Samsung, and Zuked.
 - Direct Modbus devices and equipment connected through supported gateways.
 - Bolid S2000-PP, Orion, KDL, DPLS, and S2000R-ARR topologies.
 - Model-appropriate climate controls, sensors, binary sensors, switches, and
@@ -134,6 +148,23 @@ Supported S2000-SP4 variants are `/24`, `/24 isp.01`, `/220`, and `/220 isp.01`;
 | С2000Р-ВТИ | S2000-PP / ARR/KDL | Temperature, relative humidity, both channel states, and main battery diagnostics |
 
 Some documented Bolid events require matching ARR/KDL/S2000M/PProg/S2000-PP configuration and retransmission. If an entity does not change, first verify that the event is configured to reach S2000-PP; this alone does not prove a device or integration defect.
+
+### Samsung
+
+| Model | Connection | Main capabilities |
+|---|---|---|
+| MIM-B19N(T) | Modbus RTU, including RTU over TCP through a transparent gateway | Power, HVAC mode, target/current temperature, fan, vertical airflow, communication and error diagnostics |
+
+The profile covers both MIM-B19N and MIM-B19NT because Samsung publishes them
+with one register map. The MIM is a Modbus RTU slave (documented default:
+9600 baud, 8E1) and communicates with Samsung equipment over R1/R2. Select the
+MIM's Modbus address in the connection form and the separate Samsung unit slot
+(0–47) in the preceding device step. The MIM can track up to 48 unit slots;
+each Modbus Devices entry represents one selected slot.
+
+Implementation source: Samsung manual DB68-07538A-03. A catalog reference and
+board photograph are available from the
+[MIM-B19N product page](https://intech.cool/pl/akcesoria-do-pomp-ciepla-samusng/8111-interfejs-modbus-mim-b19n-do-pomp-ciepla-samsung.html).
 
 ### Haier
 

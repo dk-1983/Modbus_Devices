@@ -25,6 +25,7 @@ MANUFACTURERS: tuple[Manufacturer, ...] = (
     Manufacturer("ERMAN", "erman"),
     Manufacturer("Haier", "haier"),
     Manufacturer("Owen", "owen"),
+    Manufacturer("Samsung", "samsung"),
     Manufacturer("Zuked", "zuked"),
 )
 

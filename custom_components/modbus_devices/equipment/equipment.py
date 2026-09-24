@@ -55,6 +55,12 @@ def get_manual_io_mapping_spec(module: str, cls_name: str) -> dict[str, Any] | N
     return None if specification is None else dict(specification)
 
 
+def get_subdevice_address_spec(module: str, cls_name: str) -> dict[str, Any] | None:
+    """Return a model-owned downstream address selector specification."""
+    specification = getattr(get_class(module, cls_name), "subdevice_address_spec", None)
+    return None if specification is None else dict(specification)
+
+
 def get_gateway_capabilities(
     module: str,
     cls_name: str,

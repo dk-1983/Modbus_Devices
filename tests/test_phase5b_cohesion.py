@@ -48,7 +48,19 @@ def test_registry_counts_and_order_remain_unchanged():
         "ERMAN",
         "Haier",
         "Owen",
+        "Samsung",
         "Zuked",
     ]
-    assert [len(equipment[name]) for name in equipment] == [1, 1, 29, 1, 1, 1, 1, 2, 1]
-    assert sum(map(len, equipment.values())) == 38
+    assert [len(equipment[name]) for name in equipment] == [
+        1,
+        1,
+        29,
+        1,
+        1,
+        1,
+        1,
+        2,
+        1,
+        1,
+    ]
+    assert sum(map(len, equipment.values())) == 39

@@ -252,6 +252,18 @@ async def async_setup_entry(
             device_id,
         )
 
+        subdevice_address = options.get(Config.CONF_SUBDEVICE_ADDRESS)
+        if subdevice_address is not None:
+            configure_subdevice = getattr(device, "configure_subdevice_address", None)
+            if not callable(configure_subdevice):
+                raise ConfigEntryError(
+                    f"{device_name} does not support a downstream address"
+                )
+            try:
+                configure_subdevice(subdevice_address)
+            except (TypeError, ValueError) as exc:
+                raise ConfigEntryError("Invalid persisted downstream address") from exc
+
         io_mapping = options.get(Config.CONF_IO_MAPPING)
         if io_mapping is not None:
             apply_io_mapping = getattr(device, "apply_io_mapping", None)

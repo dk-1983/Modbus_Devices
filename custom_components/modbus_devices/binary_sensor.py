@@ -156,7 +156,11 @@ class ModBusDescribedBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
     def __init__(self, coordinator, device, entry: ConfigEntry, description) -> None:
         super().__init__(coordinator)
         self._sensor_id = description["sensor_id"]
-        self._attr_name = description["name"]
+        translation_key = description.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+        else:
+            self._attr_name = description["name"]
         self._attr_device_class = description["device_class"]
         self._attr_entity_category = description.get("entity_category")
         self._attr_icon = description.get("icon")

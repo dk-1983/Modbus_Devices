@@ -23,6 +23,7 @@ from .equipment.equipment import (
     get_gateway_device_metadata,
     get_gateway_requirement,
     get_manual_io_mapping_spec,
+    get_subdevice_address_spec,
     validate_equipment_gateway_mapping,
 )
 from .gateway import (
@@ -92,6 +93,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         self._device_metadata = DownstreamDeviceMetadata()
         self._gateway_device_metadata: dict[str, Any] = {}
         self._manual_io_mapping_spec: dict[str, Any] | None = None
+        self._subdevice_address_spec: dict[str, Any] | None = None
         self._gateway_entry_id: str | None = None
         self._discovered_addresses: tuple[int, ...] = ()
 
@@ -259,6 +261,9 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             if self._manual_io_mapping_spec is not None:
                 return await self.async_step_io_mapping()
 
+            if self._subdevice_address_spec is not None:
+                return await self.async_step_subdevice_address()
+
             return await self._next_step()
 
         devices = list(self._manufacturer_devices)
@@ -304,6 +309,34 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             get_manual_io_mapping_spec,
             self._selected_manufacturer,
             device_name,
+        )
+        self._subdevice_address_spec = await self.hass.async_add_executor_job(
+            get_subdevice_address_spec,
+            self._selected_manufacturer,
+            device_name,
+        )
+
+    async def async_step_subdevice_address(self, user_input=None):
+        """Select the Samsung-side unit address exposed by a gateway."""
+        if user_input is not None:
+            self._data[Config.CONF_SUBDEVICE_ADDRESS] = int(
+                user_input[Config.CONF_SUBDEVICE_ADDRESS]
+            )
+            return await self._next_step()
+
+        specification = self._subdevice_address_spec or {}
+        minimum = int(specification.get("min", 0))
+        maximum = int(specification.get("max", 47))
+        default = int(specification.get("default", minimum))
+        return self.async_show_form(
+            step_id="subdevice_address",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        Config.CONF_SUBDEVICE_ADDRESS, default=default
+                    ): vol.All(int, vol.Range(min=minimum, max=maximum))
+                }
+            ),
         )
 
     def _existing_s2000_pp_entries(self) -> dict[str, Any]:
@@ -822,9 +855,13 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         if self._required_gateway is not None:
             return await self.async_step_gateway_context()
 
+        subdevice_address = self._data.get(Config.CONF_SUBDEVICE_ADDRESS)
+        if subdevice_address is not None:
+            legacy_unique_id = f"{legacy_unique_id}:subdevice:{subdevice_address}"
         await self.async_set_unique_id(legacy_unique_id)
         self._abort_if_unique_id_configured()
-        return self._create_device_entry()
+        suffix = "" if subdevice_address is None else f" unit {subdevice_address}"
+        return self._create_device_entry(suffix)
 
     def _create_device_entry(self, suffix: str = ""):
         """Create a Config Entry using the accumulated validated data."""
