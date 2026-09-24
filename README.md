@@ -12,7 +12,9 @@ Modbus Devices is a local Home Assistant integration for explicitly supported in
 
 All ER-G-220-05 numeric configuration parameters now attach to the same Home
 Assistant device as its runtime sensors and other controls. This removes the
-spurious second “Variable-frequency drive” device introduced in 1.6.0.
+spurious second “Variable-frequency drive” device introduced in 1.6.0. Numeric
+and enumerated parameter names now also follow the selected Home Assistant
+English/Russian language instead of being forced to English.
 
 ## New in 1.7.0 — Samsung MIM-B19N(T)
 

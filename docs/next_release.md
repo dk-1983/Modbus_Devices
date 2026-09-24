@@ -11,6 +11,8 @@ ER-G-220-05 configuration controls.
   instead of a main device plus a duplicate “Variable-frequency drive”.
 - A regression test now requires numeric and enumerated controls to resolve to
   the same device-registry identifier.
+- Numeric and enumerated ERMAN parameter names now honor Home Assistant's
+  English/Russian locale instead of a hard-coded English fallback name.
 
 ## Upgrade
 

@@ -46,8 +46,11 @@ class ModBusNumberEntity(CoordinatorEntity, NumberEntity):
         self._device = device
         self._number_id = description["number_id"]
         self._channel = description.get("channel")
-        self._attr_name = description["name"]
-        self._attr_translation_key = description.get("translation_key")
+        translation_key = description.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+        else:
+            self._attr_name = description["name"]
         self._attr_unique_id = f"{entry.entry_id}_{self._number_id}"
         self._attr_icon = description.get("icon")
         self._attr_native_min_value = description["native_min_value"]

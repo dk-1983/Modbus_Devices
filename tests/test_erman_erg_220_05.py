@@ -654,8 +654,10 @@ async def test_generic_number_and_select_entities_publish_confirmed_settings():
     assert number.device_info["identifiers"] == select.device_info["identifiers"]
     assert number.native_max_value == 6.0
     assert number.translation_key == "erman_p109"
+    assert "_attr_name" not in vars(number)
     assert select.current_option == "control_panel"
     assert select.translation_key == "erman_p117"
+    assert "_attr_name" not in vars(select)
 
     await number.async_set_native_value(1.5)
     await select.async_select_option("rs485")

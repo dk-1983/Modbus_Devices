@@ -42,8 +42,11 @@ class ModBusSelectEntity(CoordinatorEntity, SelectEntity):
         super().__init__(coordinator)
         self._device = device
         self._select_id = description["select_id"]
-        self._attr_name = description["name"]
-        self._attr_translation_key = description.get("translation_key")
+        translation_key = description.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+        else:
+            self._attr_name = description["name"]
         self._attr_options = list(description["options"])
         self._attr_icon = description.get("icon")
         self._attr_entity_category = description.get("entity_category")
