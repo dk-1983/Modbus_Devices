@@ -28,7 +28,7 @@ from custom_components.modbus_devices.equipment.equipment import (
 
 
 EXPECTED_CLASSES = {
-    "4VRS": ["HaierESP32"],
+    "4VRS": ["HaierESP32", "SamsungESP32Modbus"],
     "APC": ["SmartUPS3000RMXL"],
     "Bolid": [
         "C20002",
@@ -71,7 +71,7 @@ EXPECTED_CLASSES = {
 }
 
 EXPECTED_MODELS = {
-    "4VRS": ["Haier-ESP32"],
+    "4VRS": ["Haier-ESP32", "Samsung-ESP32-Modbus"],
     "APC": ["Smart-UPS 3000 RM XL"],
     "Bolid": [
         "С2000-2",
@@ -116,7 +116,7 @@ EXPECTED_MODELS = {
 
 def test_explicit_registry_preserves_canonical_set_and_order():
     assert get_equipment_classes_by_manufacturer() == EXPECTED_CLASSES
-    assert sum(map(len, EXPECTED_CLASSES.values())) == 39
+    assert sum(map(len, EXPECTED_CLASSES.values())) == 40
 
 
 def test_module_exports_are_the_single_registry_source():

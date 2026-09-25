@@ -189,6 +189,7 @@ RTD-RA has not yet been hardware-validated.
 | Model | Connection | Main capabilities |
 |---|---|---|
 | [Haier-ESP32](https://github.com/dk-1983/Haier-ESP32-Modbus) | Modbus RTU or Modbus TCP | Power, HVAC mode, target/current temperature, fan, swing, preset, fixed louvre positions, quiet/display switches, link and command diagnostics |
+| [Samsung-ESP32-Modbus](https://github.com/dk-1983/Samsung-ESP32-MQTT-Modbus) | Modbus RTU or Modbus TCP | Samsung UART climate control, full fan/swing/preset controls, confirmed writes, link and command diagnostics |
 
 Haier-ESP32 is a separate 4VRS profile; the existing Haier YCJ-A002 profile is
 unchanged. During development, the factory YCJ-A002 register set was used as
@@ -205,6 +206,13 @@ current states but are not offered as selectable commands.
 Diagnostic Input registers 4…8 are read separately so status age, the low-word-
 first 32-bit packet count, command status, and RTU/TCP link flags remain visible
 when stale main telemetry causes exception 0x0B.
+
+Samsung-ESP32-Modbus is the Modbus Devices catalog name for the
+[Samsung-ESP32-MQTT-Modbus](https://github.com/dk-1983/Samsung-ESP32-MQTT-Modbus)
+controller. Modbus Devices does not require MQTT. The profile uses the project's
+own zero-based register map and is separate from the factory Samsung MIM-B19N(T)
+profile. The controller maintains the Samsung UART connection; the connected
+air conditioner is not itself a Modbus slave.
 
 ### APC
 

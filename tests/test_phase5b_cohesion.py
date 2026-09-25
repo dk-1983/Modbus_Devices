@@ -52,7 +52,7 @@ def test_registry_counts_and_order_remain_unchanged():
         "Zuked",
     ]
     assert [len(equipment[name]) for name in equipment] == [
-        1,
+        2,
         1,
         29,
         1,
@@ -63,4 +63,4 @@ def test_registry_counts_and_order_remain_unchanged():
         1,
         1,
     ]
-    assert sum(map(len, equipment.values())) == 39
+    assert sum(map(len, equipment.values())) == 40

@@ -97,6 +97,14 @@
           "initializing": "Инициализация ПЧ", "off": "Выключен", "motor_starting": "Запуск двигателя", "moving_to_setpoint": "Движение к уставке", "maintaining_setpoint": "Поддержание уставки", "detecting_flow": "Определение расхода", "sleep": "Сон", "stopping": "Остановка", "running_at_set_frequency": "Работа на заданной частоте", "fault": "Авария", "start_delay": "Задержка перед пуском", "relay_test_before_start": "Тест реле перед пуском"
         }
       },
+      "samsung_esp32_core_status_age": {"name": "Возраст основных данных"},
+      "samsung_esp32_core_status_count": {"name": "Счётчик основных пакетов"},
+      "samsung_esp32_link_flags": {"name": "Флаги связи"},
+      "samsung_esp32_extended_last_index": {"name": "Последний расширенный индекс"},
+      "samsung_esp32_extended_catalog_size": {"name": "Размер расширенного каталога"},
+      "samsung_esp32_link_state": {"name": "Состояние связи Samsung"},
+      "samsung_esp32_command_result": {"name": "Результат команды"},
+      "samsung_esp32_extended_result": {"name": "Результат расширенной команды"},
       "erman_fault_code": {
         "name": "Код ошибки",
         "state": {
@@ -107,13 +115,19 @@
     "binary_sensor": {
       "samsung_gateway_link": {"name": "Связь шлюза Samsung"},
       "samsung_unit_link": {"name": "Связь с устройством Samsung"},
-      "samsung_outdoor_defrost": {"name": "Оттайка наружного блока"}
+      "samsung_outdoor_defrost": {"name": "Оттайка наружного блока"},
+      "samsung_esp32_core_fresh": {"name": "Основные данные актуальны"},
+      "samsung_esp32_rtu_enabled": {"name": "Modbus RTU включён"},
+      "samsung_esp32_tcp_enabled": {"name": "Modbus TCP включён"},
+      "samsung_esp32_uart_enabled": {"name": "Передача UART включена"}
     },
     "button": {
-      "erman_start": {"name": "Пуск"}, "erman_stop": {"name": "Стоп"}, "erman_emergency_stop": {"name": "Аварийная остановка"}, "erman_save_parameters": {"name": "Сохранение параметров в ПЗУ"}, "erman_load_parameters": {"name": "Загрузка параметров из ПЗУ"}, "erman_reset_fault": {"name": "Сброс аварии"}
+      "erman_start": {"name": "Пуск"}, "erman_stop": {"name": "Стоп"}, "erman_emergency_stop": {"name": "Аварийная остановка"}, "erman_save_parameters": {"name": "Сохранение параметров в ПЗУ"}, "erman_load_parameters": {"name": "Загрузка параметров из ПЗУ"}, "erman_reset_fault": {"name": "Сброс аварии"},
+      "samsung_esp32_reset_filter": {"name": "Сброс напоминания фильтра"}
     },
     "switch": {
       "erman_output_y1": {"name": "Состояние / Команда - Y1"}, "erman_output_y2": {"name": "Состояние / Команда - Y2"},
+      "samsung_esp32_quiet": {"name": "Тихий режим"},
       "erman_p134_monday": {"name": "P134 Канал 1 - 1. понедельник"}, "erman_p134_tuesday": {"name": "P134 Канал 1 - 2. вторник"}, "erman_p134_wednesday": {"name": "P134 Канал 1 - 3. среда"}, "erman_p134_thursday": {"name": "P134 Канал 1 - 4. четверг"}, "erman_p134_friday": {"name": "P134 Канал 1 - 5. пятница"}, "erman_p134_saturday": {"name": "P134 Канал 1 - 6. суббота"}, "erman_p134_sunday": {"name": "P134 Канал 1 - 7. воскресенье"},
       "erman_p137_monday": {"name": "P137 Канал 2 - 1. понедельник"}, "erman_p137_tuesday": {"name": "P137 Канал 2 - 2. вторник"}, "erman_p137_wednesday": {"name": "P137 Канал 2 - 3. среда"}, "erman_p137_thursday": {"name": "P137 Канал 2 - 4. четверг"}, "erman_p137_friday": {"name": "P137 Канал 2 - 5. пятница"}, "erman_p137_saturday": {"name": "P137 Канал 2 - 6. суббота"}, "erman_p137_sunday": {"name": "P137 Канал 2 - 7. воскресенье"}
     },

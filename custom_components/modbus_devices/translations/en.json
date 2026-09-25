@@ -97,6 +97,14 @@
           "initializing": "Initializing", "off": "Off", "motor_starting": "Motor starting", "moving_to_setpoint": "Moving to setpoint", "maintaining_setpoint": "Maintaining setpoint", "detecting_flow": "Detecting flow", "sleep": "Sleep", "stopping": "Stopping", "running_at_set_frequency": "Running at set frequency", "fault": "Fault", "start_delay": "Start delay", "relay_test_before_start": "Relay test before start"
         }
       },
+      "samsung_esp32_core_status_age": {"name": "Core status age"},
+      "samsung_esp32_core_status_count": {"name": "Core status count"},
+      "samsung_esp32_link_flags": {"name": "Link flags"},
+      "samsung_esp32_extended_last_index": {"name": "Extended last index"},
+      "samsung_esp32_extended_catalog_size": {"name": "Extended catalog size"},
+      "samsung_esp32_link_state": {"name": "Samsung link state"},
+      "samsung_esp32_command_result": {"name": "Command result"},
+      "samsung_esp32_extended_result": {"name": "Extended command result"},
       "erman_fault_code": {
         "name": "Fault code",
         "state": {
@@ -107,13 +115,19 @@
     "binary_sensor": {
       "samsung_gateway_link": {"name": "Samsung gateway link"},
       "samsung_unit_link": {"name": "Samsung unit link"},
-      "samsung_outdoor_defrost": {"name": "Outdoor unit defrost"}
+      "samsung_outdoor_defrost": {"name": "Outdoor unit defrost"},
+      "samsung_esp32_core_fresh": {"name": "Core data fresh"},
+      "samsung_esp32_rtu_enabled": {"name": "Modbus RTU enabled"},
+      "samsung_esp32_tcp_enabled": {"name": "Modbus TCP enabled"},
+      "samsung_esp32_uart_enabled": {"name": "UART TX enabled"}
     },
     "button": {
-      "erman_start": {"name": "Start"}, "erman_stop": {"name": "Stop"}, "erman_emergency_stop": {"name": "Emergency stop"}, "erman_save_parameters": {"name": "Save parameters to EEPROM"}, "erman_load_parameters": {"name": "Load parameters from EEPROM"}, "erman_reset_fault": {"name": "Reset fault"}
+      "erman_start": {"name": "Start"}, "erman_stop": {"name": "Stop"}, "erman_emergency_stop": {"name": "Emergency stop"}, "erman_save_parameters": {"name": "Save parameters to EEPROM"}, "erman_load_parameters": {"name": "Load parameters from EEPROM"}, "erman_reset_fault": {"name": "Reset fault"},
+      "samsung_esp32_reset_filter": {"name": "Reset filter reminder"}
     },
     "switch": {
       "erman_output_y1": {"name": "State / command - Y1"}, "erman_output_y2": {"name": "State / command - Y2"},
+      "samsung_esp32_quiet": {"name": "Quiet"},
       "erman_p134_monday": {"name": "P134 Channel 1 - 1. Monday"}, "erman_p134_tuesday": {"name": "P134 Channel 1 - 2. Tuesday"}, "erman_p134_wednesday": {"name": "P134 Channel 1 - 3. Wednesday"}, "erman_p134_thursday": {"name": "P134 Channel 1 - 4. Thursday"}, "erman_p134_friday": {"name": "P134 Channel 1 - 5. Friday"}, "erman_p134_saturday": {"name": "P134 Channel 1 - 6. Saturday"}, "erman_p134_sunday": {"name": "P134 Channel 1 - 7. Sunday"},
       "erman_p137_monday": {"name": "P137 Channel 2 - 1. Monday"}, "erman_p137_tuesday": {"name": "P137 Channel 2 - 2. Tuesday"}, "erman_p137_wednesday": {"name": "P137 Channel 2 - 3. Wednesday"}, "erman_p137_thursday": {"name": "P137 Channel 2 - 4. Thursday"}, "erman_p137_friday": {"name": "P137 Channel 2 - 5. Friday"}, "erman_p137_saturday": {"name": "P137 Channel 2 - 6. Saturday"}, "erman_p137_sunday": {"name": "P137 Channel 2 - 7. Sunday"}
     },

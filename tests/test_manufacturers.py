@@ -188,7 +188,11 @@ def test_zuked_310_4_0s1_is_canonical_and_discoverable():
 
 
 def test_only_documented_command_equipment_loads_button_platform():
-    expected = {("Dyna Drive", "DN310"), ("ERMAN", "ERG22005")}
+    expected = {
+        ("4VRS", "SamsungESP32Modbus"),
+        ("Dyna Drive", "DN310"),
+        ("ERMAN", "ERG22005"),
+    }
     for manufacturer, class_names in get_equipment_classes_by_manufacturer().items():
         for class_name in class_names:
             instance = get_class(manufacturer, class_name)(None, 1)

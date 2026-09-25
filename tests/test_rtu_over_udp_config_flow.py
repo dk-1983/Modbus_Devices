@@ -298,7 +298,7 @@ def test_gateway_connection_key_ignores_local_bind_routing_details():
 def test_s2000_ethernet_is_not_an_equipment_model():
     equipment = get_equipment_classes_by_manufacturer()
     assert [len(equipment[name]) for name in equipment] == [
-        1,
+        2,
         1,
         29,
         1,

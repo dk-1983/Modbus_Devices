@@ -40,7 +40,7 @@ def test_every_registered_model_has_one_canonical_category():
         for equipment_class in _get_equipment_classes(manufacturer.canonical_name)
     ]
 
-    assert len(classes) == 39
+    assert len(classes) == 40
     assert all(
         isinstance(equipment_class.equipment_category, EquipmentCategory)
         for equipment_class in classes
@@ -56,10 +56,10 @@ def test_catalog_contains_every_model_exactly_once():
         for class_name in class_names
     ]
 
-    assert len(flattened) == 39
+    assert len(flattened) == 40
     assert (
         len({(manufacturer, class_name) for _, manufacturer, class_name in flattened})
-        == 39
+        == 40
     )
     assert catalog[EquipmentCategory.VARIABLE_FREQUENCY_DRIVES]["ERMAN"] == ["ERG22005"]
     assert catalog[EquipmentCategory.BUILDING_AUTOMATION]["Bolid"] == ["M3000BB1020"]
