@@ -8,108 +8,18 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
-## Upcoming — ERMAN time-relay schedule
+## Documentation map
 
-The ER-G-220-05 time relay now exposes P132/P135 as native Home Assistant time
-controls and P134/P137 as individual Monday-through-Sunday switches for each
-channel. Time writes use the documented decimal `HH.MM` representation and
-minute precision. Each weekday change performs a serialized FC03 read, changes
-only its documented bit, writes the complete mask with FC06, and requires exact
-FC03 readback, preserving every other bit.
+- [Key features](#key-features)
+- [Installation](#installation)
+- [Adding equipment](#adding-equipment)
+- [Supported transports](#supported-transports)
+- [Supported equipment](#supported-equipment)
+- [Troubleshooting](#troubleshooting)
+- [Release history](https://github.com/dk-1983/Modbus_Devices/releases)
 
-The configuration audit now covers every documented P001-P137 setting. P122
-(slave address) and P123 (baud rate) remain intentionally unavailable because
-changing either can strand the active connection. P127/P128 are drive clock
-fields, not relay-schedule fields, and remain pending a dedicated RTC control
-and physical validation. All other non-reserved settings are represented.
-
-## New in 1.7.1 — ERMAN device identity fix
-
-All ER-G-220-05 numeric configuration parameters now attach to the same Home
-Assistant device as its runtime sensors and other controls. This removes the
-spurious second “Variable-frequency drive” device introduced in 1.6.0. Numeric
-and enumerated parameter names now also follow the selected Home Assistant
-English/Russian language instead of being forced to English.
-
-## New in 1.7.0 — Samsung MIM-B19N(T)
-
-Samsung MIM-B19N and MIM-B19NT are now represented by one shared
-**MIM-B19N(T)** profile under `Climate control and cooling → Samsung`. The
-profile uses the standard register map from Samsung's common interface manual,
-supports power, operating mode, target/current temperature, fan speed and
-vertical airflow, and exposes gateway/unit communication and error diagnostics.
-
-Setup distinguishes the Modbus slave address of the MIM board from the Samsung
-unit address behind it (0–47). No connected air-conditioner model is requested:
-the MIM maintains the Samsung R1/R2 connection and presents its unit slots to
-Modbus. The implementation is covered by protocol-level tests; physical-board
-validation is still pending.
-
-## New in 1.6.0 — ERMAN configuration controls
-
-ERMAN ER-G-220-05 now exposes 25 numeric and 12 enumerated configuration
-parameters from protocol pages 8–9. Parameter names retain their documented
-`Pxxx` identifiers, values use the documented scales and limits, and dependent
-limits follow the live P006/P102 values.
-
-Configuration is refreshed with two grouped FC03 reads every 30 seconds,
-separately from the existing one-second runtime snapshot. Every change uses a
-serialized FC06 transaction, validates the mirrored response, and requires an
-exact FC03 readback before Home Assistant publishes the new value. Reserved
-registers are never written. P122 (slave ID) and P123 (baud rate) deliberately
-remain unavailable: change them on the drive and recreate its connection so a
-write cannot strand an active integration.
-
-Changing P006 only updates the allowed ranges of its dependent pressure
-parameters; the integration never rewrites their values. When P102 is lowered
-below the live P101 value, P101 is safely lowered and confirmed first, then P102
-is written.
-Every ERMAN FC05/FC06 write is recorded in the Home Assistant log with the
-slave, function, address, parameter or command, raw value, and confirmation;
-connection credentials are never logged.
-
-To collect this audit trail without enabling verbose logging for other
-components, add the following to `configuration.yaml` and restart Home
-Assistant:
-
-```yaml
-logger:
-  logs:
-    custom_components.modbus_devices.equipment.erman: info
-```
-
-Existing configurations require no migration. Update the integration and
-restart Home Assistant.
-
-## New in 1.5.1 — faster ERMAN runtime monitoring
-
-The ERMAN ER-G-220-05 runtime block is now polled once per second instead of
-the integration-wide five-second default. This improves visibility of drive
-state, output frequency, current pressure, and motor current without increasing
-the polling rate of other equipment. The interval is model-owned and fixed;
-users cannot configure an unsafe sub-second rate.
-
-ER-G-220-05 is a Modbus slave/server and cannot initiate a state update. Home
-Assistant, acting as the Modbus master/client, receives only the register values
-that exist when each poll is performed. Polling is therefore not an event log:
-a transition that starts and ends between two one-second polls may still be
-missed. Safety events must continue to rely on the drive's latched fault code
-and its own diagnostics rather than only the instantaneous Home Assistant state.
-
-## New in 1.4.0 — ERMAN pump control and TRM-138 outputs
-
-This release adds the document-derived **ERMAN ER-G-220-05** pump-drive profile
-with grouped runtime monitoring, operating and fault states, explicit command
-buttons, and guarded Y1/Y2 controls. The implementation has automated protocol
-coverage and is ready for validation by the requesting equipment owner.
-
-Owen TRM-138 gains the manual parameters `Состояние ВУ 1…8`. Each output is
-read through FC01 and written through a strictly validated FC05 transaction
-only while it is not assigned to a `C.dr` channel. An exact FC01 readback is
-required before Home Assistant publishes the requested state.
-
-Existing configurations require no migration. Update the integration and
-restart Home Assistant.
+Release-specific changes are documented on the GitHub Releases page. This
+README describes the current integration, supported equipment, and setup.
 
 ## Key features
 
@@ -140,7 +50,7 @@ Native Modbus UDP and RTU-over-UDP use different wire formats. Select the transp
 
 Support is model-specific; a listed manufacturer does not imply support for every product or variant.
 
-### Bolid — direct and Orion equipment
+### [Bolid](https://bolid.ru/) — direct and Orion equipment
 
 | Model | Connection | Main capabilities |
 |---|---|---|
@@ -314,7 +224,7 @@ with Schneider Electric package `apc_hw05_aos722_sumx722_bootmon109.exe` to
 [AOS 7.2.2 / SUMX 7.2.2](https://www.se.com/us/en/download/document/APC_SUMX_EN/)
 and Boot Monitor 1.0.9 before the hardware validation.
 
-### Owen
+### [Owen](https://owen.ru/)
 
 | Model | Connection | Main capabilities |
 |---|---|---|
@@ -338,17 +248,17 @@ new state. The integration never clears a `C.dr` assignment automatically.
 |---|---|---|
 | 310-4.0S1 | Direct Modbus | Read-only AC-drive runtime monitoring and fault diagnostics |
 
-### Dyna Drive
+### [Dyna Drive](https://www.dninno.com/)
 
 | Model | Connection | Main capabilities |
 |---|---|---|
 | DN310 | Direct Modbus | Experimental drive monitoring, diagnostics, and explicit command buttons |
 
-### ERMAN
+### [ERMAN](https://www.erman.ru/)
 
 | Model | Connection | Main capabilities |
 |---|---|---|
-| ER-G-220-05 | Direct Modbus | Pump-drive monitoring and states; one-second runtime polling; start, stop and fault commands; Y1/Y2 control; guarded P001…P136 configuration controls |
+| ER-G-220-05 | Direct Modbus | Pump-drive monitoring and states; one-second runtime polling; start, stop and fault commands; Y1/Y2 control; guarded P001…P137 configuration and time-relay schedule controls |
 
 The initial ER-G-220-05 profile follows the
 [MODBUS protocol document v1.2](https://github.com/user-attachments/files/32493266/protocol_modbus_erg-220-05.pdf)
@@ -362,6 +272,32 @@ equal `4`, execute inside one serialized physical operation, and must pass an
 exact FC01 readback before Home Assistant publishes the new state. Runtime
 monitoring, commands, Y1/Y2 outputs and software-version decoding have been
 confirmed by the requesting user on a physical drive.
+
+Configuration parameters retain their documented `Pxxx` identifiers and use
+the protocol scales and live dependent limits. They are refreshed separately
+from runtime data in two grouped FC03 reads every 30 seconds. Writes are
+serialized, require a valid mirrored FC06 response and exact FC03 readback, and
+are published only after confirmation. Changing P006 updates dependent allowed
+ranges without rewriting their values. If P102 is lowered below P101, P101 is
+lowered and confirmed first.
+
+P132/P135 are native time controls; P134/P137 expose individual weekday
+switches for both time-relay channels. P122 (slave address) and P123 (baud rate)
+are intentionally not writable because changing them could strand the active
+connection. Reconfigure those values on the drive and recreate the integration
+entry. P127/P128 drive-clock fields await dedicated RTC control and physical
+validation. Reserved registers are never written.
+
+The one-second runtime poll improves visibility but is not an event log: a
+short transition between polls may still be missed. Safety monitoring must rely
+on the drive's latched fault code and built-in diagnostics. To record confirmed
+ERMAN FC05/FC06 writes without enabling verbose logging elsewhere, add:
+
+```yaml
+logger:
+  logs:
+    custom_components.modbus_devices.equipment.erman: info
+```
 
 ## Installation
 
@@ -522,12 +458,6 @@ Equipment implementations are manufacturer- and model-specific. Validation uses 
 - [Issues](https://github.com/dk-1983/Modbus_Devices/issues)
 - [Releases](https://github.com/dk-1983/Modbus_Devices/releases)
 - [License](LICENSE.md)
-- [Bolid](https://bolid.ru/)
-- [Daikin RTD-RA](https://www.daikin.eu/en_us/products/product.html/RTD-RA.html)
-- [Dyna Drive](https://www.dninno.com/)
-- [ERMAN](https://www.erman.ru/)
-- [Haier YCJ-A002](https://haier-rus.ru/product/ycj-a002-soglasovatel/)
-- [Owen](https://owen.ru/)
 
 ## Author
 
