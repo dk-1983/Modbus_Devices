@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time as dt_time, timedelta
 from enum import IntEnum
 import logging
 import math
@@ -66,6 +66,20 @@ class SelectParameter:
     name: str
     address: int
     options: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TimeParameter:
+    parameter: str
+    name: str
+    address: int
+
+
+@dataclass(frozen=True, slots=True)
+class WeekdayParameter:
+    parameter: str
+    name: str
+    address: int
 
 
 RUNTIME_BASE_ADDRESS = 2000
@@ -206,6 +220,26 @@ SELECT_PARAMETERS = (
     SelectParameter(
         "p131", "P131 Relay outputs on fault", 1131, ("keep_running", "turn_off")
     ),
+)
+
+TIME_PARAMETERS = (
+    TimeParameter("p132", "P132 Channel 1 start time", 1132),
+    TimeParameter("p135", "P135 Channel 2 start time", 1135),
+)
+
+WEEKDAYS = (
+    ("monday", 0),
+    ("tuesday", 1),
+    ("wednesday", 2),
+    ("thursday", 3),
+    ("friday", 4),
+    ("saturday", 5),
+    ("sunday", 6),
+)
+
+WEEKDAY_PARAMETERS = (
+    WeekdayParameter("p134", "P134 Channel 1 active days", 1134),
+    WeekdayParameter("p137", "P137 Channel 2 active days", 1137),
 )
 
 NUMBER_BY_ID = {item.parameter: item for item in NUMBER_PARAMETERS}
@@ -365,6 +399,7 @@ class ERG22005:
             Platform.SWITCH,
             Platform.NUMBER,
             Platform.SELECT,
+            Platform.TIME,
         ]
         self.attr_unique_id_prefix = None
         self.attr_device_identifier = None
@@ -494,8 +529,8 @@ class ERG22005:
 
     @staticmethod
     def get_switch_descriptions() -> list[dict[str, Any]]:
-        """Describe the two documented Y1/Y2 state-command coils."""
-        return [
+        """Describe Y1/Y2 controls and the two documented weekday masks."""
+        outputs = [
             {
                 "switch_id": "output_y1",
                 "name": "State / command - Y1",
@@ -509,6 +544,18 @@ class ERG22005:
                 "icon": "mdi:electric-switch",
             },
         ]
+        schedule_days = [
+            {
+                "switch_id": f"{parameter.parameter}_{weekday}",
+                "name": f"{parameter.name} - {weekday}",
+                "translation_key": f"erman_{parameter.parameter}_{weekday}",
+                "entity_category": EntityCategory.CONFIG,
+                "icon": "mdi:calendar-check",
+            }
+            for parameter in WEEKDAY_PARAMETERS
+            for weekday, _bit in WEEKDAYS
+        ]
+        return [*outputs, *schedule_days]
 
     @staticmethod
     def get_number_descriptions() -> list[dict[str, Any]]:
@@ -541,6 +588,20 @@ class ERG22005:
                 "icon": "mdi:tune-variant",
             }
             for item in SELECT_PARAMETERS
+        ]
+
+    @staticmethod
+    def get_time_descriptions() -> list[dict[str, Any]]:
+        """Describe the two documented time-relay start times."""
+        return [
+            {
+                "time_id": item.parameter,
+                "name": item.name,
+                "translation_key": f"erman_{item.parameter}",
+                "entity_category": EntityCategory.CONFIG,
+                "icon": "mdi:clock-outline",
+            }
+            for item in TIME_PARAMETERS
         ]
 
     async def _async_get_snapshot_on(self, client) -> dict[str, dict]:
@@ -583,7 +644,14 @@ class ERG22005:
         ):
             self._settings_cache = await self._read_settings_on(client)
             self._settings_refresh_at = time.monotonic() + SETTINGS_REFRESH_INTERVAL
-        snapshot.update(self._settings_cache)
+        snapshot["switches"].update(self._settings_cache.get("switches", {}))
+        snapshot.update(
+            {
+                key: value
+                for key, value in self._settings_cache.items()
+                if key != "switches"
+            }
+        )
         return snapshot
 
     async def async_get_snapshot(self) -> dict[str, dict]:
@@ -631,7 +699,30 @@ class ERG22005:
                 }
                 for item in SELECT_PARAMETERS
             },
+            "times": {
+                item.parameter: {
+                    "value": self._decode_hhmm(raw[item.address]),
+                    "raw_register": raw[item.address],
+                }
+                for item in TIME_PARAMETERS
+            },
+            "switches": {
+                f"{parameter.parameter}_{weekday}": {
+                    "state": bool(raw[parameter.address] & (1 << bit)),
+                    "raw_register": raw[parameter.address],
+                }
+                for parameter in WEEKDAY_PARAMETERS
+                for weekday, bit in WEEKDAYS
+            },
         }
+
+    @staticmethod
+    def _decode_hhmm(raw: int) -> dt_time | None:
+        """Decode the documented decimal HH.MM register representation."""
+        hour, minute = divmod(raw, 100)
+        if hour > 23 or minute > 59:
+            return None
+        return dt_time(hour=hour, minute=minute)
 
     async def async_set_number(self, number_id: str, value: float) -> float:
         """Write one scaled P parameter and require exact FC03 readback."""
@@ -728,6 +819,27 @@ class ERG22005:
 
         return await self._execute_serialized(execute)
 
+    async def async_set_time(self, time_id: str, value: dt_time) -> dt_time:
+        """Write one minute-resolution time-relay value with exact readback."""
+        item = next(
+            (item for item in TIME_PARAMETERS if item.parameter == time_id), None
+        )
+        if item is None:
+            raise ValueError(f"Unknown ER-G-220-05 time: {time_id}")
+        if not isinstance(value, dt_time):
+            raise ValueError(f"{item.parameter.upper()} must be a time")
+        if value.second or value.microsecond:
+            raise ValueError(f"{item.parameter.upper()} supports minute precision only")
+        raw = value.hour * 100 + value.minute
+
+        async def execute(client) -> dt_time:
+            await self._write_register_confirmed_on(
+                client, item.address, raw, item.parameter
+            )
+            return value
+
+        return await self._execute_serialized(execute)
+
     async def _write_register_confirmed_on(
         self, client, address: int, value: int, parameter: str
     ) -> None:
@@ -815,15 +927,50 @@ class ERG22005:
         )
 
     async def async_set_switch(self, switch_id: str, value: bool) -> bool:
-        """Set Y1/Y2 only when its documented function parameter equals four."""
+        """Set a confirmed Y output or one bit of a schedule weekday mask."""
         mapping = {
             "output_y1": (13, 1118, "P118"),
             "output_y2": (14, 1120, "P120"),
         }
-        if switch_id not in mapping:
-            raise ValueError(f"Unknown ER-G-220-05 switch: {switch_id}")
         if type(value) is not bool:
             raise ValueError("ER-G-220-05 output state must be boolean")
+        schedule_mapping = {
+            f"{parameter.parameter}_{weekday}": (parameter, bit)
+            for parameter in WEEKDAY_PARAMETERS
+            for weekday, bit in WEEKDAYS
+        }
+        if switch_id in schedule_mapping:
+            parameter, bit = schedule_mapping[switch_id]
+
+            async def update_schedule_day(client) -> bool:
+                response = await client.read_holding_registers(
+                    address=parameter.address,
+                    count=1,
+                    device_id=self.attr_device_id,
+                )
+                self._validate_response_device_id(
+                    response, f"read ER-G {parameter.parameter.upper()} weekday mask"
+                )
+                current = validated_registers(
+                    response,
+                    1,
+                    f"read ER-G {parameter.parameter.upper()} weekday mask",
+                    expected_function=3,
+                )[0]
+                mask = 1 << bit
+                updated = current | mask if value else current & ~mask
+                if updated != current:
+                    await self._write_register_confirmed_on(
+                        client,
+                        parameter.address,
+                        updated,
+                        parameter.parameter,
+                    )
+                return value
+
+            return await self._execute_serialized(update_schedule_day)
+        if switch_id not in mapping:
+            raise ValueError(f"Unknown ER-G-220-05 switch: {switch_id}")
         coil_address, function_address, parameter = mapping[switch_id]
 
         async def execute(client) -> bool:

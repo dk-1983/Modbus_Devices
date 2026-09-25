@@ -113,12 +113,18 @@
       "erman_start": {"name": "Start"}, "erman_stop": {"name": "Stop"}, "erman_emergency_stop": {"name": "Emergency stop"}, "erman_save_parameters": {"name": "Save parameters to EEPROM"}, "erman_load_parameters": {"name": "Load parameters from EEPROM"}, "erman_reset_fault": {"name": "Reset fault"}
     },
     "switch": {
-      "erman_output_y1": {"name": "State / command - Y1"}, "erman_output_y2": {"name": "State / command - Y2"}
+      "erman_output_y1": {"name": "State / command - Y1"}, "erman_output_y2": {"name": "State / command - Y2"},
+      "erman_p134_monday": {"name": "P134 Channel 1 - Monday"}, "erman_p134_tuesday": {"name": "P134 Channel 1 - Tuesday"}, "erman_p134_wednesday": {"name": "P134 Channel 1 - Wednesday"}, "erman_p134_thursday": {"name": "P134 Channel 1 - Thursday"}, "erman_p134_friday": {"name": "P134 Channel 1 - Friday"}, "erman_p134_saturday": {"name": "P134 Channel 1 - Saturday"}, "erman_p134_sunday": {"name": "P134 Channel 1 - Sunday"},
+      "erman_p137_monday": {"name": "P137 Channel 2 - Monday"}, "erman_p137_tuesday": {"name": "P137 Channel 2 - Tuesday"}, "erman_p137_wednesday": {"name": "P137 Channel 2 - Wednesday"}, "erman_p137_thursday": {"name": "P137 Channel 2 - Thursday"}, "erman_p137_friday": {"name": "P137 Channel 2 - Friday"}, "erman_p137_saturday": {"name": "P137 Channel 2 - Saturday"}, "erman_p137_sunday": {"name": "P137 Channel 2 - Sunday"}
     },
     "number": {
       "erman_p001": {"name": "P001 Pressure setpoint"}, "erman_p002": {"name": "P002 Proportional coefficient"}, "erman_p003": {"name": "P003 Integration time"}, "erman_p004": {"name": "P004 Start duration"}, "erman_p005": {"name": "P005 Emergency pressure threshold"}, "erman_p006": {"name": "P006 Pressure sensor limit"},
       "erman_p101": {"name": "P101 Manual frequency"}, "erman_p102": {"name": "P102 Upper frequency limit"}, "erman_p103": {"name": "P103 Lower frequency limit"}, "erman_p104": {"name": "P104 Starting frequency"}, "erman_p105": {"name": "P105 Starting-frequency voltage"}, "erman_p106": {"name": "P106 Motor-start test frequency"}, "erman_p107": {"name": "P107 Motor-start wait time"}, "erman_p108": {"name": "P108 Leak-test period"}, "erman_p109": {"name": "P109 Leak-detection pressure difference"}, "erman_p110": {"name": "P110 Flow-test period"}, "erman_p111": {"name": "P111 Flow-detection pressure difference"}, "erman_p112": {"name": "P112 Test duration"}, "erman_p113": {"name": "P113 Dry-run pressure threshold"}, "erman_p114": {"name": "P114 Dry-run detection time"}, "erman_p115": {"name": "P115 Start pressure difference"}, "erman_p116": {"name": "P116 Motor-start pressure difference"},
       "erman_p129": {"name": "P129 Current year"}, "erman_p133": {"name": "P133 Channel 1 duration"}, "erman_p136": {"name": "P136 Channel 2 duration"}
+    },
+    "time": {
+      "erman_p132": {"name": "P132 Channel 1 start time"},
+      "erman_p135": {"name": "P135 Channel 2 start time"}
     },
     "select": {
       "erman_p008": {"name": "P008 Main-menu mode", "state": {"pressure": "Pressure", "frequency": "Frequency"}},

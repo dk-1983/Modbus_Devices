@@ -8,6 +8,21 @@
 
 Modbus Devices is a local Home Assistant integration for explicitly supported industrial and building-automation equipment. Each physical instrument becomes one Home Assistant device with useful entities, validated communication, and model-specific behavior.
 
+## Upcoming — ERMAN time-relay schedule
+
+The ER-G-220-05 time relay now exposes P132/P135 as native Home Assistant time
+controls and P134/P137 as individual Monday-through-Sunday switches for each
+channel. Time writes use the documented decimal `HH.MM` representation and
+minute precision. Each weekday change performs a serialized FC03 read, changes
+only its documented bit, writes the complete mask with FC06, and requires exact
+FC03 readback, preserving every other bit.
+
+The configuration audit now covers every documented P001-P137 setting. P122
+(slave address) and P123 (baud rate) remain intentionally unavailable because
+changing either can strand the active connection. P127/P128 are drive clock
+fields, not relay-schedule fields, and remain pending a dedicated RTC control
+and physical validation. All other non-reserved settings are represented.
+
 ## New in 1.7.1 — ERMAN device identity fix
 
 All ER-G-220-05 numeric configuration parameters now attach to the same Home

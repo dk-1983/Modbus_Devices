@@ -1,6 +1,6 @@
 """Document-derived tests for the ERMAN ER-G-220-05 drive."""
 
-from datetime import timedelta
+from datetime import time, timedelta
 import logging
 from types import SimpleNamespace
 
@@ -26,6 +26,8 @@ from custom_components.modbus_devices.equipment.erman import (
     RUNTIME_BASE_ADDRESS,
     RUNTIME_REGISTER_COUNT,
     SELECT_PARAMETERS,
+    TIME_PARAMETERS,
+    WEEKDAY_PARAMETERS,
 )
 from custom_components.modbus_devices.number import ModBusNumberEntity
 from custom_components.modbus_devices.select import ModBusSelectEntity
@@ -34,6 +36,7 @@ from custom_components.modbus_devices.sensor import (
     ModBusStateSensorEntity,
 )
 from custom_components.modbus_devices.switch import ModBusDescribedSwitchEntity
+from custom_components.modbus_devices.time import ModBusTimeEntity
 
 
 class Response:
@@ -166,6 +169,7 @@ def test_registry_and_metadata_are_canonical_and_mark_hardware_status():
         Platform.SWITCH,
         Platform.NUMBER,
         Platform.SELECT,
+        Platform.TIME,
     ]
     assert device.attr_device_metadata["documented_software_version"] == "01.25"
     assert device.attr_device_metadata["writes"] == (
@@ -225,6 +229,35 @@ def test_configuration_descriptions_cover_safe_protocol_parameters():
     assert selects["p118"]["options"][-1] == "time_relay"
     assert "p122" not in numbers
     assert "p123" not in selects
+
+    times = {item["time_id"]: item for item in device.get_time_descriptions()}
+    switches = {item["switch_id"]: item for item in device.get_switch_descriptions()}
+    assert set(times) == {"p132", "p135"}
+    assert times["p132"]["translation_key"] == "erman_p132"
+    assert "p134_monday" in switches
+    assert "p137_sunday" in switches
+    assert switches["p134_monday"]["translation_key"] == "erman_p134_monday"
+
+
+def test_configuration_coverage_has_only_intentional_non_schedule_gaps():
+    implemented = {
+        *(item.parameter for item in NUMBER_PARAMETERS),
+        *(item.parameter for item in SELECT_PARAMETERS),
+        *(item.parameter for item in TIME_PARAMETERS),
+        *(item.parameter for item in WEEKDAY_PARAMETERS),
+    }
+    documented = {
+        "p001",
+        "p002",
+        "p003",
+        "p004",
+        "p005",
+        "p006",
+        "p008",
+        *(f"p{number}" for number in range(100, 138)),
+    }
+
+    assert documented - implemented == {"p122", "p123", "p127", "p128"}
 
 
 @pytest.mark.asyncio
@@ -345,10 +378,86 @@ async def test_select_write_uses_documented_code_and_exact_readback():
 
 
 @pytest.mark.asyncio
+async def test_schedule_time_write_uses_decimal_hhmm_and_exact_readback():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    device = ERG22005(client, 4)
+
+    confirmed = await device.async_set_time("p132", time(7, 5))
+
+    assert confirmed == time(7, 5)
+    assert client.logical_operations == 1
+    assert client.write_calls == [{"address": 1132, "value": 705, "device_id": 4}]
+    assert client.holding_calls[-1] == {
+        "address": 1132,
+        "count": 1,
+        "device_id": 4,
+    }
+
+
+@pytest.mark.asyncio
+async def test_schedule_time_rejects_seconds_and_unknown_parameter_without_io():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    device = ERG22005(client, 4)
+
+    with pytest.raises(ValueError, match="minute precision"):
+        await device.async_set_time("p132", time(7, 5, 1))
+    with pytest.raises(ValueError, match="Unknown ER-G-220-05 time"):
+        await device.async_set_time("p999", time(7, 5))
+
+    assert client.write_calls == []
+
+
+def test_schedule_time_decoder_rejects_invalid_hhmm_without_losing_snapshot():
+    assert ERG22005._decode_hhmm(0) == time(0, 0)
+    assert ERG22005._decode_hhmm(2359) == time(23, 59)
+    assert ERG22005._decode_hhmm(1260) is None
+    assert ERG22005._decode_hhmm(2400) is None
+
+
+@pytest.mark.asyncio
+async def test_weekday_switch_preserves_every_other_mask_bit():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    client.settings[1134] = 0x8000 | (1 << 0) | (1 << 6)
+    device = ERG22005(client, 4)
+
+    confirmed = await device.async_set_switch("p134_wednesday", True)
+
+    assert confirmed is True
+    assert client.logical_operations == 1
+    assert client.write_calls == [
+        {
+            "address": 1134,
+            "value": 0x8000 | (1 << 0) | (1 << 2) | (1 << 6),
+            "device_id": 4,
+        }
+    ]
+    assert client.settings[1134] & 0x8000
+    assert client.settings[1134] & (1 << 0)
+    assert client.settings[1134] & (1 << 2)
+    assert client.settings[1134] & (1 << 6)
+
+
+@pytest.mark.asyncio
+async def test_weekday_switch_skips_write_when_bit_already_matches():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    client.settings[1137] = 1 << 6
+
+    confirmed = await ERG22005(client, 4).async_set_switch("p137_sunday", True)
+
+    assert confirmed is True
+    assert client.logical_operations == 1
+    assert client.write_calls == []
+
+
+@pytest.mark.asyncio
 async def test_settings_are_grouped_and_cached_between_fast_runtime_polls():
     client = Client(Response(RUNTIME_VECTOR, dev_id=5))
     client.settings[1006] = 600
     client.settings[1109] = 125
+    client.settings[1132] = 730
+    client.settings[1134] = (1 << 0) | (1 << 4)
+    client.settings[1135] = 2215
+    client.settings[1137] = 1 << 6
     device = ERG22005(client, 5)
 
     first = await device.async_get_snapshot()
@@ -357,6 +466,12 @@ async def test_settings_are_grouped_and_cached_between_fast_runtime_polls():
     assert first["numbers"]["p006"]["value"] == 6.0
     assert first["numbers"]["p109"]["value"] == 1.25
     assert second["numbers"] == first["numbers"]
+    assert first["times"]["p132"]["value"] == time(7, 30)
+    assert first["times"]["p135"]["value"] == time(22, 15)
+    assert first["switches"]["p134_monday"]["state"] is True
+    assert first["switches"]["p134_friday"]["state"] is True
+    assert first["switches"]["p134_tuesday"]["state"] is False
+    assert first["switches"]["p137_sunday"]["state"] is True
     setting_reads = [
         call for call in client.holding_calls if call["address"] in (1001, 1100)
     ]
@@ -459,10 +574,10 @@ async def test_snapshot_uses_one_exact_fc04_request_and_device_identity():
         snapshot["state_sensors"]
         == ERG22005.decode_runtime(RUNTIME_VECTOR)["state_sensors"]
     )
-    assert snapshot["switches"] == {
-        "output_y1": {"state": False},
-        "output_y2": {"state": False},
-    }
+    assert snapshot["switches"]["output_y1"] == {"state": False}
+    assert snapshot["switches"]["output_y2"] == {"state": False}
+    assert snapshot["switches"]["p134_monday"]["state"] is False
+    assert snapshot["switches"]["p137_sunday"]["state"] is False
 
 
 @pytest.mark.asyncio
@@ -753,3 +868,33 @@ async def test_generic_number_and_select_entities_publish_confirmed_settings():
         (("numbers", "p109", "value"), 1.5),
         (("selects", "p117", "state"), "rs485"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_generic_time_entity_publishes_confirmed_schedule_value():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=1))
+    device = ERG22005(client, 1)
+    coordinator = SimpleNamespace(
+        data={"times": {"p132": {"value": time(6, 30)}}},
+        device=device,
+        last_update_success=True,
+    )
+    patches = []
+
+    def apply(path, value):
+        patches.append((path, value))
+        coordinator.data[path[0]][path[1]][path[2]] = value
+
+    coordinator.async_apply_confirmed_write = apply
+    entry = SimpleNamespace(entry_id="erg")
+    description = next(
+        item for item in device.get_time_descriptions() if item["time_id"] == "p132"
+    )
+    entity = ModBusTimeEntity(coordinator, device, entry, description)
+
+    assert entity.native_value == time(6, 30)
+    assert entity.translation_key == "erman_p132"
+    await entity.async_set_value(time(7, 45))
+
+    assert entity.native_value == time(7, 45)
+    assert patches == [(("times", "p132", "value"), time(7, 45))]
