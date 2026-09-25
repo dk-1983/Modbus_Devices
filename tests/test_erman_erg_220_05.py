@@ -1,6 +1,7 @@
 """Document-derived tests for the ERMAN ER-G-220-05 drive."""
 
 from datetime import timedelta
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -255,6 +256,84 @@ async def test_dynamic_limit_and_decimal_step_are_enforced_before_write():
 
 
 @pytest.mark.asyncio
+async def test_lowering_p102_clamps_p101_first_and_confirms_both_writes(caplog):
+    client = Client(Response(RUNTIME_VECTOR, dev_id=1))
+    client.settings[1101] = 500
+    client.settings[1102] = 500
+    device = ERG22005(client, 1)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="custom_components.modbus_devices.equipment.erman",
+    ):
+        confirmed = await device.async_set_number("p102", 45.0)
+
+    assert confirmed == 45.0
+    assert client.logical_operations == 1
+    assert client.write_calls == [
+        {"address": 1101, "value": 450, "device_id": 1},
+        {"address": 1102, "value": 450, "device_id": 1},
+    ]
+    assert client.settings[1101] == 450
+    assert client.settings[1102] == 450
+    assert "ERMAN dependent clamp" in caplog.text
+    assert "parameter=P101 raw_value=450" in caplog.text
+    assert "parameter=P102 raw_value=450" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_p102_does_not_change_p101_when_it_is_already_within_limit():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=1))
+    client.settings[1101] = 400
+    client.settings[1102] = 500
+
+    confirmed = await ERG22005(client, 1).async_set_number("p102", 45.0)
+
+    assert confirmed == 45.0
+    assert client.write_calls == [{"address": 1102, "value": 450, "device_id": 1}]
+    assert client.settings[1101] == 400
+
+
+@pytest.mark.asyncio
+async def test_failed_p101_clamp_leaves_p102_untouched():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=1))
+    client.settings[1101] = 500
+    client.settings[1102] = 500
+
+    async def reject_p101(**kwargs):
+        client.write_calls.append(kwargs)
+        return Response(
+            function_code=6,
+            address=kwargs["address"],
+            value=449,
+            dev_id=kwargs["device_id"],
+        )
+
+    client.write_register = reject_p101
+
+    with pytest.raises(ModbusException, match="Wrong FC06 value echo"):
+        await ERG22005(client, 1).async_set_number("p102", 45.0)
+
+    assert client.write_calls == [{"address": 1101, "value": 450, "device_id": 1}]
+    assert client.settings[1102] == 500
+
+
+@pytest.mark.asyncio
+async def test_p006_write_never_rewrites_dependent_pressure_parameters():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=1))
+    dependent_addresses = (1001, 1005, 1109, 1111, 1113, 1115, 1116)
+    before = {address: client.settings[address] for address in dependent_addresses}
+
+    confirmed = await ERG22005(client, 1).async_set_number("p006", 10.0)
+
+    assert confirmed == 10.0
+    assert client.write_calls == [{"address": 1006, "value": 1000, "device_id": 1}]
+    assert {
+        address: client.settings[address] for address in dependent_addresses
+    } == before
+
+
+@pytest.mark.asyncio
 async def test_select_write_uses_documented_code_and_exact_readback():
     client = Client(Response(RUNTIME_VECTOR, dev_id=4))
     device = ERG22005(client, 4)
@@ -462,6 +541,7 @@ async def test_documented_command_buttons_use_only_non_reserved_fc05_addresses(
     button_id,
     translation_key,
     address,
+    caplog,
 ):
     client = Client(Response(RUNTIME_VECTOR))
     device = ERG22005(client, 3)
@@ -472,9 +552,16 @@ async def test_documented_command_buttons_use_only_non_reserved_fc05_addresses(
     )
 
     assert description["translation_key"] == translation_key
-    await device.async_send_command(description["command"])
+    with caplog.at_level(
+        logging.INFO,
+        logger="custom_components.modbus_devices.equipment.erman",
+    ):
+        await device.async_send_command(description["command"])
 
     assert client.write_calls == [{"address": address, "value": True, "device_id": 3}]
+    assert f"address={address}" in caplog.text
+    assert "ERMAN FC05 command requested" in caplog.text
+    assert "ERMAN FC05 command confirmed" in caplog.text
 
 
 @pytest.mark.asyncio

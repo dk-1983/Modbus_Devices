@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import IntEnum
+import logging
 import math
 import time
 from typing import Any
@@ -29,6 +30,8 @@ from ..modbus_validation import (
     validated_bits,
     validated_registers,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -669,6 +672,38 @@ class ERG22005:
                 raise ValueError(
                     f"{item.parameter.upper()} must be {item.minimum}..{maximum}"
                 )
+            if number_id == "p102":
+                manual_frequency = NUMBER_BY_ID["p101"]
+                response = await client.read_holding_registers(
+                    address=manual_frequency.address,
+                    count=1,
+                    device_id=self.attr_device_id,
+                )
+                self._validate_response_device_id(
+                    response, "read ER-G P101 before lowering P102"
+                )
+                current_p101_raw = validated_registers(
+                    response,
+                    1,
+                    "read ER-G P101 before lowering P102",
+                    expected_function=3,
+                )[0]
+                if current_p101_raw > raw:
+                    _LOGGER.info(
+                        "ERMAN dependent clamp: slave=%s P101 raw value %s "
+                        "exceeds requested P102 raw value %s",
+                        self.attr_device_id,
+                        current_p101_raw,
+                        raw,
+                    )
+                    # Lower P101 first while the previous P102 limit is still
+                    # active. If this confirmed write fails, P102 is untouched.
+                    await self._write_register_confirmed_on(
+                        client,
+                        manual_frequency.address,
+                        raw,
+                        manual_frequency.parameter,
+                    )
             await self._write_register_confirmed_on(
                 client, item.address, raw, item.parameter
             )
@@ -696,6 +731,13 @@ class ERG22005:
     async def _write_register_confirmed_on(
         self, client, address: int, value: int, parameter: str
     ) -> None:
+        _LOGGER.info(
+            "ERMAN FC06 write requested: slave=%s address=%s parameter=%s raw_value=%s",
+            self.attr_device_id,
+            address,
+            parameter.upper(),
+            value,
+        )
         response = await client.write_register(
             address=address,
             value=value,
@@ -725,6 +767,13 @@ class ERG22005:
                 f"ER-G-220-05 {parameter.upper()} readback mismatch: "
                 f"requested {value}, got {actual}"
             )
+        _LOGGER.info(
+            "ERMAN FC06 write confirmed: slave=%s address=%s parameter=%s raw_value=%s",
+            self.attr_device_id,
+            address,
+            parameter.upper(),
+            actual,
+        )
         self._settings_refresh_at = 0.0
 
     async def _execute_serialized(self, operation):
@@ -740,6 +789,12 @@ class ERG22005:
         except ValueError as exc:
             raise ValueError(f"Unsupported ER-G-220-05 command: {command!r}") from exc
 
+        _LOGGER.info(
+            "ERMAN FC05 command requested: slave=%s address=%s command=%s value=true",
+            self.attr_device_id,
+            int(command),
+            command.name,
+        )
         response = await self.attr_client.write_coil(
             address=int(command),
             value=True,
@@ -751,6 +806,12 @@ class ERG22005:
             value=True,
             device_id=self.attr_device_id,
             operation=f"send ER-G-220-05 {command.name.casefold()} command",
+        )
+        _LOGGER.info(
+            "ERMAN FC05 command confirmed: slave=%s address=%s command=%s value=true",
+            self.attr_device_id,
+            int(command),
+            command.name,
         )
 
     async def async_set_switch(self, switch_id: str, value: bool) -> bool:
@@ -787,6 +848,14 @@ class ERG22005:
                     f"{parameter} must equal 4, got {function}"
                 )
 
+            _LOGGER.info(
+                "ERMAN FC05 output write requested: slave=%s address=%s "
+                "output=%s value=%s",
+                self.attr_device_id,
+                coil_address,
+                switch_id,
+                value,
+            )
             response = await client.write_coil(
                 address=coil_address,
                 value=value,
@@ -820,6 +889,14 @@ class ERG22005:
                     f"ER-G-220-05 {switch_id} readback mismatch: "
                     f"requested {value}, got {readback}"
                 )
+            _LOGGER.info(
+                "ERMAN FC05 output write confirmed: slave=%s address=%s "
+                "output=%s value=%s",
+                self.attr_device_id,
+                coil_address,
+                switch_id,
+                readback,
+            )
             return readback
 
         serialized_executor = getattr(

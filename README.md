@@ -45,6 +45,24 @@ registers are never written. P122 (slave ID) and P123 (baud rate) deliberately
 remain unavailable: change them on the drive and recreate its connection so a
 write cannot strand an active integration.
 
+Changing P006 only updates the allowed ranges of its dependent pressure
+parameters; the integration never rewrites their values. When P102 is lowered
+below the live P101 value, P101 is safely lowered and confirmed first, then P102
+is written.
+Every ERMAN FC05/FC06 write is recorded in the Home Assistant log with the
+slave, function, address, parameter or command, raw value, and confirmation;
+connection credentials are never logged.
+
+To collect this audit trail without enabling verbose logging for other
+components, add the following to `configuration.yaml` and restart Home
+Assistant:
+
+```yaml
+logger:
+  logs:
+    custom_components.modbus_devices.equipment.erman: info
+```
+
 Existing configurations require no migration. Update the integration and
 restart Home Assistant.
 
