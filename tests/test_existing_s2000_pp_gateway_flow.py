@@ -80,6 +80,30 @@ class StaticCache:
         return self.configuration
 
 
+class RecordingCache(StaticCache):
+    def __init__(self, configuration: S2000PPConfiguration) -> None:
+        super().__init__(configuration)
+        self.invalidated = []
+
+    def invalidate(self, gateway_id):
+        self.invalidated.append(gateway_id)
+
+
+class RefreshingCache:
+    def __init__(self, stale: S2000PPConfiguration) -> None:
+        self.configuration = stale
+        self.invalidated = []
+
+    async def async_get_or_load(self, gateway_id, loader):
+        if self.configuration is None:
+            self.configuration = await loader()
+        return self.configuration
+
+    def invalidate(self, gateway_id):
+        self.invalidated.append(gateway_id)
+        self.configuration = None
+
+
 def gateway_options(port: str = "COM7") -> dict:
     return {
         Config.CONF_MODBUS_MODE: Config.MODBUS_SERIAL,
@@ -429,6 +453,95 @@ async def test_child_setup_reuses_gateway_client_and_child_unload_does_not_close
     )
     assert await integration.async_unload_entry(hass, child)
     gateway.runtime_data.client.close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_child_reload_invalidates_both_s2000_pp_table_caches():
+    gateway = loaded_gateway()
+    context = GatewayContext(
+        GatewayType.S2000_PP,
+        gateway.unique_id,
+        f"config_entry:{gateway.entry_id}",
+        1,
+    )
+    child_mapping = ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(context, "C2000DZ", 20),
+        MappingSource.MANUAL,
+        (manual_relay_mapping(1, 1),),
+    )
+    child = FakeEntry(
+        "failed-child",
+        options={
+            Config.CONF_GATEWAY_ENTRY_ID: gateway.entry_id,
+            Config.CONF_GATEWAY_MAPPING: child_mapping.to_dict(),
+        },
+    )
+    hass = FakeHass([gateway, child])
+    first = RecordingCache(configuration())
+    second = RecordingCache(configuration())
+    hass.data[Config.DOMAIN] = {
+        "s2000_pp_configuration_cache": first,
+        "s2000_pp_mapping_reconciliation_cache": second,
+    }
+
+    assert await integration.async_unload_entry(hass, child)
+
+    assert first.invalidated == [context.stable_id]
+    assert second.invalidated == [context.stable_id]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_reloads_stale_table_once_before_accepting_mapping(
+    monkeypatch,
+):
+    gateway = GatewayContext(GatewayType.S2000_PP, "PP", "tcp:pp:502", 1)
+    persisted = ResolvedDeviceMapping(
+        DownstreamDeviceIdentity(gateway, "C2000DZ", 20),
+        MappingSource.MANUAL,
+        (manual_relay_mapping(1, 1),),
+    )
+    stale = configuration(10)
+    current = configuration(20)
+    cache = RefreshingCache(stale)
+    hass = SimpleNamespace(
+        data={
+            Config.DOMAIN: {
+                "s2000_pp_mapping_reconciliation_cache": cache,
+            }
+        },
+        config_entries=SimpleNamespace(
+            async_entries=lambda _domain: [],
+            async_update_entry=Mock(),
+        ),
+    )
+
+    class Reader:
+        def __init__(self, *_args):
+            pass
+
+        async def async_read(self):
+            return current
+
+    class Device:
+        @staticmethod
+        def reconcile_gateway_mapping(mapping, live):
+            if not live.zones_for_device(20):
+                raise ValueError("stale")
+            return mapping
+
+    monkeypatch.setattr(integration, "S2000PPConfigurationReader", Reader)
+
+    _options, reconciled = await integration._async_reconcile_gateway_mapping(
+        hass,
+        SimpleNamespace(entry_id="child", data={}, options={}),
+        {},
+        Device,
+        object(),
+        persisted,
+    )
+
+    assert reconciled is persisted
+    assert cache.invalidated == [gateway.stable_id]
 
 
 @pytest.mark.asyncio

@@ -56,6 +56,7 @@ from .s2000_pp import (
     manual_relay_mapping,
     manual_zone_mapping,
 )
+from .s2000_pp_cache import invalidate_s2000_pp_configuration_caches
 
 _TRANSPORT_CHOICES = {
     "modbus_tcp": Config.MODBUS_TCP,
@@ -96,6 +97,18 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
         self._subdevice_address_spec: dict[str, Any] | None = None
         self._gateway_entry_id: str | None = None
         self._discovered_addresses: tuple[int, ...] = ()
+        self._refreshed_gateway_configurations: set[str] = set()
+
+    def _refresh_selected_gateway_configuration_once(self) -> None:
+        """Force one live S2000-PP table read for this config flow."""
+        if self._gateway_context is None:
+            return
+        gateway_id = self._gateway_context.stable_id
+        if gateway_id in self._refreshed_gateway_configurations:
+            return
+        domain_data = self.hass.data.setdefault(Config.DOMAIN, {})
+        invalidate_s2000_pp_configuration_caches(domain_data, gateway_id)
+        self._refreshed_gateway_configurations.add(gateway_id)
 
     # ---------------------------------------------------------
     # STEP 1 - MODE
@@ -1137,6 +1150,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             errors["base"] = "gateway_unavailable"
         else:
             try:
+                self._refresh_selected_gateway_configuration_once()
                 domain_data = self.hass.data.setdefault(Config.DOMAIN, {})
                 cache = domain_data.setdefault(
                     "s2000_pp_configuration_cache", S2000PPConfigurationCache()
@@ -1411,6 +1425,7 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
                 if not client or not client.connected:
                     errors["base"] = "cannot_connect"
                 else:
+                    self._refresh_selected_gateway_configuration_once()
                     domain_data = self.hass.data.setdefault(Config.DOMAIN, {})
                     cache = domain_data.setdefault(
                         "s2000_pp_configuration_cache",
@@ -1480,6 +1495,10 @@ class ModbusDevicesConfigFlow(ConfigFlow, domain=Config.DOMAIN):
             return False
 
         identity = mapping.identity
+        invalidate_s2000_pp_configuration_caches(
+            self.hass.data.setdefault(Config.DOMAIN, {}),
+            identity.gateway.stable_id,
+        )
         if identity.dpls is not None:
             existing_mappings = (
                 (entry.options or entry.data).get(Config.CONF_GATEWAY_MAPPING)

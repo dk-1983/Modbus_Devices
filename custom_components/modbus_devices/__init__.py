@@ -4,7 +4,7 @@ from logging import getLogger
 
 from pymodbus.exceptions import ConnectionException, ModbusException
 
-from homeassistant.const import Platform
+from homeassistant.const import CONF_DEVICE_ID, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import (
@@ -17,11 +17,20 @@ from .const import Config
 from .coordinator import ModbusDeviceCoordinator
 from .dashboard import async_register_dashboard_frontend
 from .equipment.equipment import get_class
-from .gateway import ResolvedDeviceMapping, dpls_ranges_overlap
+from .gateway import (
+    GatewayContext,
+    GatewayType,
+    ResolvedDeviceMapping,
+    dpls_ranges_overlap,
+)
 from .manufacturer import canonicalize_manufacturer_options
 from .modbus_client import connect_modbus
 from .runtime import ModbusDevicesConfigEntry, ModbusDevicesRuntimeData
-from .s2000_pp import S2000PPConfigurationCache, S2000PPConfigurationReader
+from .s2000_pp import (
+    S2000PPConfigurationCache,
+    S2000PPConfigurationReader,
+)
+from .s2000_pp_cache import invalidate_s2000_pp_configuration_caches
 
 _LOGGER = getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(Config.DOMAIN)
@@ -46,20 +55,32 @@ async def _async_reconcile_gateway_mapping(
         S2000PPConfigurationCache(),
     )
     gateway = mapping.identity.gateway
+    reader = S2000PPConfigurationReader(
+        client,
+        gateway.modbus_unit_id,
+    )
     configuration = await cache.async_get_or_load(
         gateway.stable_id,
-        S2000PPConfigurationReader(
-            client,
-            gateway.modbus_unit_id,
-        ).async_read,
+        reader.async_read,
     )
     try:
         reconciled = reconcile(mapping, configuration)
-    except ValueError as exc:
-        raise ConfigEntryError(
-            "Persisted equipment mapping does not match the current S2000-PP "
-            "configuration; reconfigure the device mapping"
-        ) from exc
+    except ValueError:
+        # The converter table may have changed after another child populated
+        # the shared cache. Retry once from the physical gateway before asking
+        # the user to reconfigure a persisted mapping.
+        cache.invalidate(gateway.stable_id)
+        configuration = await cache.async_get_or_load(
+            gateway.stable_id,
+            reader.async_read,
+        )
+        try:
+            reconciled = reconcile(mapping, configuration)
+        except ValueError as refreshed_exc:
+            raise ConfigEntryError(
+                "Persisted equipment mapping does not match the current S2000-PP "
+                "configuration; reconfigure the device mapping"
+            ) from refreshed_exc
 
     async_entries = getattr(hass.config_entries, "async_entries", None)
     if callable(async_entries):
@@ -115,6 +136,64 @@ def _clear_runtime_data(entry: ModbusDevicesConfigEntry) -> None:
     """Discard runtime references after failed setup or successful unload."""
     if hasattr(entry, "runtime_data"):
         del entry.runtime_data
+
+
+def _s2000_pp_gateway_ids_for_entry(
+    hass: HomeAssistant,
+    entry: ModbusDevicesConfigEntry,
+) -> set[str]:
+    """Return S2000-PP cache identities affected by reloading one entry."""
+    options = getattr(entry, "options", {}) or getattr(entry, "data", {})
+    gateway_ids: set[str] = set()
+    mapping_data = options.get(Config.CONF_GATEWAY_MAPPING)
+    if mapping_data:
+        try:
+            mapping = ResolvedDeviceMapping.from_dict(mapping_data)
+        except (KeyError, TypeError, ValueError):
+            pass
+        else:
+            if mapping.identity.gateway.gateway_type is GatewayType.S2000_PP:
+                gateway_ids.add(mapping.identity.gateway.stable_id)
+
+    if (
+        options.get(Config.CONF_MANUFACTURER) == "Bolid"
+        and options.get(Config.CONF_DEVICE_CLASS) == "S2000PP"
+        and not options.get(Config.CONF_GATEWAY_ENTRY_ID)
+    ):
+        gateway_ids.add(
+            GatewayContext(
+                gateway_type=GatewayType.S2000_PP,
+                gateway_id=entry.unique_id or entry.entry_id,
+                connection_key=f"config_entry:{entry.entry_id}",
+                modbus_unit_id=int(options.get(CONF_DEVICE_ID, 1)),
+            ).stable_id
+        )
+        for child in hass.config_entries.async_entries(Config.DOMAIN):
+            child_options = child.options or child.data
+            if child_options.get(Config.CONF_GATEWAY_ENTRY_ID) != entry.entry_id:
+                continue
+            child_mapping = child_options.get(Config.CONF_GATEWAY_MAPPING)
+            if not child_mapping:
+                continue
+            try:
+                gateway_ids.add(
+                    ResolvedDeviceMapping.from_dict(
+                        child_mapping
+                    ).identity.gateway.stable_id
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+    return gateway_ids
+
+
+def _invalidate_s2000_pp_caches_for_entry(
+    hass: HomeAssistant,
+    entry: ModbusDevicesConfigEntry,
+) -> None:
+    """Make the next setup read the S2000-PP table from the gateway."""
+    domain_data = hass.data.setdefault(Config.DOMAIN, {})
+    for gateway_id in _s2000_pp_gateway_ids_for_entry(hass, entry):
+        invalidate_s2000_pp_configuration_caches(domain_data, gateway_id)
 
 
 def _remove_legacy_clock_control(
@@ -363,6 +442,10 @@ async def async_unload_entry(
     entry: ModbusDevicesConfigEntry,
 ) -> bool:
     """Unload ModbusDevices config entry."""
+
+    # A failed child has no runtime_data, but Home Assistant still calls unload
+    # before retrying it. Invalidate first so reload always sees table edits.
+    _invalidate_s2000_pp_caches_for_entry(hass, entry)
 
     if not hasattr(entry, "runtime_data"):
         _LOGGER.warning("Device already removed: %s", entry.entry_id)
