@@ -19,6 +19,24 @@ DEFAULT_SCAN_INTERVAL = timedelta(seconds=5)
 MINIMUM_SCAN_INTERVAL = timedelta(seconds=1)
 
 
+def get_coordinator_name(device) -> str:
+    """Return a useful name for Home Assistant coordinator diagnostics."""
+    if entry_title := getattr(device, "_config_entry_title", None):
+        return str(entry_title)
+
+    manufacturer = getattr(device, "attr_manufactures_name", None)
+    model = getattr(device, "attr_model_name", None)
+    identity = " ".join(str(value) for value in (manufacturer, model) if value)
+    return identity or "Modbus device"
+
+
+def format_exception(exc: Exception) -> str:
+    """Keep exception diagnostics meaningful when its message is empty."""
+    detail = str(exc).strip()
+    exception_type = type(exc).__name__
+    return f"{exception_type}: {detail}" if detail else exception_type
+
+
 def get_poll_interval(device) -> timedelta:
     """Return a validated, load-safe model-specific polling interval."""
     interval = getattr(device, "attr_poll_interval", DEFAULT_SCAN_INTERVAL)
@@ -46,7 +64,7 @@ class ModbusDeviceCoordinator(
         super().__init__(
             hass,
             _LOGGER,
-            name="modbus_device",
+            name=get_coordinator_name(device),
             update_interval=get_poll_interval(device),
         )
 
@@ -109,10 +127,10 @@ class ModbusDeviceCoordinator(
             return data
 
         except ConnectionException as exc:
-            raise UpdateFailed(f"Modbus update failed: {exc}") from exc
+            raise UpdateFailed(f"Modbus update failed: {format_exception(exc)}") from exc
 
         except Exception as exc:
-            raise UpdateFailed(f"Unexpected error: {exc}") from exc
+            raise UpdateFailed(f"Unexpected error: {format_exception(exc)}") from exc
 
     def async_apply_optimistic_write(self, path: tuple, value: object) -> None:
         """Publish a successful write while protecting it from an older poll."""

@@ -330,6 +330,7 @@ async def async_setup_entry(
             client,
             device_id,
         )
+        device._config_entry_title = entry.title
 
         subdevice_address = options.get(Config.CONF_SUBDEVICE_ADDRESS)
         if subdevice_address is not None:
