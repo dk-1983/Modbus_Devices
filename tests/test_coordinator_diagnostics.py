@@ -2,7 +2,13 @@
 
 from types import SimpleNamespace
 
+import pytest
+from pymodbus.exceptions import ModbusException
+
+from homeassistant.helpers.update_coordinator import UpdateFailed
+
 from custom_components.modbus_devices.coordinator import (
+    ModbusDeviceCoordinator,
     format_exception,
     get_coordinator_name,
 )
@@ -40,3 +46,35 @@ def test_exception_message_includes_type_and_detail():
         format_exception(RuntimeError("connection closed"))
         == "RuntimeError: connection closed"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (TimeoutError(), "Modbus update failed: TimeoutError"),
+        (OSError("network down"), "Modbus update failed: OSError: network down"),
+        (
+            ModbusException("invalid response"),
+            "Modbus update failed: ModbusException: Modbus Error: invalid response",
+        ),
+    ],
+)
+async def test_expected_transport_failures_are_not_reported_as_unexpected(
+    failure, expected
+):
+    """Communication failures use one actionable coordinator classification."""
+
+    class Device:
+        async def async_get_snapshot(self):
+            raise failure
+
+    coordinator = object.__new__(ModbusDeviceCoordinator)
+    coordinator.device = Device()
+    coordinator._write_generation = 0
+    coordinator._pending_write_patches = {}
+
+    with pytest.raises(UpdateFailed) as raised:
+        await coordinator._async_update_data()
+
+    assert str(raised.value) == expected

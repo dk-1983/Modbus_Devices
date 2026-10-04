@@ -173,6 +173,48 @@ async def test_selector_timeout_does_not_create_pending_owner():
 
 
 @pytest.mark.asyncio
+async def test_result_timeout_releases_owner_and_next_zone_can_run():
+    client = Client(Response(registers=[0x0100]))
+    original_read = client.read_holding_registers
+    calls = 0
+
+    async def timeout_once(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("result timeout")
+        return await original_read(**kwargs)
+
+    client.read_holding_registers = timeout_once
+    failed_reader = S2000PPNumericValueReader(client, 1, "result-timeout")
+    next_reader = S2000PPNumericValueReader(client, 1, "result-timeout")
+
+    with pytest.raises(TimeoutError, match="result timeout"):
+        await failed_reader.async_read(7, NumericParameterKind.TEMPERATURE)
+
+    assert failed_reader._session.pending_request is None
+    result = await next_reader.async_read(8, NumericParameterKind.TEMPERATURE)
+    assert result.status is NumericResultStatus.READY
+    assert [write["value"] for write in client.writes] == [7, 8]
+
+
+@pytest.mark.asyncio
+async def test_result_cancellation_releases_selector_owner():
+    client = Client(Response(registers=[0x0100]))
+
+    async def cancelled_result(**kwargs):
+        raise asyncio.CancelledError
+
+    client.read_holding_registers = cancelled_result
+    reader = S2000PPNumericValueReader(client, 1, "result-cancelled")
+
+    with pytest.raises(asyncio.CancelledError):
+        await reader.async_read(7, NumericParameterKind.TEMPERATURE)
+
+    assert reader._session.pending_request is None
+
+
+@pytest.mark.asyncio
 async def test_protocol_and_short_response_are_not_zero():
     result = await S2000PPNumericValueReader(
         Client(Response(registers=[])), 1, "short"

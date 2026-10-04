@@ -357,29 +357,39 @@ class S2000PPNumericValueReader:
                     exception_code=6,
                     message=f"S2000-PP selector is parked for {pending[0]} zone {pending[1]}",
                 ), parameter_kind, pending)
-            if pending is None:
-                self._session.generation += 1
-                async def execute(physical_client):
-                    selected = await self._select(
-                        physical_client, zone_table_number, parameter_kind
-                    )
-                    if selected is not None:
-                        return selected
-                    self._session.pending_request = request
-                    return await self._read_result(
-                        physical_client, zone_table_number, parameter_kind
-                    )
+            try:
+                if pending is None:
+                    self._session.generation += 1
 
-                result = await _async_execute_s2000_pp_serialized(
-                    self._client, execute
-                )
-            else:
-                result = await _async_execute_s2000_pp_serialized(
-                    self._client,
-                    lambda physical_client: self._read_result(
-                        physical_client, zone_table_number, parameter_kind
-                    ),
-                )
+                    async def execute(physical_client):
+                        selected = await self._select(
+                            physical_client, zone_table_number, parameter_kind
+                        )
+                        if selected is not None:
+                            return selected
+                        self._session.pending_request = request
+                        return await self._read_result(
+                            physical_client, zone_table_number, parameter_kind
+                        )
+
+                    result = await _async_execute_s2000_pp_serialized(
+                        self._client, execute
+                    )
+                else:
+                    result = await _async_execute_s2000_pp_serialized(
+                        self._client,
+                        lambda physical_client: self._read_result(
+                            physical_client, zone_table_number, parameter_kind
+                        ),
+                    )
+            except BaseException:
+                # The selector/result relationship cannot be trusted after an
+                # interrupted physical exchange.  Force the next poll to set
+                # the selector again instead of reading a stale result or
+                # indefinitely blocking another gateway child.
+                if self._session.pending_request == request:
+                    self._session.pending_request = None
+                raise
             result = self._with_session_context(result, parameter_kind, request)
             if result.status not in {
                 NumericResultStatus.PENDING,
@@ -524,24 +534,34 @@ class S2000PPCounterValueReader:
                         f"zone {pending[1]}"
                     ),
                 )
-            if pending is None:
-                async def execute(physical_client):
-                    selected = await self._select(physical_client, zone_table_number)
-                    if selected is not None:
-                        return selected
-                    self._session.pending_request = request
-                    return await self._read_result(physical_client, zone_table_number)
+            try:
+                if pending is None:
 
-                result = await _async_execute_s2000_pp_serialized(
-                    self._client, execute
-                )
-            else:
-                result = await _async_execute_s2000_pp_serialized(
-                    self._client,
-                    lambda physical_client: self._read_result(
-                        physical_client, zone_table_number
-                    ),
-                )
+                    async def execute(physical_client):
+                        selected = await self._select(
+                            physical_client, zone_table_number
+                        )
+                        if selected is not None:
+                            return selected
+                        self._session.pending_request = request
+                        return await self._read_result(
+                            physical_client, zone_table_number
+                        )
+
+                    result = await _async_execute_s2000_pp_serialized(
+                        self._client, execute
+                    )
+                else:
+                    result = await _async_execute_s2000_pp_serialized(
+                        self._client,
+                        lambda physical_client: self._read_result(
+                            physical_client, zone_table_number
+                        ),
+                    )
+            except BaseException:
+                if self._session.pending_request == request:
+                    self._session.pending_request = None
+                raise
             if result.status not in {
                 NumericResultStatus.PENDING,
                 NumericResultStatus.RETRYABLE,

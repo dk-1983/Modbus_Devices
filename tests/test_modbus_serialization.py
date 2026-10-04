@@ -108,6 +108,33 @@ async def test_different_clients_do_not_share_request_lock():
     await asyncio.gather(task_a, task_b)
 
 
+@pytest.mark.asyncio
+async def test_failed_request_releases_lock_for_next_poll():
+    class FailOnceClient:
+        connected = True
+
+        def __init__(self):
+            self.calls = 0
+
+        async def read_holding_registers(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("device did not answer")
+            return "recovered"
+
+    raw = FailOnceClient()
+    client = SerializedModbusClient(raw)
+
+    with pytest.raises(TimeoutError, match="device did not answer"):
+        await client.read_holding_registers(address=1, count=1, device_id=1)
+
+    assert not client.request_lock.locked()
+    assert (
+        await client.read_holding_registers(address=1, count=1, device_id=1)
+        == "recovered"
+    )
+
+
 class SelectorResponse:
     function_code = 6
     address = 46179

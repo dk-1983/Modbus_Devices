@@ -356,7 +356,7 @@ async def test_counter_wrong_exception_function_is_protocol_error(phase, code):
 
 
 @pytest.mark.asyncio
-async def test_counter_result_timeout_keeps_owner_for_result_only_retry():
+async def test_counter_result_timeout_reselects_before_retry():
     client = Client()
     original_read = client.read_holding_registers
     calls = 0
@@ -372,9 +372,10 @@ async def test_counter_result_timeout_keeps_owner_for_result_only_retry():
     reader = S2000PPCounterValueReader(client, 1, "counter-timeout-owner")
     with pytest.raises(TimeoutError, match="result timeout"):
         await reader.async_read(9)
+    assert reader._session.pending_request is None
     result = await reader.async_read(9)
     assert result.status is NumericResultStatus.READY
-    assert [call["value"] for call in client.writes] == [9]
+    assert [call["value"] for call in client.writes] == [9, 9]
 
 
 @pytest.mark.asyncio

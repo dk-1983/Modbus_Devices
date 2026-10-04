@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 
-from pymodbus.exceptions import ConnectionException
+from pymodbus.exceptions import ConnectionException, ModbusException
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import (
@@ -126,8 +126,10 @@ class ModbusDeviceCoordinator(
             self._reconcile_pending_writes(data, update_generation)
             return data
 
-        except ConnectionException as exc:
-            raise UpdateFailed(f"Modbus update failed: {format_exception(exc)}") from exc
+        except (ConnectionException, ModbusException, OSError, TimeoutError) as exc:
+            raise UpdateFailed(
+                f"Modbus update failed: {format_exception(exc)}"
+            ) from exc
 
         except Exception as exc:
             raise UpdateFailed(f"Unexpected error: {format_exception(exc)}") from exc
