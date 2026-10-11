@@ -17,8 +17,16 @@ from custom_components.modbus_devices.modbus_client import SerializedModbusClien
 
 
 class Response:
-    def __init__(self, *, registers=None, error=False, code=None, address=None,
-                 value=None, function_code=None):
+    def __init__(
+        self,
+        *,
+        registers=None,
+        error=False,
+        code=None,
+        address=None,
+        value=None,
+        function_code=None,
+    ):
         self.registers = registers
         self._error = error
         self.exception_code = code
@@ -86,8 +94,11 @@ async def test_counter_selector_result_contract():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("code", "status"),
-    [(15, NumericResultStatus.PENDING), (6, NumericResultStatus.RETRYABLE),
-     (2, NumericResultStatus.PROTOCOL_ERROR)],
+    [
+        (15, NumericResultStatus.PENDING),
+        (6, NumericResultStatus.RETRYABLE),
+        (2, NumericResultStatus.PROTOCOL_ERROR),
+    ],
 )
 async def test_counter_exception_semantics(code, status):
     client = Client(Response(error=True, code=code))
@@ -117,7 +128,9 @@ async def test_selector_exception_3_is_distinct_from_result_read_exception_3():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("response", [None, object(), Response(registers=[]), Response(registers=[1, 2])])
+@pytest.mark.parametrize(
+    "response", [None, object(), Response(registers=[]), Response(registers=[1, 2])]
+)
 async def test_counter_invalid_responses_are_not_zero(response):
     client = Client()
     client.result = response
@@ -180,7 +193,9 @@ async def test_read_transport_exception_propagates():
 
     client.read_holding_registers = fail
     with pytest.raises(RuntimeError, match="read transport failed"):
-        await S2000PPCounterValueReader(client, 1, "counter-read-transport").async_read(1)
+        await S2000PPCounterValueReader(client, 1, "counter-read-transport").async_read(
+            1
+        )
 
 
 @pytest.mark.asyncio
@@ -216,6 +231,7 @@ async def test_pending_counter_repeats_only_result_until_completion():
 @pytest.mark.asyncio
 async def test_historical_aligned_four_svk_attempts_remain_session_serialized():
     """Characterize the former four-entry cadence without enabling B3 polling."""
+
     class TraceClient(Client):
         def __init__(self):
             super().__init__()
@@ -232,17 +248,23 @@ async def test_historical_aligned_four_svk_attempts_remain_session_serialized():
             return await super().read_holding_registers(**kwargs)
 
     client = TraceClient()
-    results = await asyncio.gather(*(
-        S2000PPCounterValueReader(client, 1, "four-svk").async_read(zone)
-        for zone in range(1, 5)
-    ))
+    results = await asyncio.gather(
+        *(
+            S2000PPCounterValueReader(client, 1, "four-svk").async_read(zone)
+            for zone in range(1, 5)
+        )
+    )
 
     assert all(result.status is NumericResultStatus.READY for result in results)
     assert client.trace == [
-        ("selector", 1), ("result", None),
-        ("selector", 2), ("result", None),
-        ("selector", 3), ("result", None),
-        ("selector", 4), ("result", None),
+        ("selector", 1),
+        ("result", None),
+        ("selector", 2),
+        ("result", None),
+        ("selector", 3),
+        ("result", None),
+        ("selector", 4),
+        ("result", None),
     ]
 
 
@@ -318,10 +340,13 @@ async def test_grouped_state_request_cannot_interleave_counter_selector_and_resu
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("code", "status"), [
-    (15, NumericResultStatus.PENDING),
-    (6, NumericResultStatus.RETRYABLE),
-])
+@pytest.mark.parametrize(
+    ("code", "status"),
+    [
+        (15, NumericResultStatus.PENDING),
+        (6, NumericResultStatus.RETRYABLE),
+    ],
+)
 async def test_counter_selector_retryable_exceptions_are_correlated(code, status):
     client = Client()
 
@@ -341,13 +366,16 @@ async def test_counter_selector_retryable_exceptions_are_correlated(code, status
 @pytest.mark.parametrize("code", [6, 15])
 async def test_counter_wrong_exception_function_is_protocol_error(phase, code):
     response = Response(
-        error=True, code=code,
+        error=True,
+        code=code,
         function_code=0x83 if phase == "selector" else 0x86,
     )
     client = Client(response)
     if phase == "selector":
+
         async def selector_error(**kwargs):
             return response
+
         client.write_register = selector_error
     result = await S2000PPCounterValueReader(
         client, 1, f"counter-wrong-{phase}-{code}"
@@ -410,8 +438,16 @@ async def test_numeric_and_counter_physical_attempts_do_not_interleave():
         ),
     )
     assert physical.trace in (
-        [("counter", "selector"), ("counter", "result"),
-         ("numeric", "selector"), ("numeric", "result")],
-        [("numeric", "selector"), ("numeric", "result"),
-         ("counter", "selector"), ("counter", "result")],
+        [
+            ("counter", "selector"),
+            ("counter", "result"),
+            ("numeric", "selector"),
+            ("numeric", "result"),
+        ],
+        [
+            ("numeric", "selector"),
+            ("numeric", "result"),
+            ("counter", "selector"),
+            ("counter", "result"),
+        ],
     )

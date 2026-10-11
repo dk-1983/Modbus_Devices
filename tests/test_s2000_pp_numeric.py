@@ -14,8 +14,16 @@ from custom_components.modbus_devices.s2000_pp import (
 
 
 class Response:
-    def __init__(self, *, registers=None, error=False, code=None, address=None,
-                 value=None, function_code=None):
+    def __init__(
+        self,
+        *,
+        registers=None,
+        error=False,
+        code=None,
+        address=None,
+        value=None,
+        function_code=None,
+    ):
         self.registers = registers
         self._error = error
         self.exception_code = code
@@ -95,10 +103,13 @@ async def test_retryable_modbus_exceptions(code, status):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("code", "status"), [
-    (15, NumericResultStatus.PENDING),
-    (6, NumericResultStatus.RETRYABLE),
-])
+@pytest.mark.parametrize(
+    ("code", "status"),
+    [
+        (15, NumericResultStatus.PENDING),
+        (6, NumericResultStatus.RETRYABLE),
+    ],
+)
 async def test_selector_retryable_exceptions_are_phase_correlated(code, status):
     client = Client(Response(registers=[0]))
 
@@ -225,7 +236,9 @@ async def test_protocol_and_short_response_are_not_zero():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("code", [3, 4])
-async def test_terminal_result_exception_keeps_protocol_error_and_releases_session(code):
+async def test_terminal_result_exception_keeps_protocol_error_and_releases_session(
+    code,
+):
     class SequenceClient(Client):
         def __init__(self):
             super().__init__(None)

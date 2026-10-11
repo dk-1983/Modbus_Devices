@@ -9,7 +9,6 @@ custom_components/modbus_devices/mapping.py
 custom_components/modbus_devices/modbus_validation.py
 custom_components/modbus_devices/presentation/bolid.py
 custom_components/modbus_devices/rtu_over_udp.py
-custom_components/modbus_devices/s2000_pp.py
 tests/test_c2000_dz.py
 tests/test_c2000_ip.py
 tests/test_c2000_kpb.py
@@ -31,7 +30,5 @@ tests/test_phase7_reliability.py
 tests/test_plc110_24_60_k_m.py
 tests/test_rtu_over_udp.py
 tests/test_s2000_pp.py
-tests/test_s2000_pp_counter.py
-tests/test_s2000_pp_numeric.py
 tests/test_svk15_3_2_b.py
 tests/test_svk15_3_8_1_b3.py

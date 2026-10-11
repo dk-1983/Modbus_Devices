@@ -158,9 +158,7 @@ _SELECTOR_CLIENT_SESSIONS: WeakKeyDictionary[
     object, dict[str, _SelectorGatewaySession]
 ] = WeakKeyDictionary()
 
-_S2000_PP_CLIENT_LOCKS: WeakKeyDictionary[object, asyncio.Lock] = (
-    WeakKeyDictionary()
-)
+_S2000_PP_CLIENT_LOCKS: WeakKeyDictionary[object, asyncio.Lock] = WeakKeyDictionary()
 
 
 def _gateway_selector_session(client, gateway_key: str) -> _SelectorGatewaySession:
@@ -350,13 +348,17 @@ class S2000PPNumericValueReader:
             request = ("numeric", zone_table_number)
             pending = self._session.pending_request
             if pending is not None and pending != request:
-                return self._with_session_context(S2000PPNumericResult(
-                    NumericResultStatus.RETRYABLE,
+                return self._with_session_context(
+                    S2000PPNumericResult(
+                        NumericResultStatus.RETRYABLE,
+                        parameter_kind,
+                        zone_table_number,
+                        exception_code=6,
+                        message=f"S2000-PP selector is parked for {pending[0]} zone {pending[1]}",
+                    ),
                     parameter_kind,
-                    zone_table_number,
-                    exception_code=6,
-                    message=f"S2000-PP selector is parked for {pending[0]} zone {pending[1]}",
-                ), parameter_kind, pending)
+                    pending,
+                )
             try:
                 if pending is None:
                     self._session.generation += 1
@@ -429,7 +431,10 @@ class S2000PPNumericValueReader:
             device_id=self._modbus_unit_id,
         )
         error = _numeric_error_result(
-            response, kind, zone, "select numeric zone",
+            response,
+            kind,
+            zone,
+            "select numeric zone",
             expected_exception_function=0x86,
             device_id=self._modbus_unit_id,
         )
@@ -463,7 +468,10 @@ class S2000PPNumericValueReader:
             device_id=self._modbus_unit_id,
         )
         error = _numeric_error_result(
-            response, kind, zone, "read numeric result",
+            response,
+            kind,
+            zone,
+            "read numeric result",
             expected_exception_function=0x83,
             device_id=self._modbus_unit_id,
         )
@@ -576,7 +584,9 @@ class S2000PPCounterValueReader:
             device_id=self._modbus_unit_id,
         )
         error = _counter_error_result(
-            response, zone, "select counter zone",
+            response,
+            zone,
+            "select counter zone",
             expected_exception_function=0x86,
             device_id=self._modbus_unit_id,
         )
@@ -636,8 +646,13 @@ class S2000PPCounterValueReader:
 
 
 def _counter_error_result(
-    response, zone, operation, *, result_register_read: bool = False,
-    expected_exception_function: int, device_id: int,
+    response,
+    zone,
+    operation,
+    *,
+    result_register_read: bool = False,
+    expected_exception_function: int,
+    device_id: int,
 ):
     if response is None:
         return S2000PPCounterResult(
@@ -675,19 +690,28 @@ def _counter_error_result(
 
 
 def _numeric_error_result(
-    response, kind, zone, operation, *, expected_exception_function: int,
+    response,
+    kind,
+    zone,
+    operation,
+    *,
+    expected_exception_function: int,
     device_id: int,
 ):
     if response is None:
         return S2000PPNumericResult(
-            NumericResultStatus.PROTOCOL_ERROR, kind, zone,
+            NumericResultStatus.PROTOCOL_ERROR,
+            kind,
+            zone,
             message=f"empty response for {operation}",
             operation=operation,
         )
     is_error = getattr(response, "isError", None)
     if not callable(is_error):
         return S2000PPNumericResult(
-            NumericResultStatus.PROTOCOL_ERROR, kind, zone,
+            NumericResultStatus.PROTOCOL_ERROR,
+            kind,
+            zone,
             message=f"invalid response for {operation}",
             operation=operation,
         )
@@ -705,7 +729,10 @@ def _numeric_error_result(
         else NumericResultStatus.PROTOCOL_ERROR
     )
     return S2000PPNumericResult(
-        status, kind, zone, exception_code=code,
+        status,
+        kind,
+        zone,
+        exception_code=code,
         message=f"Modbus exception during {operation}: {response}",
         operation=operation,
         response_function_code=getattr(response, "function_code", None),
@@ -773,9 +800,7 @@ class S2000PPConfiguration:
     def zones_for_device(self, orion_address: int) -> tuple[S2000PPZoneRow, ...]:
         """Return rows explicitly assigned to the requested Orion address."""
         _validate_orion_address(orion_address)
-        return tuple(
-            row for row in self.zones if row.device_address == orion_address
-        )
+        return tuple(row for row in self.zones if row.device_address == orion_address)
 
     def relays_for_device(
         self,
@@ -783,9 +808,7 @@ class S2000PPConfiguration:
     ) -> tuple[S2000PPRelayRow, ...]:
         """Return rows explicitly assigned to the requested Orion address."""
         _validate_orion_address(orion_address)
-        return tuple(
-            row for row in self.relays if row.device_address == orion_address
-        )
+        return tuple(row for row in self.relays if row.device_address == orion_address)
 
     def partition_id(self, partition_number: int) -> int | None:
         """Return the raw optional identifier for a configured partition number."""
@@ -816,7 +839,9 @@ class S2000PPZoneState:
 def decode_s2000_pp_zone_state_register(raw: int) -> tuple[int, ...]:
     """Decode the two priority-ordered Orion state bytes from one register."""
     if isinstance(raw, bool) or not isinstance(raw, int) or not 0 <= raw <= 0xFFFF:
-        raise ValueError("S2000-PP zone state register must be an unsigned 16-bit value")
+        raise ValueError(
+            "S2000-PP zone state register must be an unsigned 16-bit value"
+        )
     high = (raw >> 8) & 0xFF
     low = raw & 0xFF
     return tuple(code for code in (high, low) if code != 0)
@@ -1154,9 +1179,7 @@ class S2000PPRuntimeReader:
             for offset, mapping in enumerate(group):
                 block_start = offset * S2000_PP_EXPANDED_ZONE_SIZE
                 result[mapping.gateway_object_number] = tuple(
-                    registers[
-                        block_start : block_start + S2000_PP_EXPANDED_ZONE_SIZE
-                    ]
+                    registers[block_start : block_start + S2000_PP_EXPANDED_ZONE_SIZE]
                 )
         return result
 
