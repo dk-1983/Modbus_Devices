@@ -25,9 +25,26 @@ class Client:
     def __init__(self, status=0x0008, voltage=214):
         self.calls = []
         self.responses = {
-            0x0003: response(registers=[status]),
-            0x0005: response(registers=[100, 45, 55, 16, 4, 0, 1, 33, 220, 213]),
-            0x0011: response(registers=[voltage, 50]),
+            0x0003: response(
+                registers=[
+                    status,
+                    0,
+                    100,
+                    45,
+                    55,
+                    16,
+                    4,
+                    0,
+                    1,
+                    33,
+                    220,
+                    213,
+                    0,
+                    0,
+                    voltage,
+                    50,
+                ]
+            ),
         }
 
     async def read_holding_registers(self, **kwargs):
@@ -39,14 +56,12 @@ class Client:
 
 
 @pytest.mark.asyncio
-async def test_snapshot_uses_three_field_verified_fc03_reads():
+async def test_snapshot_uses_one_contiguous_fc03_read():
     client = Client()
     snapshot = await SmartUPS3000RMXL(client, 1).async_get_snapshot()
 
     assert client.calls == [
-        {"address": 0x0003, "count": 1, "device_id": 1},
-        {"address": 0x0005, "count": 10, "device_id": 1},
-        {"address": 0x0011, "count": 2, "device_id": 1},
+        {"address": 0x0003, "count": 16, "device_id": 1},
     ]
     assert snapshot == {
         "binary_sensors": {
@@ -204,16 +219,15 @@ async def test_zero_voltage_is_a_valid_measurement():
 
 
 @pytest.mark.asyncio
-async def test_short_primary_measurement_block_is_rejected():
+async def test_short_snapshot_block_is_rejected():
     client = Client()
-    client.responses[0x0005] = response(registers=[100] * 9)
+    client.responses[0x0003] = response(registers=[100] * 15)
 
     with pytest.raises(ModbusException, match="Short Modbus response"):
         await SmartUPS3000RMXL(client, 1).async_get_snapshot()
 
     assert client.calls == [
-        {"address": 0x0003, "count": 1, "device_id": 1},
-        {"address": 0x0005, "count": 10, "device_id": 1},
+        {"address": 0x0003, "count": 16, "device_id": 1},
     ]
 
 
@@ -236,7 +250,7 @@ async def test_strict_fc03_response_validation(invalid):
     client.responses[0x0003] = invalid
     with pytest.raises(ModbusException):
         await SmartUPS3000RMXL(client, 1).async_get_snapshot()
-    assert client.calls == [{"address": 0x0003, "count": 1, "device_id": 1}]
+    assert client.calls == [{"address": 0x0003, "count": 16, "device_id": 1}]
 
 
 @pytest.mark.asyncio

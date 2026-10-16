@@ -29,10 +29,12 @@ class SmartUPS3000RMXL:
     equipment_model = "Smart-UPS 3000 RM XL"
     equipment_category = EquipmentCategory.POWER_AND_BACKUP
     STATUS_WORD_3_ADDRESS = 0x0003
-    PRIMARY_MEASUREMENTS_ADDRESS = 0x0005
-    PRIMARY_MEASUREMENTS_COUNT = 10
     INPUT_VOLTAGE_ADDRESS = 0x0011
     INPUT_MEASUREMENTS_COUNT = 2
+    SNAPSHOT_ADDRESS = STATUS_WORD_3_ADDRESS
+    SNAPSHOT_COUNT = (
+        INPUT_VOLTAGE_ADDRESS + INPUT_MEASUREMENTS_COUNT - STATUS_WORD_3_ADDRESS
+    )
     _ONLINE_BIT = 3
     _ON_BATTERY_BIT = 4
     _OVERLOAD_BIT = 5
@@ -223,21 +225,16 @@ class SmartUPS3000RMXL:
 
     async def async_get_snapshot(self) -> dict[str, dict[str, Any]]:
         """Read only field-verified registers without touching min/max values."""
-        status_word = (
-            await self._read_words(
-                self.STATUS_WORD_3_ADDRESS, "read Smart-UPS Status Word 3"
-            )
-        )[0]
-        primary = await self._read_words(
-            self.PRIMARY_MEASUREMENTS_ADDRESS,
-            "read Smart-UPS primary measurements",
-            count=self.PRIMARY_MEASUREMENTS_COUNT,
+        registers = await self._read_words(
+            self.SNAPSHOT_ADDRESS,
+            "read Smart-UPS snapshot",
+            count=self.SNAPSHOT_COUNT,
         )
-        input_measurements = await self._read_words(
-            self.INPUT_VOLTAGE_ADDRESS,
-            "read Smart-UPS input measurements",
-            count=self.INPUT_MEASUREMENTS_COUNT,
-        )
+
+        def value_at(address: int) -> int:
+            return registers[address - self.SNAPSHOT_ADDRESS]
+
+        status_word = value_at(self.STATUS_WORD_3_ADDRESS)
         return {
             "binary_sensors": {
                 "online": self._binary_state(status_word, self._ONLINE_BIT),
@@ -254,28 +251,34 @@ class SmartUPS3000RMXL:
                 "avr_trim": self._binary_state(status_word, self._AVR_TRIM_BIT),
             },
             "numeric_sensors": {
-                "battery_charge": self._numeric_state(primary[0], 0x0005, "apc_uint16"),
+                "battery_charge": self._numeric_state(
+                    value_at(0x0005), 0x0005, "apc_uint16"
+                ),
                 "runtime_remaining": self._numeric_state(
-                    primary[1], 0x0006, "apc_uint16"
+                    value_at(0x0006), 0x0006, "apc_uint16"
                 ),
                 "battery_voltage": self._numeric_state(
-                    primary[2], 0x0007, "apc_uint16"
+                    value_at(0x0007), 0x0007, "apc_uint16"
                 ),
                 "internal_temperature": self._numeric_state(
-                    primary[3], 0x0008, "apc_uint16"
+                    value_at(0x0008), 0x0008, "apc_uint16"
                 ),
                 "battery_pack_count": self._numeric_state(
-                    primary[6], 0x000B, "apc_uint16"
+                    value_at(0x000B), 0x000B, "apc_uint16"
                 ),
-                "output_load": self._numeric_state(primary[7], 0x000C, "apc_uint16"),
-                "output_voltage": self._numeric_state(primary[9], 0x000E, "apc_uint16"),
+                "output_load": self._numeric_state(
+                    value_at(0x000C), 0x000C, "apc_uint16"
+                ),
+                "output_voltage": self._numeric_state(
+                    value_at(0x000E), 0x000E, "apc_uint16"
+                ),
                 "input_voltage": self._numeric_state(
-                    input_measurements[0],
+                    value_at(self.INPUT_VOLTAGE_ADDRESS),
                     self.INPUT_VOLTAGE_ADDRESS,
                     "apc_uint16",
                 ),
                 "input_frequency": self._numeric_state(
-                    input_measurements[1], 0x0012, "apc_uint16"
+                    value_at(0x0012), 0x0012, "apc_uint16"
                 ),
                 "status_word_3": self._numeric_state(
                     status_word, self.STATUS_WORD_3_ADDRESS, "apc_status_word"
