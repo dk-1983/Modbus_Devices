@@ -124,3 +124,33 @@ and one documented contiguous FC03 read at 60001..60012. Clock correction write
 behavior is unchanged. Sparse bit ranges are not combined because the manual
 assigns unrelated registers inside the 0x80 gaps. No FC23 transaction or broad
 60001..60082 read is introduced.
+
+## Polling-load follow-up, 2026-10-19
+
+An operational review was performed after APC Smart-UPS polling was reduced
+from three FC03 requests to one contiguous request in Modbus Devices v1.9.3.
+Before that change, intermittent APC communication failures coincided with
+timeouts and temporary unavailability of other devices using the integration,
+including M3000-BB-1020. After the APC optimization, M3000 relay availability
+remained stable in the observed production system. This is operational
+evidence of shared polling pressure, not proof of an M3000 protocol fault.
+
+The current M3000 snapshot still consists of 19 transactions every five
+seconds: twelve sparse FC02 input reads, six sparse FC01 relay reads and one
+contiguous FC03 runtime-header read. This is 228 requests per minute under
+normal continuous polling.
+
+The APC optimization must not be copied mechanically to the M3000 sparse bit
+maps. Input and relay addresses are separated by `0x80`, and the intervening
+addresses contain other documented parameters. Reading the entire gaps as one
+FC01 or FC02 block is therefore not considered safe without explicit protocol
+and hardware validation. The existing regression test intentionally preserves
+individual reads for these sparse addresses.
+
+No M3000 behavior is changed as a result of this follow-up. In particular, the
+five-second polling interval remains unchanged while production behavior is
+observed. If independent M3000 instability appears later, the first safe
+mitigation to evaluate is a device-specific polling interval of 30 seconds
+(38 requests per minute), followed by 60 seconds (19 requests per minute) if
+needed. Such a change would delay background confirmation of inputs and relay
+states, while explicit relay commands would still be sent immediately.
