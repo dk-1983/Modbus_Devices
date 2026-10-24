@@ -31,13 +31,9 @@ class Device:
     config_entry_id: str = "entry-1"
     via_device_id: str | None = None
     identifiers: set[tuple[str, str]] = field(init=False)
-    config_entries: set[str] = field(init=False)
-    primary_config_entry: str = field(init=False)
 
     def __post_init__(self) -> None:
         self.identifiers = {(Config.DOMAIN, self.identifier)}
-        self.config_entries = {self.config_entry_id}
-        self.primary_config_entry = self.config_entry_id
 
 
 @dataclass
@@ -53,6 +49,7 @@ class Entity:
     name: str | None = None
     original_name: str | None = None
     original_name_unprefixed: str | None = None
+    next_name_part: object | None = None
 
 
 class DeviceRegistry:

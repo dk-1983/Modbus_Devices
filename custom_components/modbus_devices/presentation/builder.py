@@ -117,14 +117,8 @@ def _entity_row(hass, entry) -> dict[str, str]:
 
 
 def _config_entry_identity(hass, device) -> PresentationIdentity:
-    entry_ids = sorted(device.config_entries)
-    if device.primary_config_entry in device.config_entries:
-        entry_ids.remove(device.primary_config_entry)
-        entry_ids.insert(0, device.primary_config_entry)
-    for entry_id in entry_ids:
-        entry = hass.config_entries.async_get_entry(entry_id)
-        if entry is None or entry.domain != Config.DOMAIN:
-            continue
+    entry = hass.config_entries.async_get_entry(device.config_entry_id)
+    if entry is not None and entry.domain == Config.DOMAIN:
         options = entry.options or entry.data
         return PresentationIdentity(
             options.get(Config.CONF_MANUFACTURER),
