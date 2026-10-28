@@ -52,6 +52,7 @@ class Response:
         bits=None,
         address=None,
         value=None,
+        exception_code=None,
     ):
         self.registers = registers
         self.function_code = function_code
@@ -60,6 +61,7 @@ class Response:
         self.bits = bits
         self.address = address
         self.value = value
+        self.exception_code = exception_code
 
     def isError(self):
         return self.error
@@ -74,11 +76,13 @@ class Client:
         *,
         output_states=None,
         output_functions=None,
+        optional_settings_supported=True,
     ):
         self.response = response
         self.calls = []
         self.output_states = output_states or [False, False]
         self.output_functions = output_functions or {1118: 4, 1120: 4}
+        self.optional_settings_supported = optional_settings_supported
         self.settings = {
             **{
                 item.address: round(item.minimum / item.scale)
@@ -107,6 +111,13 @@ class Client:
 
     async def read_holding_registers(self, **kwargs):
         self.holding_calls.append(kwargs)
+        if kwargs["address"] == 1009 and not self.optional_settings_supported:
+            return Response(
+                function_code=0x83,
+                error=True,
+                dev_id=kwargs["device_id"],
+                exception_code=3,
+            )
         return Response(
             [
                 self.settings.get(kwargs["address"] + offset, 0)
@@ -219,12 +230,16 @@ def test_configuration_descriptions_cover_safe_protocol_parameters():
     numbers = {item["number_id"]: item for item in device.get_number_descriptions()}
     selects = {item["select_id"]: item for item in device.get_select_descriptions()}
 
-    assert len(numbers) == 25
+    assert len(numbers) == 26
+    assert numbers["p011"]["native_step"] == 0.01
+    assert numbers["p011"]["native_max_value"] == 1
     assert numbers["p109"]["native_step"] == 0.01
     assert numbers["p109"]["dynamic_max_id"] == "p006"
     assert numbers["p106"]["native_step"] == 0.1
     assert numbers["p133"]["native_max_value"] == 600
-    assert len(selects) == 12
+    assert len(selects) == 14
+    assert selects["p009"]["options"] == ["disabled", "enabled"]
+    assert selects["p010"]["options"] == ["disabled", "enabled"]
     assert selects["p100"]["options"][-1] == "analog_input_frequency"
     assert selects["p118"]["options"][-1] == "time_relay"
     assert "p122" not in numbers
@@ -254,6 +269,9 @@ def test_configuration_coverage_has_only_intentional_non_schedule_gaps():
         "p005",
         "p006",
         "p008",
+        "p009",
+        "p010",
+        "p011",
         *(f"p{number}" for number in range(100, 138)),
     }
 
@@ -378,6 +396,138 @@ async def test_select_write_uses_documented_code_and_exact_readback():
 
 
 @pytest.mark.asyncio
+async def test_new_firmware_optional_parameters_are_read_and_written_exactly():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    client.settings[1009] = 1
+    client.settings[1010] = 0
+    client.settings[1011] = 37
+    device = ERG22005(client, 4)
+
+    snapshot = await device.async_get_snapshot()
+
+    assert snapshot["selects"]["p009"]["state"] == "enabled"
+    assert snapshot["selects"]["p010"]["state"] == "disabled"
+    assert snapshot["numbers"]["p011"]["value"] == 0.37
+    assert {item["select_id"] for item in device.get_select_descriptions()} >= {
+        "p009",
+        "p010",
+    }
+    assert {item["number_id"] for item in device.get_number_descriptions()} >= {"p011"}
+
+    assert await device.async_set_select("p010", "enabled") == "enabled"
+    assert await device.async_set_number("p011", 0.42) == 0.42
+    assert client.write_calls[-2:] == [
+        {"address": 1010, "value": 1, "device_id": 4},
+        {"address": 1011, "value": 42, "device_id": 4},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_old_firmware_skips_optional_parameters_without_breaking_device(caplog):
+    client = Client(
+        Response(RUNTIME_VECTOR, dev_id=4),
+        optional_settings_supported=False,
+    )
+    device = ERG22005(client, 4)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="custom_components.modbus_devices.equipment.erman",
+    ):
+        snapshot = await device.async_get_snapshot()
+
+    assert "p011" not in snapshot["numbers"]
+    assert "p009" not in snapshot["selects"]
+    assert "p010" not in snapshot["selects"]
+    assert "p011" not in {
+        item["number_id"] for item in device.get_number_descriptions()
+    }
+    assert not {"p009", "p010"} & {
+        item["select_id"] for item in device.get_select_descriptions()
+    }
+    assert snapshot["numbers"]["p006"]["value"] == 1
+    assert "optional P009-P011 settings are unavailable" in caplog.text
+
+    device._settings_refresh_at = 0
+    await device.async_get_snapshot()
+    assert [call for call in client.holding_calls if call["address"] == 1009] == [
+        {"address": 1009, "count": 3, "device_id": 4}
+    ]
+
+    with pytest.raises(ValueError, match="P011 is not supported"):
+        await device.async_set_number("p011", 0.1)
+    with pytest.raises(ValueError, match="P009 is not supported"):
+        await device.async_set_select("p009", "enabled")
+
+
+@pytest.mark.asyncio
+async def test_optional_probe_transport_failure_is_not_treated_as_old_firmware():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    original_read = client.read_holding_registers
+
+    async def fail_optional_read(**kwargs):
+        if kwargs["address"] == 1009:
+            raise TimeoutError
+        return await original_read(**kwargs)
+
+    client.read_holding_registers = fail_optional_read
+    device = ERG22005(client, 4)
+
+    with pytest.raises(TimeoutError):
+        await device.async_get_snapshot()
+
+    assert device._optional_settings_supported is None
+
+
+@pytest.mark.asyncio
+async def test_optional_probe_rejects_wrong_device_identity():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    original_read = client.read_holding_registers
+
+    async def wrong_device_optional_response(**kwargs):
+        if kwargs["address"] == 1009:
+            return Response(
+                function_code=0x83,
+                error=True,
+                dev_id=5,
+                exception_code=3,
+            )
+        return await original_read(**kwargs)
+
+    client.read_holding_registers = wrong_device_optional_response
+    device = ERG22005(client, 4)
+
+    with pytest.raises(ModbusException):
+        await device.async_get_snapshot()
+
+    assert device._optional_settings_supported is None
+
+
+@pytest.mark.asyncio
+async def test_optional_probe_non_address_exception_remains_failure():
+    client = Client(Response(RUNTIME_VECTOR, dev_id=4))
+    original_read = client.read_holding_registers
+
+    async def busy_optional_response(**kwargs):
+        if kwargs["address"] == 1009:
+            return Response(
+                function_code=0x83,
+                error=True,
+                dev_id=4,
+                exception_code=6,
+            )
+        return await original_read(**kwargs)
+
+    client.read_holding_registers = busy_optional_response
+    device = ERG22005(client, 4)
+
+    with pytest.raises(ModbusException):
+        await device.async_get_snapshot()
+
+    assert device._optional_settings_supported is None
+
+
+@pytest.mark.asyncio
 async def test_schedule_time_write_uses_decimal_hhmm_and_exact_readback():
     client = Client(Response(RUNTIME_VECTOR, dev_id=4))
     device = ERG22005(client, 4)
@@ -473,11 +623,12 @@ async def test_settings_are_grouped_and_cached_between_fast_runtime_polls():
     assert first["switches"]["p134_tuesday"]["state"] is False
     assert first["switches"]["p137_sunday"]["state"] is True
     setting_reads = [
-        call for call in client.holding_calls if call["address"] in (1001, 1100)
+        call for call in client.holding_calls if call["address"] in (1001, 1009, 1100)
     ]
     assert setting_reads == [
         {"address": 1001, "count": 8, "device_id": 5},
         {"address": 1100, "count": 38, "device_id": 5},
+        {"address": 1009, "count": 3, "device_id": 5},
     ]
 
 

@@ -85,6 +85,9 @@ class WeekdayParameter:
 RUNTIME_BASE_ADDRESS = 2000
 RUNTIME_REGISTER_COUNT = 10
 SETTINGS_REFRESH_INTERVAL = 30.0
+OPTIONAL_SETTINGS_BASE_ADDRESS = 1009
+OPTIONAL_SETTINGS_REGISTER_COUNT = 3
+OPTIONAL_PARAMETER_IDS = frozenset({"p009", "p010", "p011"})
 
 NUMBER_PARAMETERS = (
     NumberParameter(
@@ -104,6 +107,15 @@ NUMBER_PARAMETERS = (
         "p006",
     ),
     NumberParameter("p006", "P006 Pressure sensor limit", 1006, 0.01, 1, 16, "kgf/cm²"),
+    NumberParameter(
+        "p011",
+        "P011 Pressure-control tolerance",
+        1011,
+        0.01,
+        0,
+        1,
+        "kgf/cm²",
+    ),
     NumberParameter("p101", "P101 Manual frequency", 1101, 0.1, 0, 50, "Hz", "p102"),
     NumberParameter("p102", "P102 Upper frequency limit", 1102, 0.1, 0, 50, "Hz"),
     NumberParameter(
@@ -160,6 +172,13 @@ NUMBER_PARAMETERS = (
 
 SELECT_PARAMETERS = (
     SelectParameter("p008", "P008 Main-menu mode", 1008, ("pressure", "frequency")),
+    SelectParameter("p009", "P009 Soft start", 1009, ("disabled", "enabled")),
+    SelectParameter(
+        "p010",
+        "P010 PI-controller error correction",
+        1010,
+        ("disabled", "enabled"),
+    ),
     SelectParameter(
         "p100",
         "P100 Operating mode",
@@ -405,6 +424,7 @@ class ERG22005:
         self.attr_device_identifier = None
         self._settings_cache: dict[str, dict] | None = None
         self._settings_refresh_at = 0.0
+        self._optional_settings_supported: bool | None = None
         self.attr_device_metadata = {
             "protocol_document": "MODBUS protocol v1.2 (2025-01-17)",
             "documented_software_version": "01.25",
@@ -557,8 +577,7 @@ class ERG22005:
         ]
         return [*outputs, *schedule_days]
 
-    @staticmethod
-    def get_number_descriptions() -> list[dict[str, Any]]:
+    def get_number_descriptions(self) -> list[dict[str, Any]]:
         """Describe protocol-scaled P parameters with manual-derived limits."""
         return [
             {
@@ -573,10 +592,13 @@ class ERG22005:
                 "icon": "mdi:tune-variant",
             }
             for item in NUMBER_PARAMETERS
+            if (
+                item.parameter not in OPTIONAL_PARAMETER_IDS
+                or self._optional_settings_supported is not False
+            )
         ]
 
-    @staticmethod
-    def get_select_descriptions() -> list[dict[str, Any]]:
+    def get_select_descriptions(self) -> list[dict[str, Any]]:
         """Describe enumerated P parameters from the current ER-G manual."""
         return [
             {
@@ -588,6 +610,10 @@ class ERG22005:
                 "icon": "mdi:tune-variant",
             }
             for item in SELECT_PARAMETERS
+            if (
+                item.parameter not in OPTIONAL_PARAMETER_IDS
+                or self._optional_settings_supported is not False
+            )
         ]
 
     @staticmethod
@@ -680,6 +706,43 @@ class ERG22005:
             raw.update(
                 (address + offset, value) for offset, value in enumerate(registers)
             )
+        if self._optional_settings_supported is not False:
+            response = await client.read_holding_registers(
+                address=OPTIONAL_SETTINGS_BASE_ADDRESS,
+                count=OPTIONAL_SETTINGS_REGISTER_COUNT,
+                device_id=self.attr_device_id,
+            )
+            self._validate_response_device_id(
+                response,
+                "read ER-G-220-05 optional P009-P011 settings",
+            )
+            is_error = getattr(response, "isError", None)
+            exception_code = getattr(response, "exception_code", None)
+            if (
+                self._optional_settings_supported is None
+                and callable(is_error)
+                and is_error()
+                and exception_code in (2, 3)
+            ):
+                self._optional_settings_supported = False
+                _LOGGER.info(
+                    "ERMAN optional P009-P011 settings are unavailable: "
+                    "slave=%s exception_code=%s",
+                    self.attr_device_id,
+                    exception_code,
+                )
+            else:
+                registers = validated_registers(
+                    response,
+                    OPTIONAL_SETTINGS_REGISTER_COUNT,
+                    "read ER-G-220-05 optional P009-P011 settings",
+                    expected_function=3,
+                )
+                raw.update(
+                    (OPTIONAL_SETTINGS_BASE_ADDRESS + offset, value)
+                    for offset, value in enumerate(registers)
+                )
+                self._optional_settings_supported = True
         return {
             "numbers": {
                 item.parameter: {
@@ -687,6 +750,7 @@ class ERG22005:
                     "raw_register": raw[item.address],
                 }
                 for item in NUMBER_PARAMETERS
+                if item.address in raw
             },
             "selects": {
                 item.parameter: {
@@ -698,6 +762,7 @@ class ERG22005:
                     "raw_register": raw[item.address],
                 }
                 for item in SELECT_PARAMETERS
+                if item.address in raw
             },
             "times": {
                 item.parameter: {
@@ -729,6 +794,13 @@ class ERG22005:
         if number_id not in NUMBER_BY_ID:
             raise ValueError(f"Unknown ER-G-220-05 number: {number_id}")
         item = NUMBER_BY_ID[number_id]
+        if (
+            item.parameter in OPTIONAL_PARAMETER_IDS
+            and self._optional_settings_supported is False
+        ):
+            raise ValueError(
+                f"{item.parameter.upper()} is not supported by this ER-G firmware"
+            )
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{item.parameter.upper()} must be numeric")
         value = float(value)
@@ -807,6 +879,13 @@ class ERG22005:
         if select_id not in SELECT_BY_ID:
             raise ValueError(f"Unknown ER-G-220-05 select: {select_id}")
         item = SELECT_BY_ID[select_id]
+        if (
+            item.parameter in OPTIONAL_PARAMETER_IDS
+            and self._optional_settings_supported is False
+        ):
+            raise ValueError(
+                f"{item.parameter.upper()} is not supported by this ER-G firmware"
+            )
         if option not in item.options:
             raise ValueError(f"Unsupported {item.parameter.upper()} option: {option}")
         raw = item.options.index(option)

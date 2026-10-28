@@ -283,7 +283,11 @@ confirmed by the requesting user on a physical drive.
 
 Configuration parameters retain their documented `Pxxx` identifiers and use
 the protocol scales and live dependent limits. They are refreshed separately
-from runtime data in two grouped FC03 reads every 30 seconds. Writes are
+from runtime data in two stable grouped FC03 reads every 30 seconds. Newer
+firmware also exposes P009 (soft start), P010 (PI-controller error correction)
+and P011 (pressure-control tolerance) through a separate optional FC03 block.
+If that block returns a Modbus exception, the three controls are omitted while
+all established ER-G monitoring and configuration remain operational. Writes are
 serialized, require a valid mirrored FC06 response and exact FC03 readback, and
 are published only after confirmation. Changing P006 updates dependent allowed
 ranges without rewriting their values. If P102 is lowered below P101, P101 is
